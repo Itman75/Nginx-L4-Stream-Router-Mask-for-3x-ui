@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Production AutoSetup from ItMan75 (Hardened & Multi-Domain Cosmos-Only Fork v6.9.4-Noble-Armbian-Universal)
+# Production AutoSetup from ItMan75 (Hardened & Multi-Domain Cosmos-Only Fork v1.0.2-Linux/Armbian-Universal)
 # Highly Configurable Nginx Stream L4 Router & Mask for 3X-UI / Xray
 #
 
