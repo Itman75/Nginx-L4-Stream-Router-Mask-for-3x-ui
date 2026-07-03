@@ -71,8 +71,8 @@ setup_ssh_keys() {
     local target_user="$1"
     local user_home
 
-    # Динамическое определение домашней директории пользователя
-    user_home=$(getent passwd "$target_user" | cut -d: -f6)
+    # Безопасное динамическое определение домашней директории пользователя в режиме set -e
+    user_home=$(getent passwd "$target_user" | cut -d: -f6) || user_home=""
     if [[ -z "$user_home" ]]; then
         echo "Ошибка: Не удалось определить домашний каталог для пользователя $target_user" >&2
         return 1
@@ -253,21 +253,24 @@ EOF
     # Отключаем IPv6 на уровне загрузчика ядра, чтобы его не могли вернуть сетевые менеджеры
     if [ -f /etc/default/grub ]; then
         if ! grep -q "ipv6.disable=1" /etc/default/grub; then
+            # Делаем резервную копию перед внесением изменений
+            cp /etc/default/grub /etc/default/grub.bak
             # Вставляем параметр ipv6.disable=1 в параметры загрузки ядра
             sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="ipv6.disable=1 /' /etc/default/grub
             sed -i 's/GRUB_CMDLINE_LINUX="/GRUB_CMDLINE_LINUX="ipv6.disable=1 /' /etc/default/grub
             update-grub || true
-            echo "IPv6 отключен в загрузчике GRUB (применится после перезагрузки)."
+            echo "IPv6 отключен в загрузчике GRUB (применится после перезагрузки). Резервная копия сохранена в /etc/default/grub.bak"
         fi
     fi
 
     # 3. МЕТОД CRON (Универсальный fallback для контейнеров LXC/OpenVZ и защиты от Netplan/NetworkManager)
-    # Добавляем задачу, которая через 10 сек после старта системы принудительно перенакатит sysctl
-    (crontab -l 2>/dev/null; echo "@reboot sleep 10 && sysctl --system") | sort -u | crontab -
+    # Использование '{ ... || true; }' предотвращает сбой strict-режима (set -e), если у пользователя root еще нет crontab
+    { crontab -l 2>/dev/null || true; echo "@reboot sleep 10 && sysctl --system"; } | sort -u | crontab -
     echo "Создано отложенное правило применения sysctl в Cron для защиты от сброса настроек сетью."
 
     echo "Сетевые настройки успешно применены и защищены от сброса после перезагрузки!"
 fi
+
 #####################################
 # ROOT PASSWORD
 #####################################
