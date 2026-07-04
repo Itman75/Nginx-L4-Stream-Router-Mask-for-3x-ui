@@ -207,6 +207,7 @@ echo ""
 #####################################
 if prompt_yes_no "Установить системные утилиты и инструменты мониторинга (htop, btop, tcpdump, jq, tmux и др.)"; then
     echo "Установка системных утилит..."
+    # Добавлен openssh-client и мягкая обработка ошибок через '|| true', чтобы скрипт не падал при ошибке одного из пакетов
     apt-get install -y \
         curl \
         build-essential \
@@ -221,7 +222,8 @@ if prompt_yes_no "Установить системные утилиты и ин
         jq \
         tmux \
         ncdu \
-        vnstat
+        vnstat \
+        openssh-client || echo "Предупреждение: Не все утилиты были успешно установлены."
     echo "Системные утилиты успешно установлены."
 else
     echo "Пропуск установки дополнительных утилит."
@@ -255,18 +257,24 @@ EOF
         if ! grep -q "ipv6.disable=1" /etc/default/grub; then
             # Делаем резервную копию перед внесением изменений
             cp /etc/default/grub /etc/default/grub.bak
-            # Вставляем параметр ipv6.disable=1 в параметры загрузки ядра
+            # Вставляем параметр ipv6.disable=1 в параметры загрузки ядра (обрабатываем и одинарные, и двойные кавычки)
             sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="ipv6.disable=1 /' /etc/default/grub
+            sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT='/GRUB_CMDLINE_LINUX_DEFAULT='ipv6.disable=1 /" /etc/default/grub
             sed -i 's/GRUB_CMDLINE_LINUX="/GRUB_CMDLINE_LINUX="ipv6.disable=1 /' /etc/default/grub
+            sed -i "s/GRUB_CMDLINE_LINUX='/GRUB_CMDLINE_LINUX='ipv6.disable=1 /" /etc/default/grub
             update-grub || true
             echo "IPv6 отключен в загрузчике GRUB (применится после перезагрузки). Резервная копия сохранена в /etc/default/grub.bak"
         fi
     fi
 
     # 3. МЕТОД CRON (Универсальный fallback для контейнеров LXC/OpenVZ и защиты от Netplan/NetworkManager)
-    # Использование '{ ... || true; }' предотвращает сбой strict-режима (set -e), если у пользователя root еще нет crontab
-    { crontab -l 2>/dev/null || true; echo "@reboot sleep 10 && sysctl --system"; } | sort -u | crontab -
-    echo "Создано отложенное правило применения sysctl в Cron для защиты от сброса настроек сетью."
+    # Защищено проверкой на наличие установленной утилиты crontab во избежание краша strict-режима
+    if command -v crontab &>/dev/null; then
+        { crontab -l 2>/dev/null || true; echo "@reboot sleep 10 && sysctl --system"; } | sort -u | crontab -
+        echo "Создано отложенное правило применения sysctl в Cron для защиты от сброса настроек сетью."
+    else
+        echo "Предупреждение: утилита crontab не найдена. Настройка Cron-правила пропущена."
+    fi
 
     echo "Сетевые настройки успешно применены и защищены от сброса после перезагрузки!"
 fi
