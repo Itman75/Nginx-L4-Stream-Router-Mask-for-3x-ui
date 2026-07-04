@@ -125,10 +125,12 @@ echo
 echo -e "${YELLOW}Шаг 2: Привязка технических портов панели 3X-UI${NC}"
 echo -e "Убедитесь, что порты не заняты другими веб-службами."
 prompt_default "Внутренний порт вашей веб-панели 3X-UI" "10443" PANEL_PORT
-prompt_default "Секретный пулл-путь к веб-панели (без слэшей)" "3x-dashboard" RAW_PATH
+prompt_default "Секретный пул-путь к веб-панели (без слэшей)" "3x-dashboard" RAW_PATH
 PANEL_PATH=$(echo "/${RAW_PATH}/" | tr -s '/')
 
 prompt_default "Выделенный внутренний порт подписок 3X-UI" "55443" SUB_PORT
+prompt_default "Секретный путь для подписок (без слэшей)" "postkey" RAW_SUB_PATH
+SUB_PATH=$(echo "/${RAW_SUB_PATH}/" | tr -s '/')
 
 if [[ ! "$PANEL_PORT" =~ ^[0-9]+$ ]] || [ "$PANEL_PORT" -le 0 ] || [ "$PANEL_PORT" -gt 65535 ]; then
     die "Некорректный порт панели: $PANEL_PORT."
@@ -623,7 +625,7 @@ server {
         proxy_intercept_errors off;
     }
 
-    location ^~ /postkey/ {
+    location ^~ $SUB_PATH {
         proxy_pass http://127.0.0.1:$SUB_PORT;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -710,7 +712,7 @@ echo -e "   - ${YELLOW}Путь к ключу:${NC}       ${CYAN}/etc/letsencryp
 echo
 echo -e "3. Настройка безопасных подписок (Subscriptions):"
 echo -e "   - Перейдите в настройки подписок панели 3X-UI и укажите:"
-echo -e "     • ${YELLOW}Порт подписки:${NC} ${GREEN}$SUB_PORT${NC} | ${YELLOW}Путь подписки:${NC} ${GREEN}/postkey/${NC}"
-echo -e "     • ${YELLOW}URL обратного прокси:${NC} ${GREEN}https://${PRIMARY_DOMAIN}/postkey/${NC}"
+echo -e "     • ${YELLOW}Порт подписки:${NC} ${GREEN}$SUB_PORT${NC} | ${YELLOW}Путь подписки:${NC} ${GREEN}$SUB_PATH${NC}"
+echo -e "     • ${YELLOW}URL обратного прокси:${NC} ${GREEN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
 echo -e "${GREEN}=========================================================${NC}"
 exit 0
