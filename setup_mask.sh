@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Production AutoSetup (Hardened & Multi-Domain Cosmos Steal-Oneself v1.2.5)
+# Production AutoSetup (Hardened & Multi-Domain Cosmos Steal-Oneself v1.2.4-Fixed)
 # Configurable Nginx Stream L4 Router & Mask for 3X-UI
 # Supported external ports: 443 (TCP) and 8443 (TCP) simultaneously
 # Scenario: Self-Stealing REALITY with Isolated Certificates 
@@ -23,7 +23,7 @@ die()  { echo -e "${RED}[✗] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=========================================================${NC}"
-echo -e "${GREEN}  Nginx L4 Stream Router & Mask v1.2.5 (Hardened)${NC}"
+echo -e "${GREEN}  Nginx L4 Stream Router & Mask v1.2.4 (Fixed & Verified)${NC}"
 echo -e "${CYAN}=========================================================${NC}"
 
 # ─────────────────────── Предусловия ─────────────────────────
@@ -73,19 +73,13 @@ prompt_default() {
     declare -g "$var_name=${input_val:-$default_val}"
 }
 
-validate_path() {
-    local val="$1"
-    local name="$2"
-    if [[ ! "$val" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-        die "Критическая ошибка: Параметр $name ('$val') должен содержать только латинские буквы, цифры, дефис или подчеркивание."
-    fi
-}
-
 # ═════════════════════════════════════════════════════════════
 #  ИНТЕРАКТИВНЫЙ ВВОД ПАРАМЕТРОВ С ВЫБОРОМ
 # ═════════════════════════════════════════════════════════════
 echo
 echo -e "${YELLOW}Шаг 1: Настройка Главного домена сервера (PRIMARY_DOMAIN)${NC}"
+echo -e "Этот домен будет использоваться для входа в панель 3X-UI, получения подписок"
+echo -e "и отображения сайта-маски (декоя) для посторонних."
 read -rp "Введите основной домен (например, proxy-hub.ru): " PRIMARY_DOMAIN
 [[ "$PRIMARY_DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]] \
     || die "Некорректный формат главного домена: $PRIMARY_DOMAIN"
@@ -129,15 +123,14 @@ fi
 
 echo
 echo -e "${YELLOW}Шаг 2: Привязка технических портов панели 3X-UI${NC}"
+echo -e "Убедитесь, что порты не заняты другими веб-службами."
 prompt_default "Внутренний порт вашей веб-панели 3X-UI" "10443" PANEL_PORT
 prompt_default "Секретный пул-путь к веб-панели (без слэшей)" "3x-dashboard" RAW_PATH
-validate_path "$RAW_PATH" "RAW_PATH"
-PANEL_PATH="/${RAW_PATH}/"
+PANEL_PATH=$(echo "/${RAW_PATH}/" | tr -s '/')
 
 prompt_default "Выделенный внутренний порт подписок 3X-UI" "55443" SUB_PORT
 prompt_default "Секретный путь для подписок (без слэшей)" "postkey" RAW_SUB_PATH
-validate_path "$RAW_SUB_PATH" "RAW_SUB_PATH"
-SUB_PATH="/${RAW_SUB_PATH}/"
+SUB_PATH=$(echo "/${RAW_SUB_PATH}/" | tr -s '/')
 
 if [[ ! "$PANEL_PORT" =~ ^[0-9]+$ ]] || [ "$PANEL_PORT" -le 0 ] || [ "$PANEL_PORT" -gt 65535 ]; then
     die "Некорректный порт панели: $PANEL_PORT."
@@ -150,14 +143,19 @@ if [ "$PANEL_PORT" -eq "$SUB_PORT" ]; then
 fi
 
 echo
+echo -e "${GREEN}[i] ИНФОРМАЦИЯ ПО HYSTERIA 2 (UDP):${NC}"
+echo -e "    Входные порты 443/UDP и 8443/UDP будут полностью свободны."
+echo -e "    Вы сможете привязать их напрямую в инбаундах 3X-UI."
+
+echo
 echo -e "${YELLOW}Шаг 3: Выбор визуального камуфляжа (Decoy Front)${NC}"
-echo -e " 1) Страница входа в CosmosCloud (имитация API-запросов, кастомные заголовки)"
+echo -e " 1) Точная копия CosmosCloud (Страница входа, имитация API-запросов, кастомные заголовки)"
 echo -e " 2) Стандартная заглушка Nginx (Классический 'Welcome to nginx!')"
 prompt_default "Выберите вариант (1 или 2)" "1" DECOY_TEMPLATE
 
 echo
 echo -e "${YELLOW}Шаг 4: Служебные параметры Certbot${NC}"
-prompt_default "Email для уведомлений Let's Encrypt (Оставьте пустым для пропуска ввода)" "" LE_EMAIL
+prompt_default "Email для уведомлений Let's Encrypt (Оставьте пустым для отмены)" "" LE_EMAIL
 
 # Проверка DNS
 log "Сканирование DNS-записей перед выпуском SSL..."
@@ -209,7 +207,7 @@ Pin: origin nginx.org
 Pin-Priority: 900
 EOF
 
-log "Установка Nginx..."
+log "Установка Nginx (Mainline/Stable Сборка)..."
 apt-get update -q
 apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx -y -q
 
@@ -277,44 +275,40 @@ snap install --classic certbot
 ln -sf /snap/bin/certbot /usr/bin/certbot
 
 # ═════════════════════════════════════════════════════════════
-#  НАСТРОЙКА КЛИЕНТА CERTBOT И ВЫПУСК СЕРТИФИКАТОВ
+#  ВЫПУСК СЕРТИФИКАТОВ (РАЗДЕЛЬНЫЙ)
 # ═════════════════════════════════════════════════════════════
-log "Безопасное конфигурирование Certbot во избежание утечки секретов через ps..."
-mkdir -p /etc/letsencrypt
+log "Генерация SSL для ОСНОВНОГО домена: $PRIMARY_DOMAIN..."
+CERTBOT_ARGS=(certonly --webroot -w "$WEBROOT" --agree-tos -n --expand -d "$PRIMARY_DOMAIN")
 if [ -n "$LE_EMAIL" ]; then
-    cat << EOF > /etc/letsencrypt/cli.ini
-email = $LE_EMAIL
-agree-tos = true
-non-interactive = true
-EOF
+    CERTBOT_ARGS+=(--email "$LE_EMAIL")
 else
-    cat << EOF > /etc/letsencrypt/cli.ini
-register-unsafely-without-email = true
-agree-tos = true
-non-interactive = true
-EOF
+    CERTBOT_ARGS+=(--register-unsafely-without-email)
 fi
 
-log "Генерация SSL для ОСНОВНОГО домена: $PRIMARY_DOMAIN..."
-if ! certbot certonly --webroot -w "$WEBROOT" --expand -d "$PRIMARY_DOMAIN"; then
+if ! certbot "${CERTBOT_ARGS[@]}"; then
     warn "Не удалось выпустить SSL для главного домена $PRIMARY_DOMAIN."
 fi
 
 # Проверка физического наличия сертификата для исключения падения Nginx при старте
 if [ ! -f "/etc/letsencrypt/live/$PRIMARY_DOMAIN/fullchain.pem" ]; then
-    die "Критическая ошибка: Сертификат для главного домена $PRIMARY_DOMAIN не найден."
+    die "Критическая ошибка: Сертификат для главного домена $PRIMARY_DOMAIN не найден. Дальнейшая настройка прервана."
 fi
 
 # Изолированный выпуск для каждого Reality-домена
 for ((i=1; i<${#DOMAINS[@]}; i++)); do
     alt_d="${DOMAINS[$i]}"
     log "Генерация ИЗОЛИРОВАННОГО SSL для Reality-домена: $alt_d..."
-    if ! certbot certonly --webroot -w "$WEBROOT" --expand -d "$alt_d"; then
+    ALT_CERT_ARGS=(certonly --webroot -w "$WEBROOT" --agree-tos -n --expand -d "$alt_d")
+    if [ -n "$LE_EMAIL" ]; then
+        ALT_CERT_ARGS+=(--email "$LE_EMAIL")
+    else
+        ALT_CERT_ARGS+=(--register-unsafely-without-email)
+    fi
+    if ! certbot "${ALT_CERT_ARGS[@]}"; then
         warn "Не удалось выпустить SSL для альтернативного домена $alt_d."
     fi
 done
 
-# Доступ к директории Let's Encrypt для чтения структуры
 chmod 755 /etc/letsencrypt/archive || true
 chmod 755 /etc/letsencrypt/live || true
 
@@ -398,27 +392,15 @@ if [ "$DECOY_TEMPLATE" = "1" ]; then
 EOF
 
     log "Загрузка оригинальных графических ассетов Cosmos Cloud..."
-    # Скачивание строго с проверкой сертификатов
+    # Пробуем скачать с GitHub, подавляя вывод системных ошибок curl в терминал
     if curl -fsSL --connect-timeout 10 "https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null; then
         ok "Логотип успешно загружен из основного репозитория GitHub."
     else
-        warn "Прямое подключение к GitHub не удалось. Переключаемся на резервное зеркало..."
-        if curl -fsSL --connect-timeout 10 "https://cdn.jsdelivr.net/gh/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui@main/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null; then
+        warn "Прямое подключение к GitHub не удалось (возможно, блокировка). Переключаемся на резервное зеркало..."
+        if curl -fsSLk --connect-timeout 10 "https://cdn.jsdelivr.net/gh/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui@main/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null; then
             ok "Логотип успешно загружен из резервного зеркала CDN (jsDelivr)."
         else
-            warn "Не удалось загрузить логотип. Веб-маска будет работать в режиме текстовой заглушки."
-        fi
-    fi
-
-    # Валидация формата WebP по сигнатуре (магическим байтам)
-    if [ -f "$WEBROOT/logo.webp" ]; then
-        magic_riff=$(head -c 4 "$WEBROOT/logo.webp" | tr -d '\0')
-        magic_webp=$(dd if="$WEBROOT/logo.webp" bs=1 skip=8 count=4 status=none | tr -d '\0')
-        if [[ "$magic_riff" != "RIFF" || "$magic_webp" != "WEBP" ]]; then
-            warn "Файл logo.webp имеет неверный формат или поврежден. Удаление во избежание проблем безопасности..."
-            rm -f "$WEBROOT/logo.webp"
-        else
-            ok "Файл logo.webp успешно верифицирован по сигнатуре формата."
+            warn "Не удалось загрузить логотип ни из одного источника. Веб-маска будет работать в режиме текстовой заглушки."
         fi
     fi
 else
@@ -477,16 +459,11 @@ map $http_upgrade $connection_upgrade {
 }
 EOF
 
-# Инициализация Rate Limiting
-cat << 'EOF' > /etc/nginx/conf.d/00-ratelimit.conf
-limit_req_zone $binary_remote_addr zone=panel_limit:10m rate=5r/s;
-limit_req_zone $binary_remote_addr zone=sub_limit:10m rate=10r/s;
-EOF
-
 log "Сборка L4 Stream архитектуры маршрутизации..."
 STREAM_MAP_RULES=""
 ALL_REALITY_PORTS=()
 
+# Безопасная генерация правил отображения доменов без echo -e
 for ((i=1; i<${#DOMAINS[@]}; i++)); do
     STREAM_MAP_RULES+="    ${DOMAINS[$i]}    reality_backend_${REALITY_PORTS[$i]};
 "
@@ -522,7 +499,7 @@ server {
     listen 443;
     listen 8443; 
     ssl_preread on;
-    proxy_protocol on; # Передаем оригинальный IP клиента дальше без потерь в Xray и HTTP
+    proxy_protocol on; # <--- Передаем оригинальный IP клиента дальше без потерь в Xray и HTTP
     proxy_pass \$backend_gate;
     proxy_connect_timeout 5s;
     proxy_timeout 1h;
@@ -635,7 +612,6 @@ server {
     add_header Strict-Transport-Security "max-age=15768000; includeSubDomains" always;
 
     location ^~ $PANEL_PATH {
-        limit_req zone=panel_limit burst=10 nodelay;
         proxy_pass http://127.0.0.1:$PANEL_PORT;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -650,7 +626,6 @@ server {
     }
 
     location ^~ $SUB_PATH {
-        limit_req zone=sub_limit burst=20 nodelay;
         proxy_pass http://127.0.0.1:$SUB_PORT;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -706,7 +681,7 @@ echo -e "${GREEN}=========================================================${NC}"
 echo -e "      СЦЕНАРИЙ STEAL-ONESELF НАСТРОЕН УСПЕШНО!"
 echo -e "${GREEN}=========================================================${NC}"
 echo -e "Адрес Облака-заглушки:  ${CYAN}https://${PRIMARY_DOMAIN}${NC}"
-echo -e "Альтернативные домены:  ${YELLOW}${DOMAINS[@]:1}${NC}"
+echo -e "Альтернативные домены:  ${YELLOW}${DOMAINS[@]:1}${NC} (Без связывания SSL!)"
 echo -e "Вход в панель 3X-UI:     ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 echo
 echo -e "${YELLOW}ПОДГОТОВКА ФАЙЕРВОЛА (UFW):${NC}"
