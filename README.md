@@ -88,7 +88,7 @@ chmod +x setup_mask.sh
 * **Proxy Protocol:** Включен (`true`). 
 * **Безопасность (Security):** `Reality`.
 * **Xver (Proxy Protocol к декою):** `1` (PROXY protocol v1).
-* **Цель (Dest):** `127.0.0.1:9443`.
+* **Цель (Dest):** `your.SNI.domain:443`.
 
 #### Шаблон конфигурации inbound VLESS Reality (JSON):
 ```json
