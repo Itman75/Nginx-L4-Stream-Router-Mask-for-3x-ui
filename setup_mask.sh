@@ -1,5 +1,5 @@
 #
-# Production AutoSetup (Hardened Hybrid Router & Mask v3.1.1 Multi-Cert)
+# Production AutoSetup (Hardened Hybrid Router & Mask v3.1.1)
 # Nginx Stream L4 Hybrid Router for 3X-UI + xHTTP + Multi-Domain SSL Support
 # Scenario: Classic REALITY Multi-Port + Isolated HTTPS Mask + Multi-Cert Let's Encrypt
 # Supported external ports: 443 (TCP/UDP) and 8443 (TCP/UDP)
