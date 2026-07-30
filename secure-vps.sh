@@ -1,47 +1,36 @@
 #!/bin/bash
 set -euo pipefail
 
-#################################################################
-# PROD VPS HARDENING (Ubuntu 20.04+ & Debian 11+)
+#####################################
+# PROD VPS HARDENING
+# Совместимость: Ubuntu 20.04/24.04 & Debian 11/12
+# + Optional System Upgrade & Clean
 # + BBR + Disable IPv6 + Block Ping
 # + IPv4 ONLY Firewall Rules
 # + SSH Keys (Auto-gen or Paste)
 # + 3x-ui (Выбор версии)
 # + Extended Utilities
-################################---------------------------------
+#####################################
 
 DEFAULT_SSH_PORT=22
-MIN_SSH_PORT=1024
+MIN_SSH_PORT=22
 MAX_SSH_PORT=65535
 
 export DEBIAN_FRONTEND=noninteractive
 
-# ─────────────────────────── Цвета ───────────────────────────
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log()  { echo -e "${CYAN}[+]${NC} $*"; }
-ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
-warn() { echo -e "${YELLOW}[!]${NC} $*"; }
-die()  { echo -e "${RED}[✗] $*${NC}" >&2; exit 1; }
-
 # Проверка root-прав
 if [[ $EUID -ne 0 ]]; then
-    die "Запустите скрипт от имени root (через sudo)."
+    echo "Ошибка: Запустите скрипт от пользователя root (sudo)" >&2
+    exit 1
 fi
 
-# Проверка совместимости ОС
+# Определение операционной системы
+OS_ID=""
+OS_LIKE=""
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
-        die "Данный скрипт оптимизирован строго под семейства Ubuntu и Debian."
-    fi
-    log "Обнаружена ОС: $PRETTY_NAME"
-else
-    die "Не удалось определить дистрибутив ОС."
+    OS_ID="${ID:-}"
+    OS_LIKE="${ID_LIKE:-}"
 fi
 
 #####################################
@@ -52,7 +41,7 @@ prompt_yes_no() {
     while true; do
         local ans=""
         if ! read -rp "$1 (yes/no): " ans; then
-            echo ""
+            echo "" # Перенос строки при EOF
             return 1
         fi
         case "$ans" in
@@ -77,14 +66,23 @@ validate_port() {
     (( "$1" >= MIN_SSH_PORT && "$1" <= MAX_SSH_PORT ))
 }
 
+get_ssh_service_name() {
+    if systemctl list-unit-files | grep -q "^sshd\.service"; then
+        echo "sshd"
+    else
+        echo "ssh"
+    fi
+}
+
 safe_sudoers() {
     local target_user="$1"
     local file="/etc/sudoers.d/$target_user"
-    
+
+    # Принудительно устанавливаем владельца root перед проверкой visudo
     chown root:root "$file" 2>/dev/null || true
     chmod 440 "$file" || return 1
     if ! visudo -cf "$file"; then
-        warn "Критическая ошибка: Создан невалидный файл sudoers! Удаление файла во избежание поломки sudo."
+        echo "Критическая ошибка: Создан невалидный файл sudoers! Удаление файла во избежание поломки sudo." >&2
         rm -f "$file"
         return 1
     fi
@@ -96,15 +94,16 @@ setup_ssh_keys() {
     local target_user="$1"
     local user_home
 
+    # Безопасное динамическое определение домашней директории пользователя в режиме set -e
     user_home=$(getent passwd "$target_user" | cut -d: -f6) || user_home=""
     if [[ -z "$user_home" ]]; then
-        warn "Не удалось определить домашний каталог для пользователя $target_user"
+        echo "Ошибка: Не удалось определить домашний каталог для пользователя $target_user" >&2
         return 1
     fi
 
     echo "-------------------------------------"
     echo "НАСТРОЙКА SSH КЛЮЧЕЙ ДЛЯ: $target_user"
-    echo "1) Сгенерировать новую пару ключей на сервере (НЕ РЕКОМЕНДУЕТСЯ)"
+    echo "1) Сгенерировать новую пару ключей на сервере (НЕ РЕКОМЕНДУЕТСЯ из соображений безопасности)"
     echo "2) Ввести (вставить) уже существующий Public Key (РЕКОМЕНДУЕТСЯ)"
     echo "3) Пропустить"
 
@@ -115,24 +114,27 @@ setup_ssh_keys() {
 
     case "$choice" in
         1)
-            warn "Генерация ключей на сервере менее безопасна, так как приватный ключ отображается в консоли."
+            echo "ВНИМАНИЕ: Генерация ключей на сервере менее безопасна, так как приватный ключ отображается в консоли."
             if ! prompt_yes_no "Вы действительно хотите сгенерировать ключ на сервере?"; then
                 return 1
             fi
-            
-            mkdir -p "$user_home/.ssh"
-            chmod 700 "$user_home/.ssh"
 
+            mkdir -p "$user_home/.ssh"
+            chmod 700 "$user_home/.ssh" || true
+
+            # Очистка старых ключей генерации по умолчанию
             rm -f "$user_home/.ssh/id_ed25519" "$user_home/.ssh/id_ed25519.pub"
 
-            log "Генерируем ключи Ed25519..."
+            echo "Генерируем ключи Ed25519..."
             if ! ssh-keygen -t ed25519 -f "$user_home/.ssh/id_ed25519" -C "vps-$target_user" -N "" -q; then
-                warn "Ошибка при генерации ключа."
+                echo "Ошибка при генерации ключа." >&2
                 return 1
             fi
 
+            # Добавление в authorized_keys
             cat "$user_home/.ssh/id_ed25519.pub" >> "$user_home/.ssh/authorized_keys"
 
+            # Настройка прав
             chmod 600 "$user_home/.ssh/authorized_keys" || true
             chown -R "$target_user":"$target_user" "$user_home/.ssh" 2>/dev/null || chown -R "$target_user" "$user_home/.ssh" || true
 
@@ -148,14 +150,14 @@ setup_ssh_keys() {
             return 0
             ;;
         2)
-            log "Вставьте ваш публичный ключ (начинается с ssh-rsa или ssh-ed25519):"
+            echo "Вставьте ваш публичный ключ (начинается с ssh-rsa или ssh-ed25519):"
             local pub_key=""
             if ! read -r pub_key; then
                 pub_key=""
             fi
 
             if [[ -z "$pub_key" ]]; then
-                warn "Ключ не введен."
+                echo "Ключ не введен."
                 return 1
             fi
 
@@ -166,11 +168,11 @@ setup_ssh_keys() {
             chmod 600 "$user_home/.ssh/authorized_keys" || true
             chown -R "$target_user":"$target_user" "$user_home/.ssh" 2>/dev/null || chown -R "$target_user" "$user_home/.ssh" || true
 
-            ok "Публичный ключ успешно добавлен."
+            echo "Публичный ключ добавлен."
             return 0
             ;;
         *)
-            log "Пропуск настройки ключей."
+            echo "Пропуск настройки ключей."
             return 1
             ;;
     esac
@@ -179,19 +181,46 @@ setup_ssh_keys() {
 #####################################
 # НАЧАЛО ВЫПОЛНЕНИЯ И ОБНОВЛЕНИЕ APT
 #####################################
-log "Обновление локальной базы пакетов..."
-apt-get update -y || warn "Не удалось полностью обновить кэш apt."
+echo "Обновление локальной базы пакетов..."
+apt-get update -y || echo "Предупреждение: Не удалось обновить локальный кэш пакетов. Попытка продолжить..."
 
-if [[ "$ID" == "ubuntu" ]]; then
-    log "Проверка и подключение репозитория universe (актуально для Ubuntu)..."
-    apt-get install -y software-properties-common || true
+# Гарантируем наличие базовых утилит администрирования
+apt-get install -y sudo software-properties-common curl || true
+
+# Подключение репозитория universe только для Ubuntu
+if [[ "$OS_ID" == "ubuntu" ]] || [[ "$OS_LIKE" == *"ubuntu"* ]]; then
+    echo "Проверка и подключение репозитория universe (Ubuntu)..."
     add-apt-repository -y universe || true
+fi
+
+# Интерактивное полное обновление и очистка системы
+if prompt_yes_no "Выполнить полное обновление системы (apt upgrade) и очистку?"; then
+    echo "Запуск полного обновления пакетов (это может занять некоторое время)..."
+    
+    export APT_LISTCHANGES_FRONTEND=none
+    
+    # Защищаем вызов update от падения по set -e
+    apt-get update -y || echo "Предупреждение: Не удалось обновить индексы пакетов, пробуем продолжить обновление..."
+    
+    # Флаги force-confdef и force-confold исключают зависания при конфликтах конфигурационных файлов
+    apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+    apt-get autoremove -y
+    apt-get autoclean -y
+    
+    echo "Обновление и очистка успешно завершены."
+    echo "ВНИМАНИЕ: Если были обновлены важные системные библиотеки или ядро, рекомендуется перезагрузить сервер после завершения работы скрипта."
+    echo ""
+else
+    echo "Пропуск обновления пакетов."
 fi
 
 #####################################
 # ОПТИМИЗАЦИЯ СЕТИ (PROXY TUNING)
 #####################################
-log "Применение сетевых оптимизаций ядра (Proxy Tuning)..."
+echo "==========================================================="
+echo "Применение сетевых оптимизаций ядра (Proxy Tuning)..."
+echo "==========================================================="
+
 mkdir -p /etc/sysctl.d/
 cat << EOF > /etc/sysctl.d/99-proxy-tuning.conf
 net.core.somaxconn = 16384
@@ -203,17 +232,18 @@ net.core.wmem_default = 1048576
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 EOF
-sysctl --system >/dev/null 2>&1 || warn "Некоторые параметры sysctl не применились (нормально для контейнеров LXC/OpenVZ)."
+sysctl --system >/dev/null 2>&1 || echo "Предупреждение: Не все параметры sysctl применены (нормально для контейнеров LXC/OpenVZ)."
+echo "Оптимизации сети успешно добавлены."
+echo ""
 
 #####################################
 # УСТАНОВКА СИСТЕМНЫХ УТИЛИТ И МОНИТОРИНГА
 #####################################
-if prompt_yes_no "Установить расширенные системные утилиты и мониторинг (htop, btop, tcpdump, jq, tmux и др.)"; then
-    log "Установка системных утилит..."
+if prompt_yes_no "Установить системные утилиты и инструменты мониторинга (htop, btop, tcpdump, jq, tmux и др.)"; then
+    echo "Установка системных утилит..."
     apt-get install -y \
         curl \
         build-essential \
-        btop \
         htop \
         iperf3 \
         iftop \
@@ -225,18 +255,23 @@ if prompt_yes_no "Установить расширенные системные
         tmux \
         ncdu \
         vnstat \
-        openssh-client || warn "Не все утилиты были установлены."
-    ok "Системные утилиты установлены."
+        openssh-client || true
+
+    # Попытка установить btop (может отсутствовать в старых репозиториях Debian 11 / Ubuntu 20.04)
+    apt-get install -y btop 2>/dev/null || echo "Примечание: Пакет btop недоступен в стандартном репозитории данного дистрибутива."
+    echo "Системные утилиты успешно установлены."
 else
-    log "Пропуск установки утилит."
+    echo "Пропуск установки дополнительных утилит."
 fi
 
 #####################################
-# СЕТЕВЫЕ НАСТРОЙКИ (BBR + IPv6)
+# СЕТЕВЫЕ НАСТРОЙКИ (BBR + Полное отключение IPv6)
 #####################################
 if prompt_yes_no "Включить TCP BBR и отключить IPv6"; then
     SYSCTL_CONF="/etc/sysctl.d/99-vps-hardening.conf"
-    
+    mkdir -p /etc/sysctl.d/
+
+    # 1. Записываем настройки в sysctl.d
     cat > "$SYSCTL_CONF" <<EOF
 # TCP BBR Congestion Control
 net.core.default_qdisc = fq
@@ -248,27 +283,42 @@ net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
 
-    sysctl --system || warn "Параметры sysctl применились частично."
+    # Применяем sysctl прямо сейчас
+    sysctl --system || echo "Предупреждение: Не все параметры sysctl были успешно применены. Это нормально для сред LXC/OpenVZ."
 
-    # Отключение IPv6 в GRUB (для полноценных VPS/KVM)
-    if [ -f /default/grub ] || [ -f /etc/default/grub ]; then
-        GRUB_FILE="/etc/default/grub"
-        if ! grep -q "ipv6.disable=1" "$GRUB_FILE"; then
-            cp "$GRUB_FILE" "${GRUB_FILE}.bak"
-            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="ipv6.disable=1 /' "$GRUB_FILE"
-            update-grub 2>/dev/null || update-grub2 2>/dev/null || true
-            log "IPv6 отключен через GRUB. Резервная копия сохранена."
+    # 2. МЕТОД GRUB (Для полноценных серверов и KVM-виртуализации)
+    if [ -f /etc/default/grub ]; then
+        if ! grep -q "ipv6.disable=1" /etc/default/grub; then
+            # Делаем резервную копию перед внесением изменений
+            cp /etc/default/grub /etc/default/grub.bak
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="ipv6.disable=1 /' /etc/default/grub
+            sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT='/GRUB_CMDLINE_LINUX_DEFAULT='ipv6.disable=1 /" /etc/default/grub
+            sed -i 's/GRUB_CMDLINE_LINUX="/GRUB_CMDLINE_LINUX="ipv6.disable=1 /' /etc/default/grub
+            sed -i "s/GRUB_CMDLINE_LINUX='/GRUB_CMDLINE_LINUX='ipv6.disable=1 /" /etc/default/grub
+            
+            if command -v update-grub &>/dev/null; then
+                update-grub || true
+            elif command -v grub-mkconfig &>/dev/null; then
+                grub-mkconfig -o /boot/grub/grub.cfg || true
+            fi
+            echo "IPv6 отключен в загрузчике GRUB (применится после перезагрузки). Резервная копия сохранена в /etc/default/grub.bak"
         fi
     fi
 
-    # Защита через cron при перезагрузке
+    # 3. МЕТОД CRON (Безопасное добавление без использования деструктивного sort -u)
     if command -v crontab &>/dev/null; then
         cron_job="@reboot sleep 10 && sysctl --system"
         if ! crontab -l 2>/dev/null | grep -Fq "$cron_job"; then
-            (crontab -l 2>/dev/null || true; echo "$cron_job") | crontab - || true
+            (crontab -l 2>/dev/null || true; echo "$cron_job") | crontab - || echo "Предупреждение: Не удалось обновить crontab."
+            echo "Создано отложенное правило применения sysctl в Cron для защиты от сброса настроек сетью."
+        else
+            echo "Правило автозапуска sysctl уже присутствует в Cron."
         fi
+    else
+        echo "Предупреждение: утилита crontab не найдена. Настройка Cron-правила пропущена."
     fi
-    ok "TCP BBR активирован, IPv6 заблокирован."
+
+    echo "Сетевые настройки успешно применены и защищены от сброса после перезагрузки!"
 fi
 
 #####################################
@@ -276,13 +326,23 @@ fi
 #####################################
 if prompt_yes_no "Сменить пароль root"; then
     while true; do
-        local rp="" rp2=""
-        read -rsp "Новый пароль root: " rp; echo
-        read -rsp "Повтор: " rp2; echo
-        [[ "$rp" == "$rp2" ]] || { warn "Пароли не совпадают"; continue; }
-        validate_password "$rp" || { warn "Слабый пароль. Требуется: минимум 12 символов, заглавные, строчные, цифры и спецсимволы."; continue; }
+        rp=""
+        rp2=""
+        if ! read -rsp "Новый пароль root: " rp; then
+            echo -e "\nВвод прерван."
+            break
+        fi
+        echo
+        if ! read -rsp "Повтор: " rp2; then
+            echo -e "\nВвод прерван."
+            break
+        fi
+        echo
+
+        [[ "$rp" == "$rp2" ]] || { echo "Пароли не совпадают"; continue; }
+        validate_password "$rp" || { echo "Слабый пароль. Требуется: минимум 12 символов, заглавные, строчные, цифры и спецсимволы."; continue; }
         echo "root:$rp" | chpasswd
-        ok "Пароль root изменен."
+        echo "Пароль root изменен успешно."
         break
     done
 fi
@@ -292,36 +352,54 @@ fi
 #####################################
 CREATED_USER=""
 
-if prompt_yes_no "Создать обычного пользователя с правами sudo"; then
-    local uname=""
-    read -rp "Имя пользователя: " uname || uname=""
+if prompt_yes_no "Создать обычного пользователя"; then
+    uname=""
+    if ! read -rp "Имя пользователя: " uname; then
+        uname=""
+    fi
+
     if [[ -z "$uname" ]]; then
-        warn "Имя пользователя не может быть пустым."
+        echo "Имя пользователя не может быть пустым."
     elif id "$uname" &>/dev/null; then
-        warn "Пользователь уже существует."
+        echo "Пользователь уже существует"
         CREATED_USER="$uname"
     else
-        if adduser --disabled-password --gecos "" "$uname"; then
+        # Обработка возможного падения на невалидных именах пользователей в adduser
+        if ! adduser --disabled-password --gecos "" "$uname"; then
+            echo "Ошибка: Не удалось создать пользователя с именем '$uname'." >&2
+            echo "Проверьте формат имени (должно начинаться со строчной латинской буквы и содержать только строчные буквы и цифры)." >&2
+        else
             while true; do
-                local up="" up2=""
-                read -rsp "Пароль для $uname: " up; echo
-                read -rsp "Повтор: " up2; echo
-                [[ "$up" == "$up2" ]] || { warn "Пароли не совпадают"; continue; }
-                validate_password "$up" || { warn "Слабый пароль (мин. 12 символов, разный регистр, цифры, спецсимволы)."; continue; }
+                up=""
+                up2=""
+                if ! read -rsp "Пароль для $uname: " up; then
+                    echo -e "\nВвод прерван."
+                    break
+                fi
+                echo
+                if ! read -rsp "Повтор: " up2; then
+                    echo -e "\nВвод прерван."
+                    break
+                fi
+                echo
+
+                [[ "$up" == "$up2" ]] || { echo "Пароли не совпадают"; continue; }
+                validate_password "$up" || { echo "Слабый пароль. Требуется: минимум 12 символов, заглавные, строчные, цифры и спецсимволы."; continue; }
                 echo "$uname:$up" | chpasswd
+                usermod -aG sudo "$uname"
+                CREATED_USER="$uname"
+                echo "Пользователь $uname успешно создан и добавлен в группу sudo."
                 break
             done
-            usermod -aG sudo "$uname"
-            CREATED_USER="$uname"
-            ok "Пользователь $uname создан."
-        else
-            warn "Не удалось создать пользователя."
         fi
     fi
 
-    if [[ -n "$CREATED_USER" ]] && prompt_yes_no "Разрешить беспарольный sudo для $CREATED_USER"; then
+    if [[ -n "$CREATED_USER" ]] && prompt_yes_no "Разрешить sudo без пароля для $CREATED_USER"; then
         echo "$CREATED_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$CREATED_USER"
-        safe_sudoers "$CREATED_USER"
+        if ! safe_sudoers "$CREATED_USER"; then
+            echo "Аварийное завершение работы из-за ошибки в файле sudoers." >&2
+            exit 1
+        fi
     fi
 fi
 
@@ -348,35 +426,50 @@ fi
 # SSH HARDENING
 #####################################
 SSH_PORT="$DEFAULT_SSH_PORT"
+SSH_SERVICE="$(get_ssh_service_name)"
 
-# Универсальное переключение службы SSH для Ubuntu / Debian
-log "Проверка и настройка конфигурации службы SSH..."
-if systemctl list-unit-files | grep -q ssh.socket; then
-    systemctl stop ssh.socket 2>/dev/null || true
-    systemctl disable ssh.socket 2>/dev/null || true
-fi
-systemctl enable ssh.service 2>/dev/null || systemctl enable ssh 2>/dev/null || true
+# Переключаем с socket activation (при наличии, например в Ubuntu 24.04) на стандартную службу
+echo "Настройка работы службы SSH ($SSH_SERVICE)..."
+systemctl stop ssh.socket 2>/dev/null || true
+systemctl disable ssh.socket 2>/dev/null || true
+systemctl enable "$SSH_SERVICE.service" 2>/dev/null || true
+systemctl start "$SSH_SERVICE.service" 2>/dev/null || true
 
-if prompt_yes_no "Изменить стандартный порт SSH"; then
+if prompt_yes_no "Изменить порт SSH"; then
     while true; do
-        local p=""
-        read -rp "Новый порт SSH (диапазон $MIN_SSH_PORT-$MAX_SSH_PORT): " p || p=""
-        validate_port "$p" || { warn "Недопустимый порт."; continue; }
+        p=""
+        if ! read -rp "Новый порт SSH (диапазон $MIN_SSH_PORT-$MAX_SSH_PORT): " p; then
+            p=""
+        fi
+        if [[ -z "$p" ]]; then
+            echo "Порт не изменен. Будет использован порт: $SSH_PORT"
+            break
+        fi
+        validate_port "$p" || { echo "Недопустимый порт (выберите в диапазоне $MIN_SSH_PORT-$MAX_SSH_PORT)"; continue; }
         SSH_PORT="$p"
         break
+    done
+fi
+
+# Проверим, подключена ли директория drop-in в основном файле sshd_config
+if [ -f /etc/ssh/sshd_config ]; then
+    if ! grep -q "^Include /etc/ssh/sshd_config.d/\*\.conf" /etc/ssh/sshd_config; then
+        sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
     fi
 fi
 
+# Пишем конфигурацию в drop-in файл вместо изменения основного sshd_config
 SSH_DROPIN="/etc/ssh/sshd_config.d/99-hardening.conf"
 mkdir -p /etc/ssh/sshd_config.d/
 
 cat > "$SSH_DROPIN" <<EOF
-# Hardened SSH Configuration
+# Настройки, созданные автоматическим скриптом
 Port $SSH_PORT
 AddressFamily inet
 PubkeyAuthentication yes
 EOF
 
+# Отключение входа по паролю (Только если ключи были успешно установлены)
 if [ "$KEYS_INSTALLED" = "true" ]; then
     if prompt_yes_no "Отключить вход по паролю (PasswordAuthentication no)?"; then
         cat >> "$SSH_DROPIN" <<EOF
@@ -384,28 +477,32 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 UsePAM yes
 EOF
-        ok "Аутентификация по паролю для SSH отключена."
+        echo "Вход по паролю ОТКЛЮЧЕН. Используйте ключи для авторизации."
     fi
 fi
 
+# Обеспечиваем наличие директории привилегий перед проверкой sshd -t
 mkdir -p /run/sshd
-log "Тестирование конфигурации SSH..."
-if sshd -t; then
+
+# Проверка конфигурации SSH на ошибки перед перезапуском
+echo "Проверка конфигурации SSH..."
+if /usr/sbin/sshd -t; then
     systemctl daemon-reload
-    systemctl restart ssh.service || systemctl restart ssh || warn "Не удалось перезапустить SSH автоматически."
-    ok "Служба SSH успешно переведена на порт $SSH_PORT"
+    systemctl restart "$SSH_SERVICE.service" || echo "Предупреждение: Не удалось автоматически перезапустить $SSH_SERVICE.service"
+    echo "Служба SSH успешно перезапущена на порту $SSH_PORT"
 else
-    warn "Обнаружена ошибка в конфигурации SSH! Откат изменений..."
+    echo "Критическая ошибка конфигурации SSH! Откат изменений во избежание потери доступа." >&2
     rm -f "$SSH_DROPIN"
-    systemctl restart ssh.service || systemctl restart ssh || true
+    systemctl restart "$SSH_SERVICE.service" || true
 fi
 
 #####################################
 # UFW (FIREWALL) 
 #####################################
-log "Установка и настройка межсетевого экрана UFW..."
+echo "Установка и настройка фаервола UFW..."
 apt-get install -y ufw
 
+# Безопасное отключение IPv6 в UFW
 if grep -q "^IPV6=" /etc/default/ufw; then
     sed -i 's/^IPV6=.*/IPV6=no/' /etc/default/ufw
 else
@@ -415,23 +512,28 @@ fi
 ufw default deny incoming
 ufw default allow outgoing
 
-log "Применение правил брандмауэра (IPv4)..."
-ufw allow proto tcp from any to any port "$SSH_PORT" comment 'SSH'
+echo "Настраиваем порты (только IPv4)..."
 
-TCP_PORTS=(80 443 10443 5201 4500 4501 4502)
+# SSH
+ufw allow "$SSH_PORT"/tcp comment 'SSH'
+
+# Дополнительные TCP порты
+TCP_PORTS=(80 443 8443 10443)
 for port in "${TCP_PORTS[@]}"; do
-    ufw allow proto tcp from any to any port "$port"
+    ufw allow "$port"/tcp
 done
 
-UDP_PORTS=(443 8443 5201)
+# Дополнительные UDP порты
+UDP_PORTS=(443 8443)
 for port in "${UDP_PORTS[@]}"; do
-    ufw allow proto udp from any to any port "$port"
+    ufw allow "$port"/udp
 done
 
+# Опциональная блокировка Ping (ICMP)
 if prompt_yes_no "Блокировать входящие ICMP (Ping) запросы?"; then
     if [ -f /etc/ufw/before.rules ]; then
         sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
-        ok "Ping-запросы заблокированы."
+        echo "Ping запросы заблокированы в настройках UFW."
     fi
 fi
 
@@ -440,8 +542,9 @@ ufw --force enable
 #####################################
 # FAIL2BAN
 #####################################
-log "Установка и настройка Fail2ban..."
-apt-get install -y fail2ban
+echo "Установка и настройка Fail2ban..."
+# Установка python3-systemd необходима для Debian 12 / Ubuntu 24.04 (чтение journald)
+apt-get install -y fail2ban python3-systemd 2>/dev/null || apt-get install -y fail2ban
 
 cat > /etc/fail2ban/jail.local <<EOF
 [sshd]
@@ -459,26 +562,67 @@ systemctl restart fail2ban
 #####################################
 # 3X-UI 
 #####################################
-if prompt_yes_no "Установить панель 3x-ui"; then
+if prompt_yes_no "Установить 3x-ui (потребуется интерактивная настройка панели)"; then
     if ! command -v curl &> /dev/null; then
         apt-get install -y curl
     fi
-    log "Запуск установки 3x-ui..."
-    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+
+    XUI_VERSION=""
+
+    echo "-------------------------------------"
+    echo "ВЫБОР ВЕРСИИ 3X-UI"
+    echo "1) Последняя стабильная версия (Latest) - РЕКОМЕНДУЕТСЯ"
+    echo "2) Указать конкретную версию вручную (например, v2.9.4)"
+
+    v_choice=1
+    if ! read -rp "Ваш выбор (1-2): " v_choice; then
+        v_choice=1
+    fi
+
+    if [[ "$v_choice" == "2" ]]; then
+        while true; do
+            tag=""
+            if ! read -rp "Введите тег версии (например, v2.9.4): " tag; then
+                tag=""
+            fi
+            if [[ "$tag" =~ ^v[0-9]+ ]]; then
+                XUI_VERSION="$tag"
+                break
+            else
+                echo "Неверный формат. Версия должна начинаться со строчной буквы 'v' (например, v2.9.4)."
+            fi
+        done
+    fi
+
+    echo "Запуск установки 3x-ui..."
+    curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh -o /tmp/3x-ui-install.sh
+
+    if [[ -n "$XUI_VERSION" ]]; then
+        echo "Установка версии $XUI_VERSION..."
+        bash /tmp/3x-ui-install.sh "$XUI_VERSION"
+    else
+        echo "Установка версии latest..."
+        bash /tmp/3x-ui-install.sh
+    fi
+
+    rm -f /tmp/3x-ui-install.sh
 fi
 
 #####################################
 # ФИНАЛ
 #####################################
 echo
-echo -e "${GREEN}======================================${NC}"
-echo -e "${GREEN}✔ НАСТРОЙКА VPS ЗАВЕРШЕНА УСПЕШНО${NC}"
-echo -e "  • ОС:           ${CYAN}$PRETTY_NAME${NC}"
-echo -e "  • SSH порт:     ${CYAN}$SSH_PORT${NC}"
-echo -e "  • IPv6:         ${RED}отключён${NC}"
-echo -e "  • UFW:          ${GREEN}активен (IPv4 only)${NC}"
-echo -e "  • TCP BBR:      ${GREEN}активирован${NC}"
-echo -e "  • Fail2ban:     ${GREEN}активен${NC}"
-echo -e "  • SSH Ключи:    ${CYAN}$KEYS_INSTALLED${NC}"
-echo -e "${GREEN}======================================${NC}"
-exit 0
+echo "======================================"
+echo "✔ НАСТРОЙКА VPS ЗАВЕРШЕНА УСПЕШНО"
+echo "ОС: ${NAME:-Linux} ${VERSION_ID:-}"
+echo "SSH порт: $SSH_PORT (Служба: $SSH_SERVICE)"
+echo "IPv6: отключён (System + UFW)"
+echo "UFW: включён (только v4 правила)"
+echo "BBR: активирован"
+echo "Fail2ban: активен"
+if [ "$KEYS_INSTALLED" = "true" ]; then
+    echo "SSH Ключи: УСТАНОВЛЕНЫ (вход по паролю отключен, если было выбрано)"
+else
+    echo "SSH Ключи: НЕ установлены"
+fi
+echo "======================================"
