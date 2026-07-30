@@ -1,8 +1,11 @@
+#!/usr/bin/env bash
 #
-# Production AutoSetup (Hardened Hybrid Router & Mask v3.1.1)
-# Nginx Stream L4 Hybrid Router for 3X-UI + xHTTP + Multi-Domain SSL Support
-# Scenario: Classic REALITY Multi-Port + Isolated HTTPS Mask + Multi-Cert Let's Encrypt
-# Supported external ports: 443 (TCP/UDP) and 8443 (TCP/UDP)
+# Production AutoSetup (Hardened Dual-Mode Router & Mask v3.3.0 Universal)
+# Nginx Stream L4 Router for 3X-UI + xHTTP + Multi-Domain SSL Support
+# Scenarios:
+#   1) Steal-Oneself REALITY (Multi-Domain per Port) + Isolated HTTPS Mask
+#   2) Classic External REALITY (Microsoft/Apple SNI or any SNI) + Universal HTTPS Mask
+# Supported external ports: 443 (TCP/UDP) and 8443 (TCP/UDP) simultaneously
 # Fully compatible with Ubuntu 20.04+ and Debian 11+
 #
 
@@ -23,7 +26,7 @@ die()  { echo -e "${RED}[✗] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=========================================================${NC}"
-echo -e "${GREEN}  Nginx L4 Stream Router & Mask v3.1.1 (MULTI-CERT SUPPORT)${NC}"
+echo -e "${GREEN}  Nginx L4 Stream Router & Mask v3.3.0 (UNIVERSAL DUAL-MODE)${NC}"
 echo -e "${CYAN}=========================================================${NC}"
 
 # ─────────────────────── Предусловия ─────────────────────────
@@ -82,64 +85,126 @@ validate_path() {
 }
 
 # ═════════════════════════════════════════════════════════════
-#  ИНТЕРАКТИВНЫЙ ВВОД ПАРАМЕТРОВ
+#  ИНТЕРАКТИВНЫЙ ВВОД ПАРАМЕТРОВ И ВЫБОР СЦЕНАРИЯ
 # ═════════════════════════════════════════════════════════════
 echo
-echo -e "${YELLOW}Шаг 1: Настройка Доменов и SSL-сертификатов${NC}"
-echo -e "${CYAN}Укажите ваш Главный домен (для Маски, Панели, Подписок и xHTTP).${NC}"
-read -rp "Введите ваш основной домен (например, my-proxy-hub.com): " PRIMARY_DOMAIN
+echo -e "${YELLOW}Шаг 1: Выбор архитектурного сценария REALITY${NC}"
+echo -e " 1) ${GREEN}Steal-Oneself (Кража у самого себя)${NC} - Использование собственных доменов с SSL для REALITY"
+echo -e " 2) ${GREEN}Classic External REALITY (Классический)${NC} - Маскировка под внешние домены (Microsoft, Apple и т.д.)"
+prompt_default "Выберите сценарий (1 или 2)" "1" REALITY_MODE_CHOICE
+
+echo
+echo -e "${YELLOW}Шаг 1.1: Настройка Главного домена сервера (PRIMARY_DOMAIN)${NC}"
+echo -e "${CYAN}Этот домен используется для входа в Панель 3X-UI, Подписок, xHTTP и Главной Маски.${NC}"
+read -rp "Введите ваш основной домен (например, proxy-hub.ru): " PRIMARY_DOMAIN
 [[ "$PRIMARY_DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]] \
     || die "Некорректный формат главного домена: $PRIMARY_DOMAIN"
 
 ALL_DOMAINS=("$PRIMARY_DOMAIN")
+declare -A DOMAIN_TO_PORT
+REALITY_PORTS_LIST=()
+STEAL_DOMAINS=()
+
+if [ "$REALITY_MODE_CHOICE" = "1" ]; then
+    log "Выбран режим: Steal-Oneself REALITY"
+    echo
+    echo -e "${YELLOW}Шаг 1.2 [Steal-Oneself]: Настройка портов и доменов REALITY${NC}"
+    echo -e "${CYAN}Вы можете привязать 1 или несколько доменов к каждому порту REALITY.${NC}"
+
+    while true; do
+        read -rp "Введите локальный порт Nginx Stream для REALITY [45443]: " PORT_INPUT
+        PORT_VAL="${PORT_INPUT:-45443}"
+        if [[ ! "$PORT_VAL" =~ ^[0-9]+$ ]] || [ "$PORT_VAL" -le 0 ] || [ "$PORT_VAL" -gt 65535 ]; then
+            warn "Некорректный порт '$PORT_VAL'. Назначен порт по умолчанию: 45443."
+            PORT_VAL="45443"
+        fi
+
+        if [[ ! " ${REALITY_PORTS_LIST[*]:-} " == *" ${PORT_VAL} "* ]]; then
+            REALITY_PORTS_LIST+=("$PORT_VAL")
+        fi
+
+        echo -e "${CYAN}Введите домены Steal-Oneself, которые будут обрабатываться портом $PORT_VAL.${NC}"
+        echo -e "${CYAN}Для завершения ввода доменов для этого порта нажмите ENTER на пустой строке.${NC}"
+
+        added_count_for_port=0
+        while true; do
+            read -rp "  Домен Steal-Oneself для порта $PORT_VAL: " STEAL_DOM
+            if [ -z "$STEAL_DOM" ]; then
+                if [ "$added_count_for_port" -eq 0 ]; then
+                    warn "Нужно добавить хотя бы один домен для порта $PORT_VAL!"
+                    continue
+                fi
+                break
+            fi
+
+            if [[ ! "$STEAL_DOM" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+                warn "  Некорректный формат домена '$STEAL_DOM'. Попробуйте еще раз."
+                continue
+            fi
+
+            if [[ " ${ALL_DOMAINS[*]} " == *" ${STEAL_DOM} "* ]]; then
+                warn "  Домен '$STEAL_DOM' уже есть в списке."
+                continue
+            fi
+
+            ALL_DOMAINS+=("$STEAL_DOM")
+            STEAL_DOMAINS+=("$STEAL_DOM")
+            DOMAIN_TO_PORT["$STEAL_DOM"]="$PORT_VAL"
+            added_count_for_port=$((added_count_for_port + 1))
+            ok "  Домен $STEAL_DOM успешно привязан к порту $PORT_VAL (Steal-Oneself)"
+        done
+
+        read -rp "Хотите добавить ЕЩЕ ОДИН порт REALITY с другими доменами? [y/N]: " ADD_MORE_PORTS
+        [[ "${ADD_MORE_PORTS,,}" == "y" ]] || break
+    done
+else
+    log "Выбран режим: Classic External REALITY"
+    echo
+    echo -e "${YELLOW}Шаг 1.2 [Classic]: Привязка портов REALITY${NC}"
+    prompt_default "Введите порт VLESS REALITY в 3X-UI" "45443" FIRST_REALITY_PORT
+    if [[ ! "$FIRST_REALITY_PORT" =~ ^[0-9]+$ ]] || [ "$FIRST_REALITY_PORT" -le 0 ] || [ "$FIRST_REALITY_PORT" -gt 65535 ]; then
+        die "Некорректный порт REALITY: $FIRST_REALITY_PORT."
+    fi
+    REALITY_PORTS_LIST+=("$FIRST_REALITY_PORT")
+
+    while true; do
+        read -rp "Добавить еще один порт для REALITY? (Введите порт или нажмите Enter): " ADD_PORT
+        if [ -z "$ADD_PORT" ]; then
+            break
+        fi
+        if [[ ! "$ADD_PORT" =~ ^[0-9]+$ ]] || [ "$ADD_PORT" -le 0 ] || [ "$ADD_PORT" -gt 65535 ]; then
+            warn "Некорректный номер порта '$ADD_PORT'. Пропускаем."
+        else
+            REALITY_PORTS_LIST+=("$ADD_PORT")
+            ok "Добавлен порт REALITY: $ADD_PORT"
+        fi
+    done
+fi
 
 echo
-echo -e "${CYAN}Вы можете добавить дополнительные домены для выпуска независимых SSL (например, для Hysteria 2, Trojan или других инбаундов).${NC}"
+echo -e "${CYAN}Шаг 1.3: Дополнительные SSL-домены (например, для Hysteria 2 / Trojan / Direct TLS)${NC}"
 while true; do
-    read -rp "Добавить еще один домен для выпуска SSL? (Введите домен или нажмите Enter для завершения): " ADD_DOM
-    if [ -z "$ADD_DOM" ]; then
+    read -rp "Добавить еще один домен для выпуска SSL? (Введите домен или нажмите Enter): " EXTRA_DOM
+    if [ -z "$EXTRA_DOM" ]; then
         break
     fi
-    if [[ "$ADD_DOM" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
-        if [[ " ${ALL_DOMAINS[*]} " =~ " ${ADD_DOM} " ]]; then
-            warn "Домен '$ADD_DOM' уже есть в списке."
+    if [[ "$EXTRA_DOM" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+        if [[ " ${ALL_DOMAINS[*]} " == *" ${EXTRA_DOM} "* ]]; then
+            warn "Домен '$EXTRA_DOM' уже есть в списке."
         else
-            ALL_DOMAINS+=("$ADD_DOM")
-            ok "Добавлен домен: $ADD_DOM"
+            ALL_DOMAINS+=("$EXTRA_DOM")
+            ok "Добавлен домен SSL: $EXTRA_DOM"
         fi
     else
-        warn "Некорректный формат домена '$ADD_DOM'. Пропускаем."
+        warn "Некорректный формат домена '$EXTRA_DOM'. Пропускаем."
     fi
 done
 
-log "Итоговый список доменов для выпуска SSL: ${ALL_DOMAINS[*]}"
+log "Итоговый список всех доменов для выпуска SSL: ${ALL_DOMAINS[*]}"
+log "Список портов REALITY: ${REALITY_PORTS_LIST[*]}"
 
 echo
 echo -e "${YELLOW}Шаг 2: Привязка технических портов 3X-UI и xHTTP${NC}"
-
-REALITY_PORTS=()
-prompt_default "Введите первый внутренний порт VLESS REALITY в 3X-UI" "45443" FIRST_REALITY_PORT
-if [[ ! "$FIRST_REALITY_PORT" =~ ^[0-9]+$ ]] || [ "$FIRST_REALITY_PORT" -le 0 ] || [ "$FIRST_REALITY_PORT" -gt 65535 ]; then
-    die "Некорректный порт REALITY: $FIRST_REALITY_PORT."
-fi
-REALITY_PORTS+=("$FIRST_REALITY_PORT")
-
-while true; do
-    read -rp "Добавить еще один порт для REALITY? (Введите порт или нажмите Enter для завершения): " ADD_PORT
-    if [ -z "$ADD_PORT" ]; then
-        break
-    fi
-    if [[ ! "$ADD_PORT" =~ ^[0-9]+$ ]] || [ "$ADD_PORT" -le 0 ] || [ "$ADD_PORT" -gt 65535 ]; then
-        warn "Некорректный номер порта '$ADD_PORT'. Пропускаем."
-    else
-        REALITY_PORTS+=("$ADD_PORT")
-        ok "Добавлен порт REALITY: $ADD_PORT"
-    fi
-done
-
-log "Итоговый список портов REALITY: ${REALITY_PORTS[*]}"
-
-echo
 prompt_default "Внутренний порт вашей веб-панели 3X-UI" "10443" PANEL_PORT
 prompt_default "Секретный пул-путь к веб-панели (без слэшей)" "3x-dashboard" RAW_PATH
 validate_path "$RAW_PATH" "RAW_PATH"
@@ -317,7 +382,6 @@ non-interactive = true
 EOF
 fi
 
-# Выпуск независимого сертификата для КАЖДОГО домена в списке
 for dom in "${ALL_DOMAINS[@]}"; do
     log "Генерация SSL-сертификата для домена: $dom..."
     if certbot certonly --webroot -w "$WEBROOT" --expand -d "$dom"; then
@@ -330,7 +394,6 @@ for dom in "${ALL_DOMAINS[@]}"; do
     fi
 done
 
-# Корректировка прав доступа ко всем сертификатам (чтобы Xray и Hysteria2 могли их читать)
 chmod 755 /etc/letsencrypt/archive 2>/dev/null || true
 chmod 755 /etc/letsencrypt/live 2>/dev/null || true
 
@@ -433,7 +496,6 @@ EOF
         fi
     fi
 
-    # Валидация формата WebP по сигнатуре (магическим байтам)
     if [ -f "$WEBROOT/logo.webp" ]; then
         magic_riff=$(head -c 4 "$WEBROOT/logo.webp" | tr -d '\0')
         magic_webp=$(dd if="$WEBROOT/logo.webp" bs=1 skip=8 count=4 status=none | tr -d '\0')
@@ -506,36 +568,65 @@ limit_req_zone $binary_remote_addr zone=panel_interface:10m rate=10r/s;
 limit_req_zone $binary_remote_addr zone=sub_limit:10m rate=30r/s;
 EOF
 
-log "Генерация upstream списка для REALITY..."
-REALITY_UPSTREAM_SERVERS=""
-for port in "${REALITY_PORTS[@]}"; do
-    REALITY_UPSTREAM_SERVERS+="    server 127.0.0.1:${port};"$'\n'
-done
+log "Генерация L4 Stream таблиц и Upstream-блоков..."
+STREAM_MAP_RULES=""
+REALITY_UPSTREAMS=""
 
-STREAM_DOMAINS_MAP=""
-for dom in "${ALL_DOMAINS[@]}"; do
-    STREAM_DOMAINS_MAP+="    ${dom}     nginx_http_backend;"$'\n'
-done
+if [ "$REALITY_MODE_CHOICE" = "1" ]; then
+    for dom in "${ALL_DOMAINS[@]}"; do
+        if [ "$dom" = "$PRIMARY_DOMAIN" ]; then
+            STREAM_MAP_RULES+="    ${dom}     nginx_http_backend;"$'\n'
+        elif [ -n "${DOMAIN_TO_PORT[$dom]:-}" ]; then
+            port="${DOMAIN_TO_PORT[$dom]}"
+            STREAM_MAP_RULES+="    ${dom}     reality_backend_${port};"$'\n'
+        else
+            STREAM_MAP_RULES+="    ${dom}     nginx_http_backend;"$'\n'
+        fi
+    done
+
+    for port in "${REALITY_PORTS_LIST[@]}"; do
+        REALITY_UPSTREAMS+="
+upstream reality_backend_${port} {
+    server 127.0.0.1:${port};
+}
+"
+    done
+    DEFAULT_FALLBACK="nginx_http_backend"
+else
+    for dom in "${ALL_DOMAINS[@]}"; do
+        STREAM_MAP_RULES+="    ${dom}     nginx_http_backend;"$'\n'
+    done
+
+    REALITY_SERVERS_POOL=""
+    for port in "${REALITY_PORTS_LIST[@]}"; do
+        REALITY_SERVERS_POOL+="    server 127.0.0.1:${port};"$'\n'
+    done
+
+    REALITY_UPSTREAMS="
+upstream xray_reality_backend {
+${REALITY_SERVERS_POOL}}
+"
+    DEFAULT_FALLBACK="xray_reality_backend"
+fi
 
 log "Сборка L4 STREAM HYBRID маршрутизатора..."
 cat << EOF > "/etc/nginx/stream.d/$PRIMARY_DOMAIN.conf"
 map \$ssl_preread_server_name \$backend_gate {
     ""                 nginx_http_backend; # Без SNI -> на маску
-${STREAM_DOMAINS_MAP}    default             xray_reality_backend; # Любые внешние SNI (Microsoft/Apple) -> в Xray REALITY
+${STREAM_MAP_RULES}    default             ${DEFAULT_FALLBACK};
 }
 
 upstream nginx_http_backend {
     server 127.0.0.1:9443;
 }
 
-upstream xray_reality_backend {
-${REALITY_UPSTREAM_SERVERS}}
+${REALITY_UPSTREAMS}
 
 server {
     listen 443;
     listen 8443; 
     ssl_preread on;
-    proxy_protocol on; # Передаем реальный IP клиента в Xray и HTTP
+    proxy_protocol on; # Передаем реальный IP клиента дальше
     proxy_pass \$backend_gate;
     proxy_connect_timeout 5s;
     proxy_timeout 1h;
@@ -560,7 +651,6 @@ if [ "$DECOY_TEMPLATE" = "1" ]; then
     }'
 fi
 
-# Подготовка конфигурации xHTTP в зависимости от выбранного режима
 if [ "$XHTTP_MODE_CHOICE" = "2" ]; then
     log "Конфигурация xHTTP: Режим stream-up / packet-up (HTTP/1.1 Chunked Proxy)..."
     XHTTP_LOCATION_BLOCK="
@@ -778,13 +868,12 @@ systemctl unmask nginx || true
 systemctl enable nginx || true
 systemctl restart nginx
 
-# Подготовка списка команд UFW
+# Подготовка вывода UFW
 UFW_REALITY_DENY=""
-for port in "${REALITY_PORTS[@]}"; do
+for port in "${REALITY_PORTS_LIST[@]}"; do
     UFW_REALITY_DENY="${UFW_REALITY_DENY} && ufw deny ${port}/tcp"
 done
 
-# Динамическое формирование блока вывода всех сертификатов
 SSL_DOMAINS_OUTPUT=""
 for dom in "${ALL_DOMAINS[@]}"; do
     if [ -f "/etc/letsencrypt/live/$dom/fullchain.pem" ]; then
@@ -794,13 +883,57 @@ for dom in "${ALL_DOMAINS[@]}"; do
     fi
 done
 
+REALITY_INBOUNDS_INSTRUCTIONS=""
+if [ "$REALITY_MODE_CHOICE" = "1" ]; then
+    for port in "${REALITY_PORTS_LIST[@]}"; do
+        port_doms=()
+        for s_dom in "${STEAL_DOMAINS[@]}"; do
+            if [ "${DOMAIN_TO_PORT[$s_dom]:-}" = "$port" ]; then
+                port_doms+=("$s_dom")
+            fi
+        done
+
+        doms_joined=$(IFS=,; echo "${port_doms[*]}")
+        doms_formatted=$(echo "$doms_joined" | sed 's/,/\n            /g')
+
+        REALITY_INBOUNDS_INSTRUCTIONS+="
+  👉 ${YELLOW}Инбаунд для Порта ${GREEN}${port}${YELLOW} (Steal-Oneself Домены: ${CYAN}${port_doms[*]}${YELLOW}):${NC}
+     • ${YELLOW}Протокол:${NC} ${GREEN}vless${NC} | ${YELLOW}Транспорт:${NC} ${GREEN}tcp${NC}
+     • ${YELLOW}Порт:${NC} ${GREEN}${port}${NC} | ${YELLOW}Listen IP:${NC} ${GREEN}127.0.0.1${NC}
+     • ${YELLOW}Accept Proxy Protocol (xver):${NC} ${GREEN}1 (Включить)${NC} ⚠️ ОБЯЗАТЕЛЬНО!
+     • ${YELLOW}Flow:${NC} ${GREEN}xtls-rprx-vision${NC} (или оставить пустым)
+     • ${YELLOW}Безопасность:${NC} ${GREEN}reality${NC}
+     • ${YELLOW}Dest (Назначение):${NC} ${GREEN}127.0.0.1:9443${NC} ⚠️ СТРОГО ЭТОТ ПОРТ (Порт Nginx HTTPS)
+     • ${YELLOW}Proxy Protocol для Dest (xver):${NC} ${GREEN}1 (Включить)${NC} ⚠️ ОБЯЗАТЕЛЬНО!
+     • ${YELLOW}Server Names (SNI):${NC} 
+            ${CYAN}${doms_formatted}${NC}
+     • ${YELLOW}Keys / Short ID:${NC} Нажмите ${GREEN}Get New Keys${NC} в панели
+"
+    done
+else
+    REALITY_INBOUNDS_INSTRUCTIONS="
+  👉 ${YELLOW}Инбаунд VLESS REALITY (Классический внешний камуфляж):${NC}
+     Создайте Inbound в 3X-UI для любого из портов REALITY [ ${REALITY_PORTS_LIST[*]} ]:
+     • ${YELLOW}Протокол:${NC} ${GREEN}vless${NC} | ${YELLOW}Транспорт:${NC} ${GREEN}tcp${NC}
+     • ${YELLOW}Порт:${NC} ${GREEN}<один из портов: ${REALITY_PORTS_LIST[*]}>${NC} | ${YELLOW}Listen IP:${NC} ${GREEN}127.0.0.1${NC}
+     • ${YELLOW}Accept Proxy Protocol (xver):${NC} ${GREEN}1 (Включить)${NC} ⚠️ ОБЯЗАТЕЛЬНО!
+     • ${YELLOW}Flow:${NC} ${GREEN}xtls-rprx-vision${NC}
+     • ${YELLOW}Безопасность:${NC} ${GREEN}reality${NC}
+     • ${YELLOW}Dest (Target):${NC} ${CYAN}swdist.microsoft.com:443${NC} (или www.apple.com:443)
+     • ${YELLOW}Proxy Protocol для Dest:${NC} ${RED}0 (Выключить)${NC}
+     • ${YELLOW}Server Names (SNI):${NC} ${CYAN}swdist.microsoft.com${NC}
+     • ${YELLOW}Keys / Short ID:${NC} Нажмите ${GREEN}Get New Keys${NC} в панели
+"
+fi
+
 # ═════════════════════════════════════════════════════════════
 #  ФИНАЛЬНЫЙ ВЫВОД И ИНСТРУКЦИЯ
 # ═════════════════════════════════════════════════════════════
 echo
 echo -e "${GREEN}=========================================================${NC}"
-echo -e "   ГИБРИДНЫЙ СЦЕНАРИЙ УСПЕШНО НАСТРОЕН (v3.1.1 MULTI-CERT)!"
+echo -e "   СЦЕНАРИЙ УСПЕШНО НАСТРОЕН (v3.3.0 UNIVERSAL DUAL-MODE)!"
 echo -e "${GREEN}=========================================================${NC}"
+echo -e "  Режим REALITY:          ${YELLOW}$([ "$REALITY_MODE_CHOICE" = "1" ] && echo "Steal-Oneself (Собственные домены)" || echo "Classic External (Внешние домены)")${NC}"
 echo -e "  Главная Маска-Облако:   ${CYAN}https://${PRIMARY_DOMAIN}${NC}"
 echo -e "  Вход в панель 3X-UI:     ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 echo -e "  Базовый путь подписок:  ${GREEN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
@@ -815,32 +948,23 @@ echo -e "  ${CYAN}ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && 
 echo -e "  ${RED}ufw deny $PANEL_PORT/tcp && ufw deny $SUB_PORT/tcp && ufw deny $XHTTP_PORT/tcp${UFW_REALITY_DENY}${NC}"
 echo
 
-echo -e "${YELLOW}📌 ШАГ 2: Инбаунд VLESS REALITY + TCP + VISION (Классический):${NC}"
-echo -e "Создайте Inbound в 3X-UI для любого из портов REALITY [ ${REALITY_PORTS[*]} ]:"
-echo -e "  • ${YELLOW}Протокол:${NC} ${GREEN}vless${NC} | ${YELLOW}Транспорт:${NC} ${GREEN}tcp${NC}"
-echo -e "  • ${YELLOW}Порт:${NC} ${GREEN}<один из портов: ${REALITY_PORTS[*]}>${NC} | ${YELLOW}Listen IP:${NC} ${GREEN}127.0.0.1${NC}"
-echo -e "  • ${YELLOW}Accept Proxy Protocol (xver):${NC} ${GREEN}1 (Включить)${NC} ⚠️ ОБЯЗАТЕЛЬНО!"
-echo -e "  • ${YELLOW}Flow:${NC} ${GREEN}xtls-rprx-vision${NC}"
-echo -e "  • ${YELLOW}Безопасность:${NC} ${GREEN}reality${NC}"
-echo -e "  • ${YELLOW}Dest (Target):${NC} ${CYAN}swdist.microsoft.com:443${NC} (или www.apple.com:443)"
-echo -e "  • ${YELLOW}Proxy Protocol для Dest:${NC} ${RED}0 (Выключить)${NC}"
-echo -e "  • ${YELLOW}Server Names (SNI):${NC} ${CYAN}swdist.microsoft.com${NC}"
-echo -e "  • ${YELLOW}Keys / Short ID:${NC} Нажмите ${GREEN}Get New Keys${NC} в панели"
-echo
+echo -e "${YELLOW}📌 ШАГ 2: Настройка Инбаундов VLESS REALITY:${NC}"
+echo -e "Создайте Inbound(ы) в 3X-UI строго со следующими параметрами:"
+echo -e "$REALITY_INBOUNDS_INSTRUCTIONS"
 
-echo -e "${YELLOW}📌 ШАГ 3: Инбаунд VLESS xHTTP (Защищен SSL Nginx + grpc_pass):${NC}"
-echo -e "Создайте Inbound в 3X-UI для xHTTP (используется сертификат любого вашего домена):"
+echo -e "${YELLOW}📌 ШАГ 3: Инбаунд VLESS xHTTP (Защищен SSL Nginx):${NC}"
+echo -e "Создайте Inbound в 3X-UI для xHTTP:"
 echo -e "  • ${YELLOW}Протокол:${NC} ${GREEN}vless${NC} | ${YELLOW}Транспорт (Transmission):${NC} ${GREEN}xhttp${NC}"
 echo -e "  • ${YELLOW}Порт:${NC} ${GREEN}$XHTTP_PORT${NC} | ${YELLOW}Listen IP:${NC} ${GREEN}127.0.0.1${NC}"
 echo -e "  • ${YELLOW}Path (Путь):${NC} ${CYAN}$XHTTP_PATH${NC} | ${YELLOW}Mode:${NC} ${GREEN}$XHTTP_UI_MODE_TEXT${NC}"
 echo -e "  • ${YELLOW}Безопасность (Security):${NC} ${RED}none${NC} (SSL терминирует Nginx на порту 9443)"
 echo -e "  • ${YELLOW}Accept Proxy Protocol:${NC} ${RED}0 (Выключить)${NC} ⚠️ ОБЯЗАТЕЛЬНО!"
-echo -e "  • ${YELLOW}Decryption (в пользователе):${NC} Ключ ${GREEN}vlessenc${NC} (Сгенерируйте в панели командой: ${CYAN}xray vlessenc${NC})"
-echo -e "  • ${YELLOW}Flow (в пользователе):${NC} ${GREEN}xtls-rprx-vision${NC} *(С vlessenc в Xray 26+ это работает!)*"
+echo -e "  • ${YELLOW}Decryption (в пользователе):${NC} Ключ ${GREEN}vlessenc${NC} (Сгенерируйте командой: ${CYAN}xray vlessenc${NC})"
+echo -e "  • ${YELLOW}Flow (в пользователе):${NC} ${GREEN}xtls-rprx-vision${NC}"
 echo
 
 echo -e "${YELLOW}📌 ШАГ 4: Инбаунды с прямым SSL (Hysteria 2, Trojan, VLESS-TLS):${NC}"
-echo -e "Для Hysteria 2 (UDP) или классического VLESS/Trojan SSL используйте пути к ЛЮБОМУ из выпущенных сертификатов выше:"
+echo -e "Для Hysteria 2 (UDP) или классического VLESS/Trojan SSL используйте пути к ЛЮБОМУ из выпущенных сертификатов:"
 echo -e "  • ${YELLOW}Протокол:${NC} ${GREEN}hysteria2${NC} | ${YELLOW}Транспорт:${NC} ${GREEN}udp${NC}"
 echo -e "  • ${YELLOW}Порт:${NC} ${GREEN}443${NC} (или 8443) | ${YELLOW}Listen IP:${NC} ${GREEN}0.0.0.0${NC}"
 echo -e "  • ${YELLOW}Путь к сертификату:${NC} ${CYAN}/etc/letsencrypt/live/<выбранный_домен>/fullchain.pem${NC}"
