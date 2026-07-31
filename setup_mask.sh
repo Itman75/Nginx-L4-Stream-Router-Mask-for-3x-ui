@@ -184,7 +184,7 @@ if [[ "${ENABLE_CLASSIC_INPUT,,}" == "y" ]]; then
             fi
         fi
 
-        echo -e "${CYAN}  Введите внешние SNI для порта $PORT_VAL (например, swdist.microsoft.com или stream.is74.ru).${NC}"
+        echo -e "${CYAN}  Введите внешние SNI для порта $PORT_VAL (например, swdist.microsoft.com или др.).${NC}"
         echo -e "${CYAN}  Для завершения ввода SNI для этого порта нажмите ENTER на пустой строке.${NC}"
 
         added_sni_count=0
