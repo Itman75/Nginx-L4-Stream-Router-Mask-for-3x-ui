@@ -135,8 +135,7 @@ chmod +x setup_mask.sh
       "xver": 1,
       "dest": "127.0.0.1:9443",
       "serverNames": [
-        "host74.ru",
-        "cosmocloud.host74.ru"
+        "your.alternat.domain"
       ],
       "privateKey": "ВАШ_PRIVATE_KEY",
       "shortIds": [
