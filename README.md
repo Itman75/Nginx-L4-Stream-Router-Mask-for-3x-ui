@@ -398,21 +398,67 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 45443
   },
   "sniffing": {
     "enabled": true,
-    "destOverride": ["http", "tls", "quic"]
+    "destOverride": [
+      "http",
+      "tls",
+      "quic"
+    ]
   },
   "streamSettings": {
     "network": "xhttp",
     "xhttpSettings": {
       "path": "/xhttp-stream",
+      "host": "www.host74.ru",
       "mode": "stream-one",
       "xPaddingBytes": "100-1000",
       "xPaddingObfsMode": true,
+      "xPaddingKey": "",
+      "xPaddingHeader": "",
+      "xPaddingPlacement": "",
+      "xPaddingMethod": "",
+      "sessionIDPlacement": "",
+      "sessionIDKey": "",
+      "sessionIDTable": "",
+      "sessionIDLength": "",
+      "seqPlacement": "",
+      "seqKey": "",
+      "uplinkDataPlacement": "",
+      "uplinkDataKey": "",
+      "scMaxEachPostBytes": "",
+      "noSSEHeader": false,
+      "scMaxBufferedPosts": 30,
+      "scStreamUpServerSecs": "20-80",
+      "serverMaxHeaderBytes": 0,
+      "uplinkHTTPMethod": "",
+      "headers": {},
+      "scMinPostsIntervalMs": "",
+      "uplinkChunkSize": 0,
+      "noGRPCHeader": false,
       "xmux": {
-        "maxConcurrency": 16,
-        "cMaxReuseTimes": 256
-      }
+        "maxConcurrency": "16",
+        "maxConnections": 0,
+        "cMaxReuseTimes": "256",
+        "hMaxRequestTimes": "600-900",
+        "hMaxReusableSecs": "1800-3000",
+        "hKeepAlivePeriod": 0
+      },
+      "enableXmux": true
     },
-    "security": "none"
+    "security": "none",
+    "finalmask": {
+      "quicParams": {
+        "congestion": "bbr",
+        "debug": false,
+        "maxIdleTimeout": 30,
+        "keepAlivePeriod": 10,
+        "disablePathMTUDiscovery": false,
+        "maxIncomingStreams": 1024,
+        "initStreamReceiveWindow": 8388608,
+        "maxStreamReceiveWindow": 8388608,
+        "initConnectionReceiveWindow": 20971520,
+        "maxConnectionReceiveWindow": 20971520
+      }
+    }
   }
 }
 ```
@@ -437,35 +483,82 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 45443
   },
   "sniffing": {
     "enabled": true,
-    "destOverride": ["http", "tls", "quic"]
+    "destOverride": [
+      "http",
+      "tls",
+      "quic"
+    ]
   },
   "streamSettings": {
     "network": "hysteria",
     "hysteriaSettings": {
       "version": 2,
       "udpIdleTimeout": 60,
-      "masquerade": "http://127.0.0.1:80"
+      "masquerade": {
+        "type": "proxy",
+        "dir": "",
+        "url": "http://127.0.0.1:80",
+        "rewriteHost": false,
+        "insecure": false,
+        "content": "",
+        "headers": {},
+        "statusCode": 0
+      }
     },
     "security": "tls",
     "tlsSettings": {
-      "serverName": "your-primary-domain.com",
+      "serverName": "your.primary.domain",
       "minVersion": "1.3",
       "maxVersion": "1.3",
+      "cipherSuites": "",
+      "rejectUnknownSni": false,
+      "disableSystemRoot": false,
+      "enableSessionResumption": false,
       "certificates": [
         {
-          "certificateFile": "/etc/letsencrypt/live/your-primary-domain.com/fullchain.pem",
-          "keyFile": "/etc/letsencrypt/live/your-primary-domain.com/privkey.pem",
+          "certificateFile": "/etc/letsencrypt/live/your.primary.domain/fullchain.pem",
+          "keyFile": "/etc/letsencrypt/live/your.primary.domain/privkey.pem",
+          "ocspStapling": 3600,
+          "oneTimeLoading": false,
+          "usage": "encipherment",
+          "buildChain": false,
           "useFile": true
         }
       ],
-      "alpn": ["h3"]
+      "alpn": [
+        "h3"
+      ],
+      "echServerKeys": "",
+      "settings": {
+        "echConfigList": "",
+        "pinnedPeerCertSha256": [],
+        "verifyPeerCertByName": ""
+      }
+    },
+    "externalProxy": [
+      {
+        "forceTls": "same",
+        "dest": "your.primary.domain",
+        "port": 443,
+        "remark": "",
+        "sni": "",
+        "alpn": [],
+        "pinnedPeerCertSha256": []
+      }
+    ],
+    "finalmask": {
+      "quicParams": {
+        "congestion": "bbr",
+        "debug": false,
+        "maxIdleTimeout": 30,
+        "keepAlivePeriod": 10,
+        "disablePathMTUDiscovery": false,
+        "maxIncomingStreams": 1024,
+        "initStreamReceiveWindow": 8388608,
+        "maxStreamReceiveWindow": 8388608,
+        "initConnectionReceiveWindow": 20971520,
+        "maxConnectionReceiveWindow": 20971520
+      }
     }
   }
 }
-```
-</details>
-
----
-
-*Программное обеспечение предоставляется по принципу «как есть» (As Is) исключительно в ознакомительных и образовательных целях.*
-```
