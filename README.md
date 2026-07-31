@@ -53,7 +53,7 @@ graph TD
 
     NginxStream -->|SNI: Главный домен или Пустой SNI| NginxHTTP[Nginx HTTPS :9443 с PROXY protocol]
     NginxStream -->|SNI: Steal-Oneself Домен| XrayStealREALITY[Xray REALITY :45443]
-    NginxStream -->|SNI: Внешний SNI stream.is74.ru| XrayClassicREALITY[Xray REALITY :47443]
+    NginxStream -->|SNI: Внешний SNI swdist.microsoft.com| XrayClassicREALITY[Xray REALITY :47443]
 
     XrayStealREALITY -->|Обычный браузер / Non-VLESS| NginxHTTP
     
@@ -184,9 +184,9 @@ chmod +x setup_mask.sh
     "realitySettings": {
       "show": false,
       "xver": 0,
-      "dest": "stream.is74.ru:443",
+      "dest": "swdist.microsoft.com:443",
       "serverNames": [
-        "stream.is74.ru"
+        "swdist.microsoft.com"
       ],
       "privateKey": "ВАШ_PRIVATE_KEY",
       "shortIds": [
