@@ -147,7 +147,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 45443
 
 | Авторизация по прямому IP | Изменение URI-пути панели | Настройка подписок без SSL | Вход в панель по защищенному доменному |
 | :---: | :---: | :---: | :---: |
-| ![PRE_X-UI](assets/PRE_X-UI.png) | ![PRE_X-UI_3](assets/PRE_X-UI_3.png) | ![PRE_X-UI_8](assets/PRE_X-UI_8.png) | ![PRE_X-UI_15](assets/PRE_X-UI_15.png) |
+| ![PRE_X-UI](assets/PRE_X-UI.png) | ![PRE_X-UI_4](assets/PRE_X-UI_4.png) | ![PRE_X-UI_12](assets/PRE_X-UI_12.png) | ![PRE_X-UI_15](assets/PRE_X-UI_15.png) |
 
 1. Откройте панель по временному прямому IP: `http://YOUR_SERVER_IP:10443/ВАШ_ВРЕМЕННЫЙ_ПУТЬ/panel`
 2. Перейдите в **Настройки панели** -> **Панель**:
