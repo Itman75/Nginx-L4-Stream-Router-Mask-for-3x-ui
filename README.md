@@ -408,7 +408,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 45443
     "network": "xhttp",
     "xhttpSettings": {
       "path": "/xhttp-stream",
-      "host": "www.host74.ru",
+      "host": "your.primary.domain",
       "mode": "stream-one",
       "xPaddingBytes": "100-1000",
       "xPaddingObfsMode": true,
