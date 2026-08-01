@@ -262,7 +262,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 45443
 
 ## 🌐 Проверка работы камуфляжного веб-сайта (Decoy Front)
 
-При обычном заходе браузером на ваш главный домен `https://your-primary-domain.com` отдается интерактивный сайт-маска CosmosCloud:
+При обычном входе браузером на ваш главный домен `https://your-primary-domain.com` отдается интерактивный сайт-маска CosmosCloud:
 
 ![MASK_Site](assets/MASK_Site.png)
 
