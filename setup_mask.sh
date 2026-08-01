@@ -241,7 +241,7 @@ while true; do
 done
 
 log "Итоговый список собственных доменов для выпуска SSL: ${ALL_DOMAINS[*]}"
-log "Итоговый список всех портов REALITY: ${ALL_REALITY_PORTS[*]}"
+log "Итоговый список всех портов REALITY: ${ALL_REALITY_PORTS[*]:-none}"
 
 echo
 echo -e "${YELLOW}Шаг 2: Привязка технических портов 3X-UI и xHTTP${NC}"
@@ -310,7 +310,7 @@ if [ "$SSL_ENGINE_CHOICE" = "2" ]; then
         fi
         read -rp "Введите ваш Cloudflare Account ID (опционально, нажмите Enter для пропуска): " CF_Account_ID
         export CF_Token
-        [ -n "$CF_Account_ID" ] && export CF_Account_ID
+        [ -n "${CF_Account_ID:-}" ] && export CF_Account_ID
     else
         read -rp "Введите ваш Cloudflare Email: " CF_Email
         if [ -z "$CF_Email" ]; then
@@ -476,9 +476,11 @@ EOF
     cat << 'EOF' > /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
 #!/bin/bash
 systemctl reload nginx
+chmod 755 /etc/letsencrypt /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
 chmod 755 /etc/letsencrypt/archive/* 2>/dev/null || true
 chmod 755 /etc/letsencrypt/live/* 2>/dev/null || true
 chmod 644 /etc/letsencrypt/archive/*/* 2>/dev/null || true
+chmod 644 /etc/letsencrypt/live/*/* 2>/dev/null || true
 EOF
     chmod +x /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
 
@@ -493,10 +495,9 @@ else
         ACME_EMAIL="admin@$PRIMARY_DOMAIN"
     fi
     
-    # Стандартная установка acme.sh в домашний каталог пользователя root
     curl -s https://get.acme.sh | sh -s email="$ACME_EMAIL"
     
-    _ACME="/root/.acme.sh/acme.sh"
+    _ACME="${HOME:-/root}/.acme.sh/acme.sh"
     chmod +x "$_ACME"
 
     log "Регистрация аккаунта в Let's Encrypt для acme.sh..."
@@ -515,18 +516,15 @@ else
 
     for dom in "${ALL_DOMAINS[@]}"; do
         log "Генерация SSL-сертификата для домена: $dom через acme.sh (Cloudflare DNS)..."
-        # Нам не нужно заранее создавать эту директорию через mkdir -p, чтобы избежать ложных срабатываний
-        # при проверке Nginx, но для acme.sh мы подготовим окружение.
         
         if "$_ACME" --issue --dns dns_cf -d "$dom" --server letsencrypt --force; then
             ok "Сертификат для $dom успешно выпущен Let's Encrypt!"
             mkdir -p "/etc/letsencrypt/live/$dom"
             
-            # Инсталляция сертификата в целевую папку и настройка автоматического релоада
             if "$_ACME" --install-cert -d "$dom" \
                 --key-file       "/etc/letsencrypt/live/$dom/privkey.pem" \
                 --fullchain-file "/etc/letsencrypt/live/$dom/fullchain.pem" \
-                --reloadcmd     "chmod 755 /etc/letsencrypt/live/* 2>/dev/null || true; chmod 644 /etc/letsencrypt/live/*/* 2>/dev/null || true; systemctl reload nginx"; then
+                --reloadcmd     "chmod 755 /etc/letsencrypt /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true; chmod 755 /etc/letsencrypt/live/* 2>/dev/null || true; chmod 644 /etc/letsencrypt/live/*/* 2>/dev/null || true; systemctl reload nginx"; then
                 ok "Сертификат для $dom успешно установлен и привязан к Nginx!"
             else
                 die "Критическая ошибка: Не удалось скопировать сертификат $dom в целевую директорию."
@@ -541,11 +539,15 @@ else
 fi
 
 # Универсальная коррекция прав для SSL-папок
-chmod 755 /etc/letsencrypt/live 2>/dev/null || true
+chmod 755 /etc/letsencrypt /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
 for dom in "${ALL_DOMAINS[@]}"; do
     if [ -d "/etc/letsencrypt/live/$dom" ]; then
         chmod 755 "/etc/letsencrypt/live/$dom" 2>/dev/null || true
         chmod 644 /etc/letsencrypt/live/"$dom"/* 2>/dev/null || true
+    fi
+    if [ -d "/etc/letsencrypt/archive/$dom" ]; then
+        chmod 755 "/etc/letsencrypt/archive/$dom" 2>/dev/null || true
+        chmod 644 /etc/letsencrypt/archive/"$dom"/* 2>/dev/null || true
     fi
 done
 
@@ -736,8 +738,8 @@ if [ "$CLASSIC_ENABLED" -eq 1 ]; then
     done
 fi
 
-# 3. Создание индивидуальных Upstream-блоков для КАЖДОГО порта REALITY (без балансировки!)
-for port in "${ALL_REALITY_PORTS[@]}"; do
+# 3. Создание индивидуальных Upstream-блоков для КАЖДОГО порта REALITY
+for port in "${ALL_REALITY_PORTS[@]:-}"; do
     REALITY_UPSTREAMS+="
 upstream reality_backend_${port} {
     server 127.0.0.1:${port};
@@ -781,14 +783,13 @@ COSMOS_HEADER=""
 COSMOS_MOCK_API=""
 if [ "$DECOY_TEMPLATE" = "1" ]; then
   COSMOS_HEADER='add_header X-Cosmoscloud-Version "0.22.18" always;'
-  # Служебные переменные Nginx экранированы строго с помощью обратного слэша для предотвращения синтаксических ошибок в Bash
   COSMOS_MOCK_API='
     location ~ ^/(api/v1/status|status)$ {
         default_type application/json;
         return 200 '\''{"installed":true,"maintenance":false,"version":"0.22.18","productname":"CosmosCloud"}'\'';
     }
     location = /api/v1/auth/login {
-        if (\$request_method = POST) {
+        if ($request_method = POST) {
             add_header Content-Type "application/json" always;
             return 401 '\''{"error":"Wrong nickname or password. Try again or try resetting your password","code":401}'\'';
         }
@@ -796,7 +797,6 @@ if [ "$DECOY_TEMPLATE" = "1" ]; then
     }'
 fi
 
-# Тройное экранирование служебных переменных Nginx (например, \\\$http_host) для предотвращения их подмены в Bash
 if [ "$XHTTP_MODE_CHOICE" = "2" ]; then
     log "Конфигурация xHTTP: Режим stream-up / packet-up (HTTP/1.1 Chunked Proxy)..."
     XHTTP_LOCATION_BLOCK="
@@ -809,10 +809,10 @@ if [ "$XHTTP_MODE_CHOICE" = "2" ]; then
         proxy_buffering off;
         proxy_request_buffering off;
         proxy_http_version 1.1;
-        proxy_set_header Host \\\$http_host;
-        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-        proxy_set_header Upgrade \\\$http_upgrade;
-        proxy_set_header Connection \\\$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
         proxy_pass http://127.0.0.1:$XHTTP_PORT;
     }"
     XHTTP_UI_MODE_TEXT="stream-up (или packet-up / auto)"
@@ -826,8 +826,8 @@ else
         grpc_read_timeout 1h;
         grpc_send_timeout 1h;
         grpc_buffer_size 32k;
-        grpc_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-        grpc_set_header Host \\\$http_host;
+        grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        grpc_set_header Host \$http_host;
         grpc_pass grpc://127.0.0.1:$XHTTP_PORT;
     }"
     XHTTP_UI_MODE_TEXT="stream-one"
@@ -836,7 +836,6 @@ fi
 EXTRA_HTTPS_SERVERS=""
 for ((i=1; i<${#ALL_DOMAINS[@]}; i++)); do
     ext_dom="${ALL_DOMAINS[$i]}"
-    # Проверка изменена с -d на -f fullchain.pem во избежание генерации серверов Nginx с битыми файлами SSL
     if [ -f "/etc/letsencrypt/live/$ext_dom/fullchain.pem" ]; then
         EXTRA_HTTPS_SERVERS+="
 server {
@@ -866,19 +865,19 @@ server {
 
     location ^~ $PANEL_PATH {
         proxy_pass http://127.0.0.1:$PANEL_PORT;
-        proxy_set_header Host \\\$http_host;
-        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \\\$scheme;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \\\$http_upgrade;
-        proxy_set_header Connection \\\$connection_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
     }
 
     location ^~ $SUB_PATH {
         proxy_pass http://127.0.0.1:$SUB_PORT;
-        proxy_set_header Host \\\$http_host;
-        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \\\$scheme;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     $COSMOS_MOCK_API
@@ -1007,7 +1006,7 @@ systemctl restart nginx
 
 # Подготовка вывода UFW
 UFW_REALITY_DENY=""
-for port in "${ALL_REALITY_PORTS[@]}"; do
+for port in "${ALL_REALITY_PORTS[@]:-}"; do
     UFW_REALITY_DENY="${UFW_REALITY_DENY} && ufw deny ${port}/tcp"
 done
 
@@ -1026,7 +1025,7 @@ if [ "$STEAL_ENABLED" -eq 1 ]; then
   * Сценарий 1: Steal-Oneself (Кража у самого себя):\n"
     for port in "${STEAL_PORTS_LIST[@]}"; do
         port_doms=()
-        for s_dom in "${STEAL_DOMAINS[@]}"; do
+        for s_dom in "${STEAL_DOMAINS[@]:-}"; do
             if [ "${DOMAIN_TO_PORT[$s_dom]:-}" = "$port" ]; then
                 port_doms+=("$s_dom")
             fi
