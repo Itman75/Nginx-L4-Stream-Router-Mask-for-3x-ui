@@ -7,6 +7,7 @@
 #   2) Classic External REALITY (Dedicated External SNI per Port) [Optional]
 # Supported external ports: 443 (TCP/UDP) and 8443 (TCP/UDP) simultaneously
 # Fully compatible with Ubuntu 20.04+ and Debian 11+
+# Optional SSL Engine: Classic Certbot (HTTP-01) OR acme.sh + Cloudflare (DNS-01)
 #
 
 set -euo pipefail
@@ -26,7 +27,7 @@ die()  { echo -e "${RED}[X] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=========================================================${NC}"
-echo -e "${GREEN}  Nginx L4 Stream Router & Mask v4.1.0 (MULTI-PORT ENGINE)${NC}"
+echo -e "${GREEN}  Nginx L4 Stream Router & Mask v4.2.0 (HYBRID SSL ENGINE)${NC}"
 echo -e "${CYAN}=========================================================${NC}"
 
 # ─────────────────────── Предусловия ─────────────────────────
@@ -221,7 +222,7 @@ if [ "$STEAL_ENABLED" -eq 0 ] && [ "$CLASSIC_ENABLED" -eq 0 ]; then
 fi
 
 echo
-echo -e "${CYAN}Шаг 1.4: Дополнительные собственные SSL-домены (для Hysteria 2 / Trojan / Direct TLS)${NC}"
+echo -e "${YELLOW}Шаг 1.4: Дополнительные собственные SSL-домены (для Hysteria 2 / Trojan / Direct TLS)${NC}"
 while true; do
     read -rp "Добавить еще один собственный домен для выпуска SSL? (Введите домен или нажмите Enter): " EXTRA_DOM
     if [ -z "$EXTRA_DOM" ]; then
@@ -286,8 +287,43 @@ echo -e " 2) Стандартная заглушка Nginx (Классическ
 prompt_default "Выберите вариант (1 или 2)" "1" DECOY_TEMPLATE
 
 echo
-echo -e "${YELLOW}Шаг 5: Служебные параметры Certbot${NC}"
-prompt_default "Email для уведомлений Let's Encrypt (Оставьте пустым для отмены)" "" LE_EMAIL
+echo -e "${YELLOW}Шаг 5: Выбор архитектуры выпуска SSL-сертификатов${NC}"
+echo -e " 1) ${GREEN}Оригинальный Certbot (HTTP-01)${NC} - Требует открытый порт 80, домены должны строго смотреть на IP сервера."
+echo -e " 2) ${GREEN}Интеграция acme.sh + Cloudflare (DNS-01)${NC} - Обход проверок порта 80, выпуск по API."
+prompt_default "Выберите вариант (1 или 2)" "1" SSL_ENGINE_CHOICE
+
+prompt_default "Email для уведомлений Let's Encrypt (Оставьте пустым для Certbot без почты)" "" LE_EMAIL
+
+CF_AUTH_METHOD="1"
+if [ "$SSL_ENGINE_CHOICE" = "2" ]; then
+    echo
+    echo -e "${YELLOW}Шаг 5.1: Параметры Cloudflare API для DNS-проверки (acme.sh)${NC}"
+    echo -e " Выберите способ аутентификации в Cloudflare:"
+    echo -e "   1) ${GREEN}API Token${NC} (Рекомендуется: права Zone.DNS:Edit, Zone.Zone:Read)"
+    echo -e "   2) ${GREEN}Global API Key${NC} (Старый метод: полный доступ к аккаунту)"
+    prompt_default "Выберите метод (1 или 2)" "1" CF_AUTH_METHOD
+
+    if [ "$CF_AUTH_METHOD" = "1" ]; then
+        read -rp "Введите ваш Cloudflare API Token: " CF_Token
+        if [ -z "$CF_Token" ]; then
+            die "Критическая ошибка: API Token не может быть пустым."
+        fi
+        read -rp "Введите ваш Cloudflare Account ID (опционально, нажмите Enter для пропуска): " CF_Account_ID
+        export CF_Token
+        [ -n "$CF_Account_ID" ] && export CF_Account_ID
+    else
+        read -rp "Введите ваш Cloudflare Email: " CF_Email
+        if [ -z "$CF_Email" ]; then
+            die "Критическая ошибка: Cloudflare Email не может быть пустым."
+        fi
+        read -rp "Введите ваш Cloudflare Global API Key: " CF_Key
+        if [ -z "$CF_Key" ]; then
+            die "Критическая ошибка: Global API Key не может быть пустым."
+        fi
+        export CF_Email
+        export CF_Key
+    fi
+fi
 
 # Проверка DNS для ВСЕХ собственных доменов
 log "Сканирование DNS-записей для всех указанных собственных доменов..."
@@ -319,7 +355,7 @@ fi
 log "Интеграция официального репозитория Nginx.org..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install gnupg ca-certificates lsb-release openssl snapd -y -q
+apt-get install gnupg ca-certificates lsb-release openssl -y -q
 
 mkdir -p /usr/share/keyrings
 curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg --yes
@@ -364,7 +400,7 @@ rm -f "/etc/nginx/stream.d/$PRIMARY_DOMAIN.conf"
 
 NGINX_80_SERVER_NAMES="${ALL_DOMAINS[*]}"
 
-log "Конфигурация HTTP-порта 80 для ACME-проверок всех собственных доменов..."
+log "Конфигурация HTTP-порта 80 для ACME-проверок и перенаправлений..."
 cat << EOF > "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
 server {
     listen 80;
@@ -382,65 +418,132 @@ nginx -t || die "Ошибка валидации базовых конфигов
 systemctl restart nginx || systemctl start nginx
 
 # ═════════════════════════════════════════════════════════════
-#  УСТАНОВКА CERTBOT ЧЕРЕЗ SNAP
+#  ОТВЕТВЛЕНИЕ SSL ENGINE (CERTBOT ИЛИ ACME.SH)
 # ═════════════════════════════════════════════════════════════
-log "Инициализация подсистемы Snapd..."
-apt-get purge -y certbot || true
-systemctl start snapd.socket || true
-systemctl enable snapd.socket || true
+if [ "$SSL_ENGINE_CHOICE" = "1" ]; then
+    # === МЕТОД 1: CERTBOT ЧЕРЕЗ SNAP ===
+    log "Выбран метод: Классический Certbot через Snap."
+    log "Инициализация подсистемы Snapd..."
+    apt-get install snapd -y -q
+    apt-get purge -y certbot || true
+    systemctl start snapd.socket || true
+    systemctl enable snapd.socket || true
 
-for i in {1..15}; do
-    if snap version >/dev/null 2>&1; then
-        log "Демон snapd успешно активирован."
-        break
-    fi
-    sleep 2
-done
+    for i in {1..15}; do
+        if snap version >/dev/null 2>&1; then
+            log "Демон snapd успешно активирован."
+            break
+        fi
+        sleep 2
+    done
 
-log "Установка Certbot..."
-snap install core || true
-snap refresh core || true
-snap install --classic certbot
-ln -sf /snap/bin/certbot /usr/bin/certbot
+    log "Установка Certbot..."
+    snap install core || true
+    snap refresh core || true
+    snap install --classic certbot
+    ln -sf /snap/bin/certbot /usr/bin/certbot
 
-# ═════════════════════════════════════════════════════════════
-#  НАСТРОЙКА КЛИЕНТА CERTBOT И ВЫПУСК СЕРТИФИКАТОВ
-# ═════════════════════════════════════════════════════════════
-mkdir -p /etc/letsencrypt
-if [ -n "$LE_EMAIL" ]; then
-    cat << EOF > /etc/letsencrypt/cli.ini
+    # Настройка клиента Certbot и выпуск
+    mkdir -p /etc/letsencrypt
+    if [ -n "$LE_EMAIL" ]; then
+        cat << EOF > /etc/letsencrypt/cli.ini
 email = $LE_EMAIL
 agree-tos = true
 non-interactive = true
 EOF
-else
-    cat << EOF > /etc/letsencrypt/cli.ini
+    else
+        cat << EOF > /etc/letsencrypt/cli.ini
 register-unsafely-without-email = true
 agree-tos = true
 non-interactive = true
 EOF
+    fi
+
+    for dom in "${ALL_DOMAINS[@]}"; do
+        log "Генерация SSL-сертификата для домена: $dom..."
+        if certbot certonly --webroot -w "$WEBROOT" --expand -d "$dom"; then
+            ok "Сертификат для $dom успешно выпущен!"
+        else
+            warn "Не удалось выпустить сертификат для $dom."
+            if [ "$dom" = "$PRIMARY_DOMAIN" ]; then
+                die "Критическая ошибка: Выпуск сертификата для Главного домена $PRIMARY_DOMAIN провален."
+            fi
+        fi
+    done
+
+    # Создание хука перезагрузки для Certbot
+    mkdir -p /etc/letsencrypt/renewal-hooks/deploy/
+    cat << 'EOF' > /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
+#!/bin/bash
+systemctl reload nginx
+chmod 755 /etc/letsencrypt/archive/* 2>/dev/null || true
+chmod 755 /etc/letsencrypt/live/* 2>/dev/null || true
+chmod 644 /etc/letsencrypt/archive/*/* 2>/dev/null || true
+EOF
+    chmod +x /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
+
+else
+    # === МЕТОД 2: ACME.SH ЧЕРЕЗ CLOUDFLARE DNS ===
+    log "Выбран метод: acme.sh с Cloudflare API (DNS-01)."
+    log "Установка acme.sh и зависимостей..."
+    apt-get install -y cron socat -q
+    
+    ACME_EMAIL="${LE_EMAIL:-}"
+    if [ -z "$ACME_EMAIL" ]; then
+        ACME_EMAIL="admin@$PRIMARY_DOMAIN"
+    fi
+    
+    export LE_WORKING_DIR="/root/.acme.sh"
+    curl -s https://get.acme.sh | sh -s -- --install-home --m "$ACME_EMAIL"
+    
+    _ACME="/root/.acme.sh/acme.sh"
+    chmod +x "$_ACME"
+
+    log "Регистрация аккаунта в Let's Encrypt для acme.sh..."
+    "$_ACME" --register-account -m "$ACME_EMAIL" --server letsencrypt
+
+    # Экспортируем параметры Cloudflare
+    if [ "$CF_AUTH_METHOD" = "1" ]; then
+        export CF_Token="$CF_Token"
+        [ -n "${CF_Account_ID:-}" ] && export CF_Account_ID="$CF_Account_ID"
+    else
+        export CF_Email="$CF_Email"
+        export CF_Key="$CF_Key"
+    fi
+
+    mkdir -p /etc/letsencrypt/live
+
+    for dom in "${ALL_DOMAINS[@]}"; do
+        log "Генерация SSL-сертификата для домена: $dom через acme.sh (Cloudflare DNS)..."
+        mkdir -p "/etc/letsencrypt/live/$dom"
+        
+        if "$_ACME" --issue --dns dns_cf -d "$dom" --server letsencrypt --force; then
+            ok "Сертификат для $dom успешно выпущен Let's Encrypt!"
+            
+            # Инсталляция сертификата в целевую папку и настройка автоматического релоада
+            if "$_ACME" --install-cert -d "$dom" \
+                --key-file       "/etc/letsencrypt/live/$dom/privkey.pem" \
+                --fullchain-file "/etc/letsencrypt/live/$dom/fullchain.pem" \
+                --reloadcmd     "chmod 755 /etc/letsencrypt/live/* 2>/dev/null || true; chmod 644 /etc/letsencrypt/live/*/* 2>/dev/null || true; systemctl reload nginx"; then
+                ok "Сертификат для $dom успешно установлен и привязан к Nginx!"
+            else
+                die "Критическая ошибка: Не удалось скопировать сертификат $dom в целевую директорию."
+            fi
+        else
+            warn "Не удалось выпустить сертификат для $dom."
+            if [ "$dom" = "$PRIMARY_DOMAIN" ]; then
+                die "Критическая ошибка: Выпуск сертификата для Главного домена $PRIMARY_DOMAIN провален."
+            fi
+        fi
+    done
 fi
 
-for dom in "${ALL_DOMAINS[@]}"; do
-    log "Генерация SSL-сертификата для собственного домена: $dom..."
-    if certbot certonly --webroot -w "$WEBROOT" --expand -d "$dom"; then
-        ok "Сертификат для $dom успешно выпущен!"
-    else
-        warn "Не удалось выпустить сертификат для $dom. Проверьте A-запись."
-        if [ "$dom" = "$PRIMARY_DOMAIN" ]; then
-            die "Критическая ошибка: Выпуск сертификата для Главного домена $PRIMARY_DOMAIN провален."
-        fi
-    fi
-done
-
-chmod 755 /etc/letsencrypt/archive 2>/dev/null || true
+# Универсальная коррекция прав для SSL-папок
 chmod 755 /etc/letsencrypt/live 2>/dev/null || true
-
 for dom in "${ALL_DOMAINS[@]}"; do
     if [ -d "/etc/letsencrypt/live/$dom" ]; then
-        chmod 755 /etc/letsencrypt/archive/"$dom" 2>/dev/null || true
-        chmod 755 /etc/letsencrypt/live/"$dom" 2>/dev/null || true
-        chmod 644 /etc/letsencrypt/archive/"$dom"/* 2>/dev/null || true
+        chmod 755 "/etc/letsencrypt/live/$dom" 2>/dev/null || true
+        chmod 644 /etc/letsencrypt/live/"$dom"/* 2>/dev/null || true
     fi
 done
 
@@ -893,16 +996,6 @@ EOF
 log "Тестирование и перезапуск веб-сервера..."
 nginx -t || die "Критическая ошибка синтаксиса собранной конфигурации Nginx."
 
-mkdir -p /etc/letsencrypt/renewal-hooks/deploy/
-cat << 'EOF' > /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
-#!/bin/bash
-systemctl reload nginx
-chmod 755 /etc/letsencrypt/archive/* 2>/dev/null || true
-chmod 755 /etc/letsencrypt/live/* 2>/dev/null || true
-chmod 644 /etc/letsencrypt/archive/*/* 2>/dev/null || true
-EOF
-chmod +x /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
-
 systemctl unmask nginx || true
 systemctl enable nginx || true
 systemctl restart nginx
@@ -987,14 +1080,14 @@ fi
 # ═════════════════════════════════════════════════════════════
 echo
 echo -e "${GREEN}=========================================================${NC}"
-echo -e "   СЦЕНАРИЙ УСПЕШНО НАСТРОЕН (v4.1.0 MULTI-PORT ENGINE)!"
+echo -e "   СЦЕНАРИЙ УСПЕШНО НАСТРОЕН (v4.2.0 HYBRID SSL ENGINE)!"
 echo -e "${GREEN}=========================================================${NC}"
 echo -e "  Главная Маска-Облако:   ${CYAN}https://${PRIMARY_DOMAIN}${NC}"
 echo -e "  Вход в панель 3X-UI:     ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 echo -e "  Базовый путь подписок:  ${GREEN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
 echo
 
-echo -e "${YELLOW}[SSL] ГОТОВЫЕ SSL-СЕРТИФИКАТЫ ДЛЯ ИНБАУНДОВ (Права 644 настроены):${NC}"
+echo -e "${YELLOW}[SSL] ГОТОВЫЕ SSL-СЕРТИФИКАТЫ ДЛЯ ИНБАУНДОВ (Права настроены):${NC}"
 echo -e "$SSL_DOMAINS_OUTPUT"
 
 echo -e "${YELLOW}ШАГ 1: Настройка файервола (UFW)${NC}"
