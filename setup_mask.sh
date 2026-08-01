@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Production AutoSetup (Hardened Hybrid Multi-Port Engine v3.3.0 Universal)
+# Production AutoSetup (Hardened Hybrid Multi-Port Engine v4.2.1 Universal)
 # Nginx Stream L4 Router for 3X-UI + xHTTP + Multi-Domain SSL Support
 # Combined Scenarios:
 #   1) Steal-Oneself REALITY (Multi-Domain per Port with SSL) [Optional]
@@ -27,7 +27,7 @@ die()  { echo -e "${RED}[X] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=========================================================${NC}"
-echo -e "${GREEN}  Nginx L4 Stream Router & Mask v4.2.0 (HYBRID SSL ENGINE)${NC}"
+echo -e "${GREEN}  Nginx L4 Stream Router & Mask v4.2.1 (HYBRID SSL ENGINE)${NC}"
 echo -e "${CYAN}=========================================================${NC}"
 
 # ─────────────────────── Предусловия ─────────────────────────
@@ -493,8 +493,8 @@ else
         ACME_EMAIL="admin@$PRIMARY_DOMAIN"
     fi
     
-    export LE_WORKING_DIR="/root/.acme.sh"
-    curl -s https://get.acme.sh | sh -s -- --install-home --m "$ACME_EMAIL"
+    # Стандартная установка acme.sh в домашний каталог пользователя root
+    curl -s https://get.acme.sh | sh -s email="$ACME_EMAIL"
     
     _ACME="/root/.acme.sh/acme.sh"
     chmod +x "$_ACME"
@@ -515,10 +515,12 @@ else
 
     for dom in "${ALL_DOMAINS[@]}"; do
         log "Генерация SSL-сертификата для домена: $dom через acme.sh (Cloudflare DNS)..."
-        mkdir -p "/etc/letsencrypt/live/$dom"
+        # Нам не нужно заранее создавать эту директорию через mkdir -p, чтобы избежать ложных срабатываний
+        # при проверке Nginx, но для acme.sh мы подготовим окружение.
         
         if "$_ACME" --issue --dns dns_cf -d "$dom" --server letsencrypt --force; then
             ok "Сертификат для $dom успешно выпущен Let's Encrypt!"
+            mkdir -p "/etc/letsencrypt/live/$dom"
             
             # Инсталляция сертификата в целевую папку и настройка автоматического релоада
             if "$_ACME" --install-cert -d "$dom" \
@@ -779,13 +781,14 @@ COSMOS_HEADER=""
 COSMOS_MOCK_API=""
 if [ "$DECOY_TEMPLATE" = "1" ]; then
   COSMOS_HEADER='add_header X-Cosmoscloud-Version "0.22.18" always;'
+  # Служебные переменные Nginx экранированы строго с помощью обратного слэша для предотвращения синтаксических ошибок в Bash
   COSMOS_MOCK_API='
     location ~ ^/(api/v1/status|status)$ {
         default_type application/json;
         return 200 '\''{"installed":true,"maintenance":false,"version":"0.22.18","productname":"CosmosCloud"}'\'';
     }
     location = /api/v1/auth/login {
-        if ($request_method = POST) {
+        if (\$request_method = POST) {
             add_header Content-Type "application/json" always;
             return 401 '\''{"error":"Wrong nickname or password. Try again or try resetting your password","code":401}'\'';
         }
@@ -793,6 +796,7 @@ if [ "$DECOY_TEMPLATE" = "1" ]; then
     }'
 fi
 
+# Тройное экранирование служебных переменных Nginx (например, \\\$http_host) для предотвращения их подмены в Bash
 if [ "$XHTTP_MODE_CHOICE" = "2" ]; then
     log "Конфигурация xHTTP: Режим stream-up / packet-up (HTTP/1.1 Chunked Proxy)..."
     XHTTP_LOCATION_BLOCK="
@@ -805,10 +809,10 @@ if [ "$XHTTP_MODE_CHOICE" = "2" ]; then
         proxy_buffering off;
         proxy_request_buffering off;
         proxy_http_version 1.1;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \\\$http_host;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade \\\$http_upgrade;
+        proxy_set_header Connection \\\$connection_upgrade;
         proxy_pass http://127.0.0.1:$XHTTP_PORT;
     }"
     XHTTP_UI_MODE_TEXT="stream-up (или packet-up / auto)"
@@ -822,8 +826,8 @@ else
         grpc_read_timeout 1h;
         grpc_send_timeout 1h;
         grpc_buffer_size 32k;
-        grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        grpc_set_header Host \$http_host;
+        grpc_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        grpc_set_header Host \\\$http_host;
         grpc_pass grpc://127.0.0.1:$XHTTP_PORT;
     }"
     XHTTP_UI_MODE_TEXT="stream-one"
@@ -832,7 +836,8 @@ fi
 EXTRA_HTTPS_SERVERS=""
 for ((i=1; i<${#ALL_DOMAINS[@]}; i++)); do
     ext_dom="${ALL_DOMAINS[$i]}"
-    if [ -d "/etc/letsencrypt/live/$ext_dom" ]; then
+    # Проверка изменена с -d на -f fullchain.pem во избежание генерации серверов Nginx с битыми файлами SSL
+    if [ -f "/etc/letsencrypt/live/$ext_dom/fullchain.pem" ]; then
         EXTRA_HTTPS_SERVERS+="
 server {
     listen 127.0.0.1:9443 ssl proxy_protocol;
@@ -861,19 +866,19 @@ server {
 
     location ^~ $PANEL_PATH {
         proxy_pass http://127.0.0.1:$PANEL_PORT;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host \\\$http_host;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Upgrade \\\$http_upgrade;
+        proxy_set_header Connection \\\$connection_upgrade;
     }
 
     location ^~ $SUB_PATH {
         proxy_pass http://127.0.0.1:$SUB_PORT;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host \\\$http_host;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
     }
 
     $COSMOS_MOCK_API
@@ -1080,7 +1085,7 @@ fi
 # ═════════════════════════════════════════════════════════════
 echo
 echo -e "${GREEN}=========================================================${NC}"
-echo -e "   СЦЕНАРИЙ УСПЕШНО НАСТРОЕН (v4.2.0 HYBRID SSL ENGINE)!"
+echo -e "   СЦЕНАРИЙ УСПЕШНО НАСТРОЕН (v4.2.1 HYBRID SSL ENGINE)!"
 echo -e "${GREEN}=========================================================${NC}"
 echo -e "  Главная Маска-Облако:   ${CYAN}https://${PRIMARY_DOMAIN}${NC}"
 echo -e "  Вход в панель 3X-UI:     ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
