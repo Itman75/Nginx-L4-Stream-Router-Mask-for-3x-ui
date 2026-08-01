@@ -83,7 +83,7 @@ chmod +x secure-vps.sh
 * Установить 3x-ui: `y` -> Выбор `1` (Latest)
 * Установка 3X-UI в инсталляторе:
   * Customize Panel Port: `y` -> Порт `10443`
-  * SSL Certificate Setup: **`4`** *(Skip SSL — пропустить, так как TLS терминирует Nginx)*
+  * SSL Certificate Setup: **`4`и `N`** *(Skip SSL — пропустить, так как TLS терминирует Nginx чз обратный прокси на 127.0.0.1)*
 
 ---
 
