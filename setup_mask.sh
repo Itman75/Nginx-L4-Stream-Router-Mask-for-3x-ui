@@ -882,7 +882,18 @@ server {
 
     $COSMOS_MOCK_API
 
-    location = / { try_files /index.html =404; }
+    location = / {
+        default_type text/html;
+        root $WEBROOT;
+        try_files /index.html =404; 
+    }
+
+    location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|webp)\$ {
+        expires 7d;
+        access_log off;
+        try_files \$uri =404;
+    }
+
     location / { return 404; }
 }
 "
