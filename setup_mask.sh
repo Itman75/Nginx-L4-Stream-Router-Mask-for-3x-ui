@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v5.9 Universal (Open Source Ready)
-# Nginx L4 Stream + 3X-UI + Unix Sockets + Pure H2/gRPC Stream-One + 5 Decoys 
+# Production AutoSetup: Hardened Engine v5.9 Universal 
+# Nginx L4 Stream + 3X-UI + Unix Sockets + Pure H2/gRPC Stream-One + 5 Decoys (Open Source Ready)
 # ==============================================================================
 # Архитектура:
-#   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org)
+#   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org) 
 #   2) Полная совместимость с Nginx Open Source (без платных директив Nginx Plus)
 #   3) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
 #   4) Classic External REALITY (Выделение портов для внешних SNI)
