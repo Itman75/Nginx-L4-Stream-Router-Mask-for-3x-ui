@@ -6,19 +6,18 @@
 # ==============================================================================
 # Архитектура:
 #   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org) 
-#   2) Полная совместимость с Nginx Open Source (без платных директив Nginx Plus)
-#   3) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
-#   4) Classic External REALITY (Выделение портов для внешних SNI)
-#   5) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2/gRPC Streaming
-#   6) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
-#   7) 5 режимов маскировки (Decoy Front):
+#   2) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
+#   3) Classic External REALITY (Выделение портов для внешних SNI)
+#   4) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2/gRPC Streaming
+#   5) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
+#   6) 5 режимов маскировки (Decoy Front):
 #      - 1: Интеллектуальное зеркалирование animesss.com (Anime/Media Portal)
 #      - 2: Интеллектуальное зеркалирование stream.is74.ru/0/streaming (Live Video Stream)
 #      - 3: Корпоративный IT SaaS (DataSphere Analytics)
 #      - 4: Облако CosmosCloud (с эмуляцией API и ассетами)
 #      - 5: Стандартная заглушка Nginx (Welcome to nginx)
-#   8) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
-#   9) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm)
+#   7) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
+#   8) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm)
 # ==============================================================================
 
 set -euo pipefail
