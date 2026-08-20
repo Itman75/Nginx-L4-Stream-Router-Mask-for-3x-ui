@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v5.9 Universal 
-# Nginx L4 Stream + 3X-UI + Unix Sockets + Pure H2/gRPC Stream-One + 5 Decoys (Open Source Ready)
+# Production AutoSetup: Hardened Engine v6.0 Universal (Native HTTP/2 Edition)
+# Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 5 Decoys 
 # ==============================================================================
 # Архитектура:
-#   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org) 
-#   2) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
-#   3) Classic External REALITY (Выделение портов для внешних SNI)
-#   4) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2/gRPC Streaming
-#   5) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
-#   6) 5 режимов маскировки (Decoy Front):
+#   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org)
+#   2) Нативное HTTP/2 (H2C) проксирование к апстримам: proxy_http_version 2
+#   3) Буферизация HTTP/2: http2_recv_buffer_size 4m;
+#   4) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
+#   5) Classic External REALITY (Выделение портов для внешних SNI)
+#   6) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2 Streaming
+#   7) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
+#   8) 5 режимов маскировки (Decoy Front):
 #      - 1: Интеллектуальное зеркалирование animesss.com (Anime/Media Portal)
 #      - 2: Интеллектуальное зеркалирование stream.is74.ru/0/streaming (Live Video Stream)
 #      - 3: Корпоративный IT SaaS (DataSphere Analytics)
 #      - 4: Облако CosmosCloud (с эмуляцией API и ассетами)
 #      - 5: Стандартная заглушка Nginx (Welcome to nginx)
-#   7) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
-#   8) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm)
+#   9) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
+#  10) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm)
 # ==============================================================================
 
 set -euo pipefail
@@ -38,7 +40,7 @@ die()  { echo -e "${RED}[X] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN} Nginx xHTTP VLESSENC+VISION Router & Decoy Engine v5.9 (OPEN SOURCE)${NC}"
+echo -e "${GREEN} Nginx xHTTP VLESSENC+VISION Router v6.0 (NATIVE HTTP/2 UPSTREAM)  ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 # ─────────────────────── Системные предусловия ───────────────────────
@@ -461,7 +463,7 @@ Pin: origin nginx.org
 Pin-Priority: 900
 EOF
 
-log "Установка Nginx Mainline с поддержкой Stream L4, HTTP/2 и Unix Sockets..."
+log "Установка Nginx Mainline с поддержкой Stream L4, HTTP/2 Upstream и Unix Sockets..."
 apt-get update -q
 apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx -y -q
 
@@ -819,9 +821,8 @@ chmod 644 "$WEBROOT/index.html" "$WEBROOT/404.html"
 # ═════════════════════════════════════════════════════════════
 #  ПОЛНАЯ КОНФИГУРАЦИЯ NGINX (STREAM + HTTP CORE + ANTI-BOT)
 # ═════════════════════════════════════════════════════════════
-log "Сборка конфигурации Nginx Mainline (Stream L4 + HTTP Engine)..."
+log "Сборка конфигурации Nginx Mainline (Stream L4 + HTTP/2 Upstream Engine)..."
 
-# Генерация пулов upstream с полной совместимостью со стандартным Nginx Open Source
 UPSTREAM_DECOY_BLOCK=""
 if [ "$DECOY_MODE" = "1" ]; then
     UPSTREAM_DECOY_BLOCK="
@@ -867,13 +868,16 @@ http {
     resolver 1.1.1.1 8.8.8.8 ipv6=off valid=300s;
     resolver_timeout 5s;
 
+    # Оптимизация буфера приёма HTTP/2 на воркер
+    http2_recv_buffer_size 4m;
+
     # Получение реального IP клиента из PROXY Protocol
     map \$proxy_protocol_addr \$ak_real_ip {
         ""      \$remote_addr;
         default \$proxy_protocol_addr;
     }
 
-    # Upstream пулы для 3X-UI и чистого HTTP/2 xHTTP (Stream-One via grpc_pass)
+    # Upstream пулы для 3X-UI и нативного HTTP/2 xHTTP (Stream-One via proxy_http_version 2)
     upstream panel_3xui {
         server 127.0.0.1:$PANEL_PORT;
         keepalive 30;
@@ -1482,32 +1486,33 @@ server {
         add_header Cache-Control "no-store, no-cache, must-revalidate";
     }
 
-    # ─── ЛОКАЦИЯ 3: VLESS xHTTP (Чистый HTTP/2 gRPC Stream-One + VLESSENC + VISION) ───
+    # ─── ЛОКАЦИЯ 3: VLESS xHTTP (Native HTTP/2 Stream-One + VLESSENC + VISION) ───
     location ^~ ${XHTTP_STREAM_PATH} {
         if (\$request_method != POST) {
             return 404;
         }
 
-        grpc_set_header Host \$http_host;
-        grpc_set_header X-Real-IP \$ak_real_ip;
-        grpc_set_header X-Forwarded-For \$ak_real_ip;
-        grpc_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 2;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$ak_real_ip;
+        proxy_set_header X-Forwarded-For \$ak_real_ip;
+        proxy_set_header X-Forwarded-Proto \$scheme;
 
-        grpc_read_timeout 1h;
-        grpc_send_timeout 1h;
+        proxy_request_buffering off;
+        proxy_buffering off;
+
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
         client_body_timeout 1h;
         send_timeout 1h;
-        grpc_socket_keepalive on;
 
         client_max_body_size 0;
-        grpc_buffer_size 4k;
-        client_body_buffer_size 128k;
 
         access_log off;
         error_log off;
         gzip off;
 
-        grpc_pass grpc://xray_xhttp_stream;
+        proxy_pass http://xray_xhttp_stream;
     }
 
     # ─── ЛОКАЦИЯ 4: ДЕКОЙ САЙТ / МАСКИРОВКА ───
@@ -1661,7 +1666,7 @@ fi
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v5.9 OPEN SOURCE EDITION)!     "
+echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.0 NATIVE HTTP/2 EDITION)!   "
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Маска-Фронтенд:              ${CYAN}https://${PRIMARY_DOMAIN}${NC} (${DECOY_NAME})"
 echo -e "  Вход в панель 3X-UI:         ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
@@ -1679,7 +1684,7 @@ echo
 echo -e "${YELLOW}ШАГ 2: Инбаунды VLESS REALITY (3X-UI):${NC}"
 echo -e "$REALITY_INBOUNDS_REPORT"
 
-echo -e "${YELLOW}ШАГ 3: Инбаунд VLESS xHTTP (Stream-One + VLESSENC + VISION):${NC}"
+echo -e "${YELLOW}ШАГ 3: Инбаунд VLESS xHTTP (Stream-One + VLESSENC + VISION via H2):${NC}"
 echo -e "  - ${YELLOW}Протокол:${NC} ${GREEN}vless${NC} | ${YELLOW}Транспорт:${NC} ${GREEN}xhttp${NC}"
 echo -e "  - ${YELLOW}Порт:${NC} ${GREEN}$XHTTP_STREAM_PORT${NC} | ${YELLOW}Listen IP:${NC} ${GREEN}127.0.0.1${NC}"
 echo -e "  - ${YELLOW}Безопасность (Security):${NC} ${RED}none${NC} (SSL терминирует Nginx)"
