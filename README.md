@@ -1,12 +1,13 @@
+# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.0 Universal)
 
-# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v5.9 Universal)
+> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing), полной изоляцией внутренних служб и 100% совместимостью с Nginx Open Source.**  
+> Развёртывается на чистых ОС семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
 
-> **Высокопроизводительная серверная инфраструктура с многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing), полной изоляцией внутренних служб и 100% совместимостью с Nginx Open Source.**  
-> Развёртывается на чистых OS семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
+---
 
-## 🌟 Ключевые возможности архитектуры v5.9 Universal
+## 🌟 Ключевые возможности архитектуры v6.0 Universal
 
-Комплекс состоит из скрипта первичного укрепления операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v5.9**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x**:
+Комплекс состоит из скрипта первичного укрепления операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.0**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x**:
 
 ### 1. Сценарий 1: Steal-Oneself REALITY (Кража у самого себя с Anti-Loop Port 9443)
 * Выпуск легитимных SSL-сертификатов Let's Encrypt на собственные домены.
@@ -15,10 +16,12 @@
 
 ### 2. Сценарий 2: Classic External REALITY (Внешний камуфляж)
 * Использование известных внешних доменов (`swdist.microsoft.com`, `www.samsung.com`, `gateway.icloud.com` и др.) в качестве SNI.
-* Каждому внешнему пулу назначается независимый локальный порт (`44441`, `44442` и т.д.), исключая коллизии и балансировочные таймауты.
+* Каждому внешнему пулу назначается независимый локальный порт (`46443`, `47443` и т.д.), исключая коллизии и балансировочные таймауты.
 
-### 3. Шлюз VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision через Nginx
-* **Проксирование через `grpc_pass`:** Локация xHTTP в Nginx настроена на полнодуплексное H2-проксирование с помощью директивы `grpc_pass`, что обеспечивает непрерывный двунаправленный поток без буферизации тела запроса.
+### 3. Шлюз VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision via Native HTTP/2
+* **Нативное H2C-проксирование (`proxy_http_version 2`):** В Nginx Mainline (1.31.4+) проксирование к Xray xHTTP выполняется через честный протокол HTTP/2 без промежуточного преобразования в gRPC или деградации до HTTP/1.1.
+* **Тюнинг буфера приёма (`http2_recv_buffer_size 4m`):** Расширенный буфер воркеров Nginx исключает узкие места при передаче тяжёлых потоковых медиаданных.
+* **Полнодуплексный стриминг без задержек:** Отключение буферизации тела (`proxy_request_buffering off; proxy_buffering off;`) обеспечивает сквозной двунаправленный обмен фреймами.
 * **Сквозное шифрование `vlessenc`:** Полезная нагрузка защищается постквантовым симметричным ключом шифрования (ML-KEM-768 / VLESS Encryption) на уровне протокола VLESS.
 * **XTLS-Vision поверх xHTTP:** В клиентах с версией ядра **Xray 24.9.27+** активируется `flow: xtls-rprx-vision` совместно с `vlessenc` для динамического паддинга и маскировки под стандартный веб-трафик.
 * **Паддинг заголовков:** Случайный мусор в HTTP-заголовках (`xPaddingBytes: 120-1120`, ключ `X-Amz-Meta-Trace`).
@@ -39,6 +42,7 @@
 ### 6. Двухрежимный гибридный SSL-движок
 * **Certbot (HTTP-01):** Автоматический выпуск через Snapd с деплой-хуками нормализации прав (`chmod 755 / 644`).
 * **acme.sh (Cloudflare DNS-01):** Выпуск сертификатов через Cloudflare API (Token или Global Key), включая Wildcard-сертификаты.
+
 ---
 
 > [!CAUTION]
@@ -47,7 +51,6 @@
 > * ❌ **Proxied (Оранжевое облако):** Запрещено! CDN Cloudflare терминирует TLS на собственных узлах, что делает невозможным работу L4 SNI Preread, Steal-Oneself REALITY и прямого HTTP/2 xHTTP стриминга.
 > * ✔️ **DNS Only (Серое облако):** Трафик поступает напрямую на IP-адрес вашего сервера без вмешательства промежуточных прокси.
 
----
 ---
 
 ## 📊 Архитектурная схема движения трафика
@@ -59,7 +62,7 @@ graph TD
 
     NginxStream -->|SNI: Главный домен / Пустой SNI| NginxSock[Unix Socket: /dev/shm/nginx-http.sock]
     NginxStream -->|SNI: Steal-Oneself cdn.yourdomain.online| XrayStealREALITY[Xray REALITY :45443]
-    NginxStream -->|SNI: Внешний SNI swdist.microsoft.com| XrayClassicREALITY[Xray REALITY :44441]
+    NginxStream -->|SNI: Внешний SNI swdist.microsoft.com| XrayClassicREALITY[Xray REALITY :46443]
 
     XrayStealREALITY -->|Fallback не-REALITY / xver=1| NginxFallbackHTTP[Nginx HTTP :9443 Anti-Loop]
     XrayClassicREALITY -->|Fallback не-REALITY / Direct xver=0| ExternalSite[Внешний ресурс swdist.microsoft.com:443]
@@ -68,9 +71,9 @@ graph TD
     NginxFallbackHTTP --> NginxHTTPCore
 
     NginxHTTPCore -->|Корень /| DecoySite[Decoy Маскировка 1-5]
-    NginxHTTPCore -->|Секретный путь /..../| Panel3X[3X-UI Панель управления :10443]
-    NginxHTTPCore -->|Путь подписок /...../| PanelSub[3X-UI Сервер подписок :55443]
-    NginxHTTPCore -->|Путь xHTTP /...../ via grpc_pass| XrayXHTTP[Xray VLESS xHTTP :50443]
+    NginxHTTPCore -->|Секретный путь /my-3x-panel/| Panel3X[3X-UI Панель управления :10443]
+    NginxHTTPCore -->|Путь подписок /my-post-key/| PanelSub[3X-UI Сервер подписок :55443]
+    NginxHTTPCore -->|Путь xHTTP /Stream-One-Path/ via proxy_http_version 2| XrayXHTTP[Xray VLESS xHTTP :50443]
 ```
 
 ---
@@ -120,7 +123,7 @@ chmod +x secure-vps.sh
 
 ---
 
-## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v5.9)
+## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.0)
 
 На втором шаге подключается официальный репозиторий Nginx Mainline, генерируются SSL-сертификаты, разворачивается выбранная веб-маска и конфигурируется матрица безопасности.
 
@@ -132,7 +135,7 @@ chmod +x setup_mask.sh
 ./setup_mask.sh
 ```
 
-### Пример интерактивного ввода параметров:
+### Пример интерактивного ввода параметров (со значениями по умолчанию):
 * **PRIMARY_DOMAIN (Главный домен):** `yourdomain.online`
 * **Добавить алиас 'www.yourdomain.online'?** `y`
 * **Steal-Oneself REALITY:** `y`
@@ -140,16 +143,16 @@ chmod +x setup_mask.sh
   * Домены для порта 45443: `cdn.yourdomain.online`
   * Добавить ещё порт Steal-Oneself? `n` (или `y` для настройки доп. портов)
 * **Classic External REALITY:** `y`
-  * Локальный порт Xray: `44441`
+  * Локальный порт Xray: `46443`
   * Внешний SNI: `swdist.microsoft.com`
   * Добавить ещё порт Classic? `n`
 * **Дополнительные SSL-домены:** *(Enter для завершения)*
 * **Внутренний порт панели 3X-UI:** `10443`
-* **Секретный URI-путь к веб-панели:** `video/bitrate/hls/stream-74`
+* **Секретный URI-путь к веб-панели:** `my-3x-panel`
 * **Внутренний порт сервера подписок:** `55443`
-* **Секретный URI-путь подписок:** `stream/master/playlist/post-keys`
-* **Внутренний порт VLESS xHTTP:** `7443`
-* **URI-путь для xHTTP:** `videos/media/ts/1080`
+* **Секретный URI-путь подписок:** `my-post-key`
+* **Внутренний порт VLESS xHTTP:** `50443`
+* **URI-путь для xHTTP:** `Stream-One-Path`
 * **Вариант маскировки (DECOY_MODE):** `1` *(AnimeSSS)*, `2` *(IS74 Video)*, `3` *(DataSphere)*, `4` *(CosmosCloud)* или `5` *(Nginx Stub)*
 * **Метод сертификации:** `1` *(Certbot HTTP-01)* или `2` *(acme.sh + Cloudflare DNS-01)*
 
@@ -157,14 +160,14 @@ chmod +x setup_mask.sh
 
 ### Настройка брандмауэра UFW (Выполнить после setup_mask.sh)
 
-Заблокируйте прямой доступ к внутренним техническим портам снаружи (после преднастройки панели 3x-ui):
+Заблокируйте прямой доступ к внутренним техническим портам снаружи:
 
 ```bash
 # Разрешаем внешние сетевые точки входа
 ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && ufw allow 8443/tcp && ufw allow 8443/udp
 
 # Блокируем технические внутренние сокеты и порт Anti-Loop
-ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 7443/tcp && ufw deny 9443/tcp && ufw deny 45443/tcp && ufw deny 44441/tcp
+ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/tcp && ufw deny 45443/tcp && ufw deny 46443/tcp
 ```
 
 ---
@@ -173,20 +176,20 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 7443/tcp && ufw deny 9443/t
 
 ### 1. Синхронизация путей панели и подписок
 
-1. Откройте панель по адресу: `http://IP_СЕРВЕРА:10443/ВАШ_ВРЕМЕННЫЙ_ПУТЬ/panel`
+1. Откройте панель по временному адресу: `http://IP_СЕРВЕРА:10443/my-3x-panel/`
 2. Перейдите в **Настройки панели** -> **Панель**:
-   * **URI-путь корневой папки панели:** `путь указанный при развёртывании`
+   * **URI-путь корневой папки панели:** `/my-3x-panel/`
    * Нажмите **Сохранить**.
 3. Перейдите в **Настройки панели** -> **Подписка**:
    * Вкладка **Сертификаты**: Поля *Публичный ключ* и *Приватный ключ* оставьте **ПУСТЫМИ**!
    * **Порт подписки:** `55443`
-   * **URI-путь подписки:** `путь указанный при развёртывании`
-   * **URI обратного прокси:** `https://yourdomain.online/путь указанный при развёртывании`
+   * **URI-путь подписки:** `/my-post-key/`
+   * **URI обратного прокси:** `https://yourdomain.online/my-post-key/`
    * Нажмите **Сохранить** и выберите **Перезапустить панель**.
 
 > [!SUCCESS]
 > Вход в панель теперь защищён и доступен исключительно по HTTPS-адресу:  
-> `https://yourdomain.online/путь указанный при развёртывании`
+> `https://yourdomain.online/my-3x-panel/`
 
 ---
 
@@ -208,7 +211,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 7443/tcp && ufw deny 9443/t
 ---
 
 #### B. Инбаунд `VLESS_CLASSIC` (Classic External REALITY)
-* **Основное:** Порт `44441` | Listen IP `127.0.0.1` | Протокол `vless`
+* **Основное:** Порт `46443` | Listen IP `127.0.0.1` | Протокол `vless`
 * **Поток:** Транспорт `tcp` | Accept Proxy Protocol: `1` (Включить) ⚠️
 * **Безопасность:** `reality` | uTLS `chrome`
 * **Flow:** `xtls-rprx-vision`
@@ -227,12 +230,12 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 7443/tcp && ufw deny 9443/t
 1. **Создание инбаунда:** Перейдите во **Входящие** -> **Добавить подключение**.
 2. **Вкладка «Основное»:**
    * **Протокол:** `vless`
-   * **Порт:** `7443`
+   * **Порт:** `50443`
    * **Listen IP:** `127.0.0.1`
 3. **Вкладка «Поток» (Stream Settings):**
    * **Транспорт:** `xhttp`
    * **Режим (Mode):** `stream-one`
-   * **Путь (Path):** `/путь указанный при развёртывании/`
+   * **Путь (Path):** `/Stream-One-Path/`
    * **Хост (Host):** `yourdomain.online`
    * **Паддинг (xPaddingBytes):** `120-1120`
    * **xPaddingObfsMode:** `true` (Включить)
@@ -248,7 +251,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 7443/tcp && ufw deny 9443/t
    * **Flow:** **`xtls-rprx-vision`** ⚠️ *(Обязательно включить для клиентов с ядром 24.9.27+)*
    * **Decryption:** Ключ **`vlessenc`** (скопируйте сгенерированный ключ).
    * **Host / SNI:** `yourdomain.online`
-   * **Path:** `путь указанный при развёртывании`
+   * **Path:** `/Stream-One-Path/`
 
 ---
 
@@ -299,9 +302,9 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 7443/tcp && ufw deny 9443/t
 | `9443/TCP` | Локальный | **Заблокирован** | **Anti-Loop Fallback:** Приём не-REALITY трафика от Xray с PROXY protocol |
 | `10443/TCP` | Локальный | **Заблокирован** | Внутренний веб-интерфейс панели 3X-UI |
 | `55443/TCP` | Локальный | **Заблокирован** | Внутренний сервер клиентских подписок 3X-UI |
-| `7443/TCP` | Локальный | **Заблокирован** | Внутренний шлюз VLESS xHTTP (Stream-One via `grpc_pass`) |
+| `50443/TCP` | Локальный | **Заблокирован** | Внутренний шлюз VLESS xHTTP (Native H2 via `proxy_http_version 2`) |
 | `45443/TCP` | Локальный | **Заблокирован** | Локальный инбаунд Steal-Oneself REALITY |
-| `44441/TCP` | Локальный | **Заблокирован** | Локальный инбаунд Classic External REALITY |
+| `46443/TCP` | Локальный | **Заблокирован** | Локальный инбаунд Classic External REALITY |
 
 ---
 
@@ -320,7 +323,7 @@ ls -la /dev/shm/nginx-http.sock
 curl -Iv --http2 https://yourdomain.online
 
 # 4. Тест шлюза xHTTP (должен возвращать 404 Not Found на пустой GET, подтверждая активность локации)
-curl -Iv --http2 https://yourdomain.online/videos/media/ts/1080/
+curl -Iv --http2 https://yourdomain.online/Stream-One-Path/
 
 # 5. Проверка Fallback Steal-Oneself (должен отдавать маску без зацикливания)
 curl -Iv --resolve cdn.yourdomain.online:443:127.0.0.1 https://cdn.yourdomain.online
@@ -418,12 +421,12 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 </details>
 
 <details>
-<summary><b>2. JSON: VLESS REALITY Classic External (Порт 44441)</b></summary>
+<summary><b>2. JSON: VLESS REALITY Classic External (Порт 46443)</b></summary>
 
 ```json
 {
   "listen": "127.0.0.1",
-  "port": 44441,
+  "port": 46443,
   "protocol": "vless",
   "tag": "in-classic-reality",
   "settings": {
@@ -463,12 +466,12 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 </details>
 
 <details>
-<summary><b>3. JSON: VLESS xHTTP Stream-One + VLESSENC + VISION (Порт 7443)</b></summary>
+<summary><b>3. JSON: VLESS xHTTP Stream-One + VLESSENC + VISION (Порт 50443)</b></summary>
 
 ```json
 {
   "listen": "127.0.0.1",
-  "port": 7443,
+  "port": 50443,
   "protocol": "vless",
   "tag": "in-xhttp-vision",
   "settings": {
@@ -487,7 +490,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
   "streamSettings": {
     "network": "xhttp",
     "xhttpSettings": {
-      "path": "/videos/media/ts/1080/",
+      "path": "/Stream-One-Path/",
       "host": "yourdomain.online",
       "mode": "stream-one",
       "xPaddingBytes": "120-1120",
@@ -550,4 +553,3 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 }
 ```
 </details>
-```
