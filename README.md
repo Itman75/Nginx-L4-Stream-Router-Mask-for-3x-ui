@@ -68,9 +68,9 @@ graph TD
     NginxFallbackHTTP --> NginxHTTPCore
 
     NginxHTTPCore -->|Корень /| DecoySite[Decoy Маскировка 1-5]
-    NginxHTTPCore -->|Секретный путь /video/bitrate/.../| Panel3X[3X-UI Панель управления :10443]
-    NginxHTTPCore -->|Путь подписок /stream/master/.../| PanelSub[3X-UI Сервер подписок :55443]
-    NginxHTTPCore -->|Путь xHTTP /videos/media/ts/1080/ via grpc_pass| XrayXHTTP[Xray VLESS xHTTP :7443]
+    NginxHTTPCore -->|Секретный путь /..../| Panel3X[3X-UI Панель управления :10443]
+    NginxHTTPCore -->|Путь подписок /...../| PanelSub[3X-UI Сервер подписок :55443]
+    NginxHTTPCore -->|Путь xHTTP /...../ via grpc_pass| XrayXHTTP[Xray VLESS xHTTP :50443]
 ```
 
 ---
