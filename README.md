@@ -1,4 +1,4 @@
-# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.0 Universal)
+# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.0.1 Universal)
 
 > **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing), полной изоляцией внутренних служб и 100% совместимостью с Nginx Open Source.**  
 > Развёртывается на чистых ОС семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
