@@ -1,29 +1,28 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v6.0 Universal (Native HTTP/2 Edition)
+# Production AutoSetup: Hardened Engine v6.0.1 Universal (Native HTTP/2 Edition)
 # Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 5 Decoys 
 # ==============================================================================
 # Архитектура:
 #   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org)
-#   2) Нативное HTTP/2 (H2C) проксирование к апстримам: proxy_http_version 2
-#   3) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
-#   4) Classic External REALITY (Выделение портов для внешних SNI)
-#   5) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2 Streaming
-#   6) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
-#   7) 5 режимов маскировки (Decoy Front):
+#   2) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
+#   3) Classic External REALITY (Выделение портов для внешних SNI)
+#   4) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2 Streaming
+#   5) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
+#   6) 5 режимов маскировки (Decoy Front):
 #      - 1: Интеллектуальное зеркалирование animesss.com (Anime/Media Portal)
 #      - 2: Интеллектуальное зеркалирование stream.is74.ru/0/streaming (Live Video Stream)
 #      - 3: Корпоративный IT SaaS (DataSphere Analytics)
 #      - 4: Облако CosmosCloud (с эмуляцией API и ассетами)
 #      - 5: Стандартная заглушка Nginx (Welcome to nginx)
-#   8) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
-#   9) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm)
+#   7) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
+#   8) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm)
 # ==============================================================================
 
 set -euo pipefail
 
-# ─────────────────────────── Цвета вывода ───────────────────────────
+# --------------------------- Цвета вывода ---------------------------
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
@@ -42,7 +41,7 @@ echo -e "${CYAN}================================================================
 echo -e "${GREEN} Nginx xHTTP VLESSENC+VISION Router v6.0 (NATIVE HTTP/2 UPSTREAM)  ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
-# ─────────────────────── Системные предусловия ───────────────────────
+# ----------------------- Системные предусловия -----------------------
 if [ "$EUID" -ne 0 ]; then
   die "Пожалуйста, запустите установщик с правами суперпользователя root (через sudo)."
 fi
@@ -99,9 +98,9 @@ validate_path_segment() {
     fi
 }
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 #  ИНТЕРАКТИВНАЯ КОНФИГУРАЦИЯ И СЦЕНАРИИ МАРШРУТИЗАЦИИ
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 echo
 echo -e "${YELLOW}Шаг 1: Конфигурация Главного домена (PRIMARY_DOMAIN)${NC}"
 echo -e "${CYAN}Этот домен используется для входа в 3X-UI, подписок, xHTTP (VLESSENC) и Маски.${NC}"
@@ -299,12 +298,25 @@ MIRROR_TARGET_URI=""
 MIRROR_BRAND="AnimeSSS"
 
 if [ "$DECOY_MODE" = "1" ]; then
-    prompt_default "Хост медиа-портала для зеркалирования" "animesss.com" MIRROR_TARGET_HOST
+    prompt_default "Хост внешнего медиа-портала для зеркалирования" "animesss.com" MIRROR_TARGET_HOST
     prompt_default "Бренд для подмены в HTML-шапках" "AnimeSSS" MIRROR_BRAND
 elif [ "$DECOY_MODE" = "2" ]; then
-    prompt_default "Хост медиа-сервера для зеркалирования" "stream.is74.ru" MIRROR_TARGET_HOST
+    prompt_default "Хост внешнего медиа-сервера для зеркалирования" "stream.is74.ru" MIRROR_TARGET_HOST
     prompt_default "Путь видеотрансляции / видеопотока" "/0/streaming" MIRROR_TARGET_URI
     prompt_default "Бренд для подмены в HTML-шапках" "Интерсвязь" MIRROR_BRAND
+fi
+
+# Защита от указания собственного домена в качестве внешнего источника зеркала
+if [[ "$DECOY_MODE" = "1" || "$DECOY_MODE" = "2" ]]; then
+    if [ "$MIRROR_TARGET_HOST" = "$PRIMARY_DOMAIN" ] || [[ " ${ALL_DOMAINS[*]} " == *" ${MIRROR_TARGET_HOST} "* ]]; then
+        warn "Обнаружено совпадение хоста зеркалирования с собственным доменом сервера ($MIRROR_TARGET_HOST)!"
+        warn "Во избежание петли запросов хост автоматически сброшен на внешний источник по умолчанию."
+        if [ "$DECOY_MODE" = "1" ]; then
+            MIRROR_TARGET_HOST="animesss.com"
+        else
+            MIRROR_TARGET_HOST="stream.is74.ru"
+        fi
+    fi
 fi
 
 echo
@@ -328,7 +340,7 @@ if [ "$SSL_ENGINE_CHOICE" = "2" ]; then
         [ -n "$CF_Token" ] || die "API Token не может быть пустым."
         read -rp "Введите Cloudflare Account ID (Enter для пропуска): " CF_Account_ID
         export CF_Token
-        [ -n "${CF_Account_ID:-}" ] && export CF_Account_ID
+        [ -n "${CF_Account_ID:-}" ] && export CF_Account_ID="$CF_Account_ID"
     else
         read -rp "Введите ваш Cloudflare Email: " CF_Email
         [ -n "$CF_Email" ] || die "Email не может быть пустым."
@@ -363,9 +375,9 @@ if [ -n "$WAN_IP" ]; then
     done
 fi
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 #  ТЮНИНГ ЯДРА LINUX (SYSCTL BBR, SOMAXCONN & BUFFERS)
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 log "Применение расширенного тюнинга сетевого стека и ядра Linux..."
 
 cat << 'EOF' > /etc/sysctl.d/99-vless-tuning.conf
@@ -438,9 +450,9 @@ nginx soft nofile 524288
 nginx hard nofile 524288
 EOF
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 #  ПОДКЛЮЧЕНИЕ REPO NGINX MAINLINE И УСТАНОВКА
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 log "Подключение официального репозитория Nginx Mainline..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
@@ -519,9 +531,9 @@ EOF
 nginx -t || die "Ошибка синтаксиса начальной конфигурации Nginx."
 systemctl restart nginx || systemctl start nginx
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 #  ВЫПУСК SSL-СЕРТИФИКАТОВ (CERTBOT ИЛИ ACME.SH)
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 if [ "$SSL_ENGINE_CHOICE" = "1" ]; then
     log "Инициализация подсистемы Certbot через Snap..."
     apt-get install snapd -y -q
@@ -635,9 +647,9 @@ for dom in "${ALL_DOMAINS[@]}"; do
     fi
 done
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 #  ГЕНЕРАЦИЯ СТАТИЧЕСКИХ МАСКИРОВОЧНЫХ СТРАНИЦ
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 log "Формирование маскировочного контента..."
 
 if [ "$DECOY_MODE" = "3" ]; then
@@ -817,9 +829,9 @@ EOF
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT"
 chmod 644 "$WEBROOT/index.html" "$WEBROOT/404.html"
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 #  ПОЛНАЯ КОНФИГУРАЦИЯ NGINX (STREAM + HTTP CORE + ANTI-BOT)
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 log "Сборка конфигурации Nginx Mainline (Stream L4 + HTTP/2 Upstream Engine)..."
 
 UPSTREAM_DECOY_BLOCK=""
@@ -1051,8 +1063,6 @@ ${REALITY_UPSTREAMS}
 
 server {
     listen 443 backlog=65535 reuseport;
-    listen [::]:443 backlog=65535 reuseport;
-
     proxy_protocol on;
     proxy_pass \$backend_gate;
     ssl_preread on;
@@ -1060,8 +1070,6 @@ server {
 
 server {
     listen 8443 backlog=65535 reuseport;
-    listen [::]:8443 backlog=65535 reuseport;
-
     proxy_protocol on;
     proxy_pass \$backend_gate;
     ssl_preread on;
@@ -1365,7 +1373,6 @@ cat << EOF > "/etc/nginx/conf.d/01-main.conf"
 # HTTP Порт 80 (Проверка ACME и редирект на HTTPS)
 server {
     listen 80 default_server;
-    listen [::]:80 default_server;
     server_name _;
     access_log off;
 
@@ -1431,61 +1438,50 @@ server {
 
     error_page 400 403 404 405 @notfound;
 
-    # ─── ЛОКАЦИЯ 1: ПАНЕЛЬ 3X-UI ───
+    # --- ЛОКАЦИЯ 1: ПАНЕЛЬ 3X-UI ---
     location = ${PANEL_PATH%/} {
         return 301 ${PANEL_PATH};
     }
 
     location ^~ ${PANEL_PATH} {
         limit_req zone=panel burst=40 delay=20;
-        proxy_pass http://panel_3xui;
+        proxy_pass http://127.0.0.1:$PANEL_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host \$http_host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Real-IP \$ak_real_ip;
-        proxy_set_header X-Forwarded-For \$ak_real_ip;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_buffering off;
-        proxy_request_buffering off;
-        access_log off;
-        add_header Cache-Control "no-store, no-cache, must-revalidate";
+        proxy_intercept_errors off;
     }
 
-    # ─── ЛОКАЦИЯ 2: ПОДПИСКИ КЛИЕНТОВ ───
+    # --- ЛОКАЦИЯ 2: ПОДПИСКИ КЛИЕНТОВ ---
     location ^~ /sub/ {
-        limit_req zone=subs burst=20 nodelay;
-        proxy_pass http://sub_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Host localhost;
-        proxy_set_header X-Real-IP \$ak_real_ip;
-        proxy_set_header X-Forwarded-For \$ak_real_ip;
+        limit_req zone=subs burst=60 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:$SUB_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_buffering on;
-        proxy_buffer_size 128k;
-        proxy_buffers 8 512k;
-        proxy_busy_buffers_size 1024k;
+        proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
-        add_header Cache-Control "no-store, no-cache, must-revalidate";
     }
 
     location ^~ ${SUB_PATH} {
-        limit_req zone=subs burst=20 nodelay;
-        proxy_pass http://sub_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Host localhost;
-        proxy_set_header X-Real-IP \$ak_real_ip;
-        proxy_set_header X-Forwarded-For \$ak_real_ip;
+        limit_req zone=subs burst=60 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:$SUB_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_buffering on;
-        proxy_set_header Accept-Encoding "";
+        proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
-        add_header Cache-Control "no-store, no-cache, must-revalidate";
     }
 
-    # ─── ЛОКАЦИЯ 3: VLESS xHTTP (Native HTTP/2 Stream-One + VLESSENC + VISION) ───
+    # --- ЛОКАЦИЯ 3: VLESS xHTTP (Native HTTP/2 Stream-One + VLESSENC + VISION) ---
     location ^~ ${XHTTP_STREAM_PATH} {
         if (\$request_method != POST) {
             return 404;
@@ -1514,10 +1510,10 @@ server {
         proxy_pass http://xray_xhttp_stream;
     }
 
-    # ─── ЛОКАЦИЯ 4: ДЕКОЙ САЙТ / МАСКИРОВКА ───
+    # --- ЛОКАЦИЯ 4: ДЕКОЙ САЙТ / МАСКИРОВКА ---
     $DECOY_LOCATION_BLOCKS
 
-    # ─── СЛУЖЕБНЫЕ ЛОКАЦИИ ───
+    # --- СЛУЖЕБНЫЕ ЛОКАЦИИ ---
     location = /robots.txt {
         default_type text/plain;
         access_log off;
@@ -1567,6 +1563,42 @@ server {
 
     $DECOY_LOCATION_BLOCKS
 
+    location ^~ ${PANEL_PATH} {
+        proxy_pass http://127.0.0.1:$PANEL_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host \$http_host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_intercept_errors off;
+    }
+
+    location ^~ /sub/ {
+        limit_req zone=subs burst=60 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:$SUB_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+    }
+
+    location ^~ ${SUB_PATH} {
+        limit_req zone=subs burst=60 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:$SUB_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+    }
+
     location @notfound {
         root $WEBROOT;
         rewrite ^ /404.html break;
@@ -1583,9 +1615,9 @@ systemctl unmask nginx || true
 systemctl enable nginx || true
 systemctl restart nginx
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 #  ФОРМИРОВАНИЕ ИТОГОВ И ИНСТРУКЦИИ ДЛЯ 3X-UI
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 UFW_DENY_LIST=""
 for port in "${ALL_REALITY_PORTS[@]:-}"; do
     if [ -n "$port" ]; then
@@ -1615,14 +1647,13 @@ if [ "$STEAL_ENABLED" -eq 1 ]; then
         [ ${#p_doms[@]} -gt 0 ] || continue
 
         REALITY_INBOUNDS_REPORT+="    - Инбаунд для порта ${GREEN}${port}${NC} (Домены: ${CYAN}${p_doms[*]}${NC}):
-      * ${YELLOW}Протокол:${NC} ${GREEN}vless${NC} | ${YELLOW}Транспорт:${NC} ${GREEN}tcp${NC}
-      * ${YELLOW}Порт:${NC} ${GREEN}${port}${NC} | ${YELLOW}Listen IP:${NC} ${GREEN}127.0.0.1${NC}
-      * ${YELLOW}Accept Proxy Protocol (xver):${NC} ${GREEN}1 (Включить)${NC}
-      * ${YELLOW}Flow:${NC} ${GREEN}xtls-rprx-vision${NC} (Для клиентов с поддержкой Vision)
-      * ${YELLOW}Безопасность:${NC} ${GREEN}reality${NC}
-      * ${YELLOW}Dest (Anti-Loop Fallback Port):${NC} ${GREEN}127.0.0.1:${REALITY_FALLBACK_PORT}${NC}
-      * ${YELLOW}Proxy Protocol для Dest (xver):${NC} ${GREEN}1 (Включить)${NC}
-      * ${YELLOW}Server Names (SNI):${NC} ${CYAN}${p_doms[*]}${NC}\n\n"
+      * ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}vless${NC} | Адрес: ${GREEN}127.0.0.1${NC} | Порт: ${GREEN}${port}${NC}
+      * ${YELLOW}Вкладка «Поток»:${NC} Транспорт: ${GREEN}RAW (tcp)${NC} | Accept Proxy Protocol: ${GREEN}Включить (xver: 1)${NC}
+      * ${YELLOW}Вкладка «Безопасность»:${NC} ${GREEN}Reality${NC} | uTLS: ${GREEN}chrome / firefox${NC}
+        - Dest (Anti-Loop Fallback): ${GREEN}127.0.0.1:${REALITY_FALLBACK_PORT}${NC}
+        - Proxy Protocol для Dest: ${GREEN}Включить (xver: 1)${NC}
+        - Server Names (SNI): ${CYAN}${p_doms[*]}${NC}
+      * ${YELLOW}Вкладка «Сниффинг»:${NC} Включить (${GREEN}HTTP, TLS, QUIC, FAKEDNS${NC})\n\n"
     done
 fi
 
@@ -1639,14 +1670,13 @@ if [ "$CLASSIC_ENABLED" -eq 1 ]; then
         primary_ext="${p_snis[0]}"
 
         REALITY_INBOUNDS_REPORT+="    - Инбаунд для порта ${GREEN}${port}${NC} (SNI: ${CYAN}${p_snis[*]}${NC}):
-      * ${YELLOW}Протокол:${NC} ${GREEN}vless${NC} | ${YELLOW}Транспорт:${NC} ${GREEN}tcp${NC}
-      * ${YELLOW}Порт:${NC} ${GREEN}${port}${NC} | ${YELLOW}Listen IP:${NC} ${GREEN}127.0.0.1${NC}
-      * ${YELLOW}Accept Proxy Protocol (xver):${NC} ${GREEN}1 (Включить)${NC}
-      * ${YELLOW}Flow:${NC} ${GREEN}xtls-rprx-vision${NC}
-      * ${YELLOW}Безопасность:${NC} ${GREEN}reality${NC}
-      * ${YELLOW}Dest (Target):${NC} ${CYAN}${primary_ext}:443${NC}
-      * ${YELLOW}Proxy Protocol для Dest (xver):${NC} ${RED}0 (Выключить)${NC}
-      * ${YELLOW}Server Names (SNI):${NC} ${CYAN}${p_snis[*]}${NC}\n\n"
+      * ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}vless${NC} | Адрес: ${GREEN}127.0.0.1${NC} | Порт: ${GREEN}${port}${NC}
+      * ${YELLOW}Вкладка «Поток»:${NC} Транспорт: ${GREEN}RAW (tcp)${NC} | Accept Proxy Protocol: ${GREEN}Включить (xver: 1)${NC}
+      * ${YELLOW}Вкладка «Безопасность»:${NC} ${GREEN}Reality${NC} | uTLS: ${GREEN}chrome / firefox${NC}
+        - Dest (Target): ${CYAN}${primary_ext}:443${NC}
+        - Proxy Protocol для Dest: ${RED}Выключить (xver: 0)${NC}
+        - Server Names (SNI): ${CYAN}${p_snis[*]}${NC}
+      * ${YELLOW}Вкладка «Сниффинг»:${NC} Включить (${GREEN}HTTP, TLS, QUIC, FAKEDNS${NC})\n\n"
     done
 fi
 
@@ -1683,41 +1713,33 @@ echo
 echo -e "${YELLOW}ШАГ 2: Инбаунды VLESS REALITY (3X-UI):${NC}"
 echo -e "$REALITY_INBOUNDS_REPORT"
 
-echo -e "${YELLOW}ШАГ 3: Инбаунд VLESS xHTTP (Stream-One + VLESSENC + VISION via H2):${NC}"
-echo -e "  - ${YELLOW}Протокол:${NC} ${GREEN}vless${NC} | ${YELLOW}Транспорт:${NC} ${GREEN}xhttp${NC}"
-echo -e "  - ${YELLOW}Порт:${NC} ${GREEN}$XHTTP_STREAM_PORT${NC} | ${YELLOW}Listen IP:${NC} ${GREEN}127.0.0.1${NC}"
-echo -e "  - ${YELLOW}Безопасность (Security):${NC} ${RED}none${NC} (SSL терминирует Nginx)"
-echo -e "  - ${YELLOW}Accept Proxy Protocol:${NC} ${RED}0 (Выключить)${NC}"
-echo -e "  - ${YELLOW}Stream Settings (Raw JSON в настройках Inbound 3X-UI):${NC}"
-echo -e "${CYAN}{
-  \"network\": \"xhttp\",
-  \"xhttpSettings\": {
-    \"path\": \"$XHTTP_STREAM_PATH\",
-    \"host\": \"$PRIMARY_DOMAIN\",
-    \"mode\": \"stream-one\",
-    \"xPaddingBytes\": \"120-1120\",
-    \"xPaddingObfsMode\": true,
-    \"xPaddingKey\": \"X-Amz-Meta-Trace\"
-  }
-}${NC}"
-echo -e "  - ${YELLOW}В настройках клиента (3X-UI Client Settings):${NC}"
-echo -e "    * ${YELLOW}Flow:${NC} ${GREEN}xtls-rprx-vision${NC} (${CYAN}Для клиентов с ядром Xray 24.9.27+ / 25.x / 26.x${NC})"
-echo -e "    * ${YELLOW}Decryption:${NC} Ключ ${GREEN}vlessenc${NC} (${CYAN}xray vlessenc${NC})"
-echo -e "    * ${YELLOW}SNI / Host:${NC} ${CYAN}$PRIMARY_DOMAIN${NC}"
-echo -e "    * ${YELLOW}Path:${NC} ${CYAN}$XHTTP_STREAM_PATH${NC}"
+echo -e "${YELLOW}ШАГ 3: Инбаунд VLESS xHTTP (Native H2 Stream-One + VLESSENC + VISION):${NC}"
+echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}vless${NC} | Адрес: ${GREEN}127.0.0.1${NC} | Порт: ${GREEN}$XHTTP_STREAM_PORT${NC}"
+echo -e "  - ${YELLOW}Вкладка «Протокол»:${NC} Генерация ключей: выбрать ${GREEN}ML-KEM-768 (native)${NC} и нажать ${CYAN}«Сгенерировать»${NC}"
+echo -e "  - ${YELLOW}Вкладка «Поток»:${NC}"
+echo -e "    * Транспорт: ${GREEN}xHTTP${NC} | Режим: ${GREEN}stream-one${NC}"
+echo -e "    * Хост: ${CYAN}$PRIMARY_DOMAIN${NC} | Путь: ${CYAN}$XHTTP_STREAM_PATH${NC}"
+echo -e "    * Padding Bytes: ${GREEN}120-1120${NC} | Padding Obfs Mode: ${GREEN}Включить${NC} | Key: ${GREEN}X-Amz-Meta-Trace${NC}"
+echo -e "    * QUIC Params / BBR: ${GREEN}Включить${NC}"
+echo -e "  - ${YELLOW}Вкладка «Безопасность»:${NC} ${RED}Нет (None)${NC} | Accept Proxy Protocol: ${RED}Выключить (0)${NC}"
+echo -e "  - ${YELLOW}Вкладка «Сниффинг»:${NC} Включить (${GREEN}HTTP, TLS, QUIC, FAKEDNS${NC})"
 echo
 
-echo -e "${YELLOW}ШАГ 4: Прямые SSL-инбаунды (Hysteria 2 / Trojan / Direct TLS):${NC}"
-echo -e "  - ${YELLOW}Протокол:${NC} ${GREEN}hysteria2${NC} (UDP) | ${YELLOW}Порт:${NC} ${GREEN}443${NC} (или 8443) | ${YELLOW}Listen IP:${NC} ${GREEN}0.0.0.0${NC}"
-echo -e "  - ${YELLOW}Certificate Path:${NC} ${CYAN}/etc/letsencrypt/live/$PRIMARY_DOMAIN/fullchain.pem${NC}"
-echo -e "  - ${YELLOW}Private Key Path:${NC} ${CYAN}/etc/letsencrypt/live/$PRIMARY_DOMAIN/privkey.pem${NC}"
+echo -e "${YELLOW}ШАГ 4: Прямые SSL-инбаунды (Hysteria 2 / UDP):${NC}"
+echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}hysteria (v2)${NC} | Адрес: ${GREEN}0.0.0.0${NC} | Порт: ${GREEN}443${NC}"
+echo -e "  - ${YELLOW}Вкладка «Поток»:${NC} Masquerade: тип ${GREEN}proxy${NC} -> URL: ${CYAN}http://127.0.0.1:80${NC}"
+echo -e "  - ${YELLOW}Вкладка «Безопасность»:${NC} ${GREEN}TLS${NC} | SNI: ${CYAN}$PRIMARY_DOMAIN${NC} | ALPN: ${GREEN}h3${NC}"
+echo -e "    * Публичный ключ: ${CYAN}/etc/letsencrypt/live/$PRIMARY_DOMAIN/fullchain.pem${NC}"
+echo -e "    * Приватный ключ: ${CYAN}/etc/letsencrypt/live/$PRIMARY_DOMAIN/privkey.pem${NC}"
 echo
 
-echo -e "${YELLOW}ШАГ 5: Настройки Подписок и Хостов (Hosts) 3X-UI:${NC}"
-echo -e "  - ${YELLOW}Subscription Port:${NC} ${GREEN}$SUB_PORT${NC}"
-echo -e "  - ${YELLOW}Subscription Path:${NC} ${GREEN}$SUB_PATH${NC}"
-echo -e "  - ${YELLOW}Subscription URL (Sub URL):${NC} ${CYAN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
-echo -e "  - ${YELLOW}В разделе «Хосты» (Hosts 🌐) добавьте 2 правила:${NC}"
+echo -e "${YELLOW}ШАГ 5: Настройки Клиента и Подписок в 3X-UI:${NC}"
+echo -e "  - ${YELLOW}В карточке Клиента (Клиенты -> Учетные данные):${NC}"
+echo -e "    * Flow: выбрать ${GREEN}xtls-rprx-vision${NC} (Ключи VLESS-ENC панель подставит в подписку автоматически)"
+echo -e "  - ${YELLOW}Настройки подписок (Панель -> Подписка):${NC}"
+echo -e "    * Subscription Port: ${GREEN}$SUB_PORT${NC} | Subscription Path: ${GREEN}$SUB_PATH${NC}"
+echo -e "    * Subscription URL: ${CYAN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
+echo -e "  - ${YELLOW}В разделе «Хосты» (Hosts ??) добавьте 2 правила:${NC}"
 echo -e "    1) ${BOLD}MAIN_SAME_443:${NC} Инбаунды: ${CYAN}REALITY + Hysteria 2${NC} -> Порт: ${GREEN}443${NC} | Безопасность: ${GREEN}same${NC}"
 echo -e "    2) ${BOLD}XHTTP_TLS_443:${NC} Инбаунд: ${CYAN}VLESS_XHTTP${NC} -> Порт: ${GREEN}443${NC} | Безопасность: ${GREEN}tls${NC} (SNI: ${CYAN}$PRIMARY_DOMAIN${NC})"
 echo -e "${GREEN}=====================================================================${NC}"
