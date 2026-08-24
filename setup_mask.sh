@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v6.0.2 Universal (Native HTTP/2 Edition)
+# Production AutoSetup: Hardened Engine v6.0.3 Universal (Native HTTP/2 Edition)
 # Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 5 Decoys 
 # ==============================================================================
 # Архитектура:
@@ -11,9 +11,9 @@
 #   4) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2 Streaming
 #   5) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
 #   6) 5 режимов маскировки (Decoy Front):
-#      - 1: Интеллектуальное зеркалирование animesss.com (Anime/Media Portal)
+#      - 1: Интеллектуальное зеркалирование animego.org (Anime/Media Portal)
 #      - 2: Интеллектуальное зеркалирование stream.is74.ru/0/streaming (Live Video Stream)
-#      - 3: Корпоративный IT SaaS (DataSphere Analytics)
+#      - 3: Корпоративный IT SaaS (DataSphere Analytics - Интерактивный SPA)
 #      - 4: Облако CosmosCloud (с эмуляцией API и ассетами)
 #      - 5: Стандартная заглушка Nginx (Welcome to nginx)
 #   7) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
@@ -286,20 +286,20 @@ XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
 
 echo
 echo -e "${YELLOW}Шаг 6: Параметры сайта-маскировки (1 и 2 - Streaming Mirror, 3-4-5 сайты-заглушки)${NC}"
-echo -e " 1) ${GREEN}Интеллектуальное зеркалирование animesss.com${NC}"
+echo -e " 1) ${GREEN}Интеллектуальное зеркалирование animego.org${NC}"
 echo -e " 2) ${GREEN}Интеллектуальное зеркалирование stream.is74.ru/0/streaming (Live Video Stream)${NC}"
-echo -e " 3) Корпоративный IT SaaS (Локальная посадочная страница DataSphere Analytics)"
+echo -e " 3) ${GREEN}Корпоративный IT SaaS (Интерактивная консоль DataSphere Analytics)${NC}"
 echo -e " 4) Облако CosmosCloud"
 echo -e " 5) Стандартная заглушка Nginx (Welcome to nginx)"
 prompt_default "Выберите вариант маскировки (1, 2, 3, 4 или 5)" "1" DECOY_MODE
 
-MIRROR_TARGET_HOST="animesss.com"
+MIRROR_TARGET_HOST="animego.org"
 MIRROR_TARGET_URI=""
-MIRROR_BRAND="AnimeSSS"
+MIRROR_BRAND="AnimeGO"
 
 if [ "$DECOY_MODE" = "1" ]; then
-    prompt_default "Хост внешнего медиа-портала для зеркалирования" "animesss.com" MIRROR_TARGET_HOST
-    prompt_default "Бренд для подмены в HTML-шапках" "AnimeSSS" MIRROR_BRAND
+    prompt_default "Хост внешнего медиа-портала для зеркалирования" "animego.org" MIRROR_TARGET_HOST
+    prompt_default "Бренд для подмены в HTML-шапках" "AnimeGO" MIRROR_BRAND
 elif [ "$DECOY_MODE" = "2" ]; then
     prompt_default "Хост внешнего медиа-сервера для зеркалирования" "stream.is74.ru" MIRROR_TARGET_HOST
     prompt_default "Путь видеотрансляции / видеопотока" "/0/streaming" MIRROR_TARGET_URI
@@ -312,7 +312,7 @@ if [[ "$DECOY_MODE" = "1" || "$DECOY_MODE" = "2" ]]; then
         warn "Обнаружено совпадение хоста зеркалирования с собственным доменом сервера ($MIRROR_TARGET_HOST)!"
         warn "Во избежание петли запросов хост автоматически сброшен на внешний источник по умолчанию."
         if [ "$DECOY_MODE" = "1" ]; then
-            MIRROR_TARGET_HOST="animesss.com"
+            MIRROR_TARGET_HOST="animego.org"
         else
             MIRROR_TARGET_HOST="stream.is74.ru"
         fi
@@ -653,57 +653,561 @@ done
 log "Формирование маскировочного контента..."
 
 if [ "$DECOY_MODE" = "3" ]; then
-    # 3) DataSphere Analytics
+    # 3) DataSphere Analytics (Интерактивная консоль с модальным окном и красивыми шрифтами)
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DataSphere - Платформа облачной аналитики</title>
+    <title>DataSphere Analytics - Интеллектуальная платформа облачных данных</title>
     <style>
-        :root { --primary: #3b82f6; --primary-hover: #2563eb; --bg: #0f172a; --surface: #1e293b; --text: #f8fafc; --text-muted: #94a3b8; }
-        body { margin: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
-        header { display: flex; justify-content: space-between; align-items: center; padding: 24px 5%; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .logo { font-size: 22px; font-weight: 700; display: flex; align-items: center; gap: 10px; letter-spacing: -0.5px; }
-        .btn { background: var(--primary); color: #fff; border: none; padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-        .hero { text-align: center; padding: 120px 20px; max-width: 800px; margin: 0 auto; }
-        .hero h1 { font-size: 56px; line-height: 1.1; margin-bottom: 24px; letter-spacing: -1.5px; }
-        .hero p { font-size: 20px; color: var(--text-muted); margin: 0 auto 40px; line-height: 1.6; }
-        .features { display: flex; gap: 30px; justify-content: center; padding: 60px 5%; flex-wrap: wrap; background: rgba(0,0,0,0.2); border-top: 1px solid rgba(255,255,255,0.02); }
-        .feature-card { background: var(--surface); padding: 40px; border-radius: 16px; flex: 1; min-width: 280px; max-width: 380px; border: 1px solid rgba(255,255,255,0.05); text-align: left; }
-        .feature-card h3 { font-size: 20px; margin: 20px 0 10px; }
-        .feature-card p { color: var(--text-muted); line-height: 1.5; font-size: 15px; }
-        .icon { width: 40px; height: 40px; color: var(--primary); }
-        footer { text-align: center; padding: 40px; color: var(--text-muted); font-size: 14px; border-top: 1px solid rgba(255,255,255,0.05); }
+        :root {
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --primary-glow: rgba(59, 130, 246, 0.35);
+            --accent: #6366f1;
+            --bg: #0b0f19;
+            --surface: #111827;
+            --surface-card: rgba(17, 24, 39, 0.85);
+            --text: #f9fafb;
+            --text-muted: #9ca3af;
+            --border: rgba(255, 255, 255, 0.08);
+            --danger: #ef4444;
+            --success: #10b981;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.12) 0px, transparent 50%);
+            min-height: 100vh;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 6%;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(16px);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            background: rgba(11, 15, 25, 0.75);
+        }
+
+        .logo {
+            font-size: 21px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            letter-spacing: -0.5px;
+            color: #fff;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 16px var(--primary-glow);
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: #fff;
+            border: none;
+            padding: 11px 22px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 14px rgba(59, 130, 246, 0.25);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+            filter: brightness(1.08);
+        }
+
+        .btn:active { transform: translateY(0); }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+            box-shadow: none;
+        }
+
+        .btn-outline:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: none;
+        }
+
+        .hero {
+            text-align: center;
+            padding: 100px 20px 80px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #93c5fd;
+            margin-bottom: 24px;
+        }
+
+        .badge-dot {
+            width: 7px;
+            height: 7px;
+            background: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        .hero h1 {
+            font-size: clamp(36px, 5vw, 58px);
+            font-weight: 800;
+            line-height: 1.15;
+            margin-bottom: 24px;
+            letter-spacing: -1.5px;
+            background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero p {
+            font-size: clamp(16px, 2vw, 19px);
+            color: var(--text-muted);
+            margin: 0 auto 36px;
+            line-height: 1.65;
+            max-width: 720px;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .stats-bar {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 60px;
+            padding-top: 40px;
+            border-top: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+
+        .stat-item h4 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+
+        .stat-item p {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            max-width: 1100px;
+            margin: 40px auto 100px;
+            padding: 0 6%;
+        }
+
+        .feature-card {
+            background: var(--surface-card);
+            padding: 32px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(59, 130, 246, 0.4);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+        }
+
+        .feature-card .icon-box {
+            width: 44px;
+            height: 44px;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+
+        .feature-card h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+
+        .feature-card p {
+            color: var(--text-muted);
+            line-height: 1.55;
+            font-size: 14px;
+        }
+
+        /* --- МОДАЛЬНОЕ ОКНО АВТОРИЗАЦИИ / ПОДКЛЮЧЕНИЯ --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(5, 8, 15, 0.82);
+            backdrop-filter: blur(12px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            z-index: 100;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal-card {
+            background: var(--surface);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 440px;
+            padding: 36px 32px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 30px rgba(59, 130, 246, 0.15);
+            transform: scale(0.95) translateY(10px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .modal-overlay.active .modal-card {
+            transform: scale(1) translateY(0);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 24px;
+        }
+
+        .modal-header h2 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+
+        .modal-header p {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s;
+        }
+
+        .modal-close:hover { color: #fff; }
+
+        .form-group {
+            margin-bottom: 18px;
+            text-align: left;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: #cbd5e1;
+            margin-bottom: 6px;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 14px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            color: #fff;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+            background: rgba(15, 23, 42, 0.95);
+        }
+
+        .alert-box {
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 20px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            animation: fadeIn 0.25s ease;
+        }
+
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+            font-size: 13px;
+            border-top: 1px solid var(--border);
+        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
     <header>
         <div class="logo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="28" height="28"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <div class="logo-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="18" height="18"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
             DataSphere
         </div>
-        <button class="btn">Консоль</button>
+        <button class="btn" onclick="openAuthModal('Вход в Консоль')">Консоль</button>
     </header>
-    <section class="hero">
-        <h1>Инфраструктура данных нового поколения</h1>
-        <p>Высоконадежное корпоративное облако для распределенных вычислений и аналитики больших данных с непрерывным мониторингом доступности.</p>
-        <button class="btn" style="padding: 16px 32px; font-size: 18px;">Подключить узел</button>
-    </section>
-    <section class="features">
-        <div class="feature-card">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            <h3>Сквозное шифрование</h3>
-            <p>Передача сетевых пакетов осуществляется с аппаратным ускорением TLS 1.3 / AES-GCM.</p>
+
+    <main>
+        <section class="hero">
+            <div class="badge">
+                <span class="badge-dot"></span>
+                <span>DataSphere Cloud Engine v3.14 — Доступность 99.998%</span>
+            </div>
+            <h1>Инфраструктура распределённых данных нового поколения</h1>
+            <p>Высоконадежная корпоративная аналитическая среда с аппаратным ускорением сетевого стека, сквозным TLS 1.3 шифрованием и Anycast-маршрутизацией узлов.</p>
+            <div class="hero-actions">
+                <button class="btn" style="padding: 14px 28px; font-size: 15px;" onclick="openAuthModal('Подключение вычислительного узла')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    Подключить узел
+                </button>
+                <button class="btn btn-outline" style="padding: 14px 28px; font-size: 15px;" onclick="fetchClusterStatus()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    Статус сети
+                </button>
+            </div>
+
+            <div class="stats-bar">
+                <div class="stat-item">
+                    <h4>&lt; 1.2 ms</h4>
+                    <p>Средняя задержка ядра</p>
+                </div>
+                <div class="stat-item">
+                    <h4>100 Gbps</h4>
+                    <p>Пропускная способность</p>
+                </div>
+                <div class="stat-item">
+                    <h4>TLS 1.3 / H2</h4>
+                    <p>Аппаратное шифрование</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="features">
+            <div class="feature-card">
+                <div class="icon-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </div>
+                <h3>Сквозное квантовое шифрование</h3>
+                <p>Передача сетевых пакетов осуществляется с аппаратным криптоускорением TLS 1.3 и защитой от перехвата пакетов на пограничных маршрутизаторах.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                </div>
+                <h3>Распределённая телеметрия</h3>
+                <p>Многопоточный конвейер аналитики агрегирует метрики узлов в реальном времени с нулевой деградацией пропускной способности каналов.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6"/></svg>
+                </div>
+                <h3>Изоляция сокетов IPC</h3>
+                <p>Все процессы ввода-вывода распределяются по энергонезависимым сегментам оперативной памяти с прямой маршрутизацией через Unix-сокеты.</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- МОДАЛЬНОЕ ОКНО АВТОРИЗАЦИИ / КЛАСТЕРА -->
+    <div id="authModal" class="modal-overlay" onclick="closeOnBackdrop(event)">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div>
+                    <h2 id="modalTitle">Авторизация в DataSphere</h2>
+                    <p>Введите учётные данные для доступа к управляющей консоли</p>
+                </div>
+                <button class="modal-close" onclick="closeAuthModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <div id="errorAlert" class="alert-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span id="errorMsg">Ошибка аутентификации</span>
+            </div>
+
+            <form id="authForm" onsubmit="handleDataSphereAuth(event)">
+                <div class="form-group">
+                    <label for="dsUser">Идентификатор узла или Email</label>
+                    <input type="text" id="dsUser" class="form-control" placeholder="cluster-admin@datasphere.cloud" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="dsKey">Секретный ключ авторизации / API Token</label>
+                    <input type="password" id="dsKey" class="form-control" placeholder="••••••••••••••••" required autocomplete="current-password">
+                </div>
+                <button type="submit" id="submitBtn" class="btn" style="width: 100%; height: 46px; margin-top: 10px;">
+                    Подключиться к кластеру
+                </button>
+            </form>
         </div>
-        <div class="feature-card">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-            <h3>Отказоустойчивость</h3>
-            <p>Распределенный кластер на базе Anycast DNS обеспечивает SLA доступности 99.99%.</p>
-        </div>
-    </section>
-    <footer>&copy; 2026 DataSphere Cloud Systems. All rights reserved.</footer>
+    </div>
+
+    <footer>
+        &copy; 2026 DataSphere Cloud Systems Inc. Платформа распределенной аналитики и защиты данных.
+    </footer>
+
+    <script>
+        function openAuthModal(title) {
+            document.getElementById("modalTitle").innerText = title || "Авторизация в DataSphere";
+            document.getElementById("errorAlert").style.display = "none";
+            document.getElementById("authModal").classList.add("active");
+            document.getElementById("dsUser").focus();
+        }
+
+        function closeAuthModal() {
+            document.getElementById("authModal").classList.remove("active");
+        }
+
+        function closeOnBackdrop(e) {
+            if (e.target.id === "authModal") closeAuthModal();
+        }
+
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") closeAuthModal();
+        });
+
+        function setSessionCookie() {
+            document.cookie = "datasphere_session=" + Math.random().toString(36).substring(2) + "; path=/; Secure; SameSite=Lax";
+        }
+
+        async function fetchClusterStatus() {
+            try {
+                const res = await fetch("/api/v1/datasphere/status");
+                const data = await res.json();
+                alert("Статус кластера DataSphere: " + (data.status || "online") + "\nАктивных нод: " + (data.nodes_active || 148) + "\nSLA доступности: " + (data.telemetry_rate || "99.998%"));
+            } catch(e) {
+                openAuthModal("Мониторинг кластера (Требуется ключ)");
+            }
+        }
+
+        async function handleDataSphereAuth(e) {
+            e.preventDefault();
+            const btn = document.getElementById("submitBtn");
+            const errBox = document.getElementById("errorAlert");
+            const errText = document.getElementById("errorMsg");
+
+            errBox.style.display = "none";
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner"></div>';
+
+            try {
+                const response = await fetch("/api/v1/datasphere/auth", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        principal: document.getElementById("dsUser").value,
+                        secret: document.getElementById("dsKey").value
+                    })
+                });
+
+                const result = await response.json();
+                errText.innerText = result.error || "Недействительный токен кластера или ключ авторизации узла.";
+                errBox.style.display = "flex";
+            } catch (err) {
+                errText.innerText = "Ошибка защищенного соединения с контроллером кластера.";
+                errBox.style.display = "flex";
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = "Подключиться к кластеру";
+            }
+        }
+
+        setSessionCookie();
+    </script>
 </body>
 </html>
 EOF
@@ -1080,9 +1584,9 @@ EOF
 DECOY_LOCATION_BLOCKS=""
 
 if [ "$DECOY_MODE" = "1" ]; then
-    # Режим 1: Зеркалирование animesss.com
+    # Режим 1: Зеркалирование animego.org
     DECOY_LOCATION_BLOCKS="
-        location ~* ^/(uploads|public|engine|templates)/ {
+        location ~* ^/(uploads|public|engine|templates|static|system)/ {
             root /var/www/mirror;
             try_files \$uri @store_static;
             access_log off;
@@ -1106,7 +1610,7 @@ if [ "$DECOY_MODE" = "1" ]; then
             proxy_temp_path /var/www/proxy_temp;
         }
 
-        location ~ ^/(assets|cdn|aniserials|api|player)/ {
+        location ~ ^/(assets|cdn|upload|api|player|video|media|ajax)/ {
             access_log off;
             limit_req zone=assets burst=150 nodelay;
 
@@ -1146,7 +1650,7 @@ if [ "$DECOY_MODE" = "1" ]; then
             sub_filter '//$MIRROR_TARGET_HOST' '//\$host';
             sub_filter '$MIRROR_BRAND' '$PRIMARY_DOMAIN';
             sub_filter_once off;
-            sub_filter_types text/xml text/plain;
+            sub_filter_types text/xml text/plain application/json application/javascript;
         }
 
         location ^~ /cdn-cgi/ {
@@ -1311,6 +1815,41 @@ elif [ "$DECOY_MODE" = "2" ]; then
             sub_filter_types text/xml text/plain;
         }
 "
+elif [ "$DECOY_MODE" = "3" ]; then
+    # Режим 3: DataSphere Analytics (API эмуляция и заголовки)
+    DECOY_LOCATION_BLOCKS="
+        add_header X-DataSphere-Engine \"v3.14.8-enterprise\" always;
+
+        location ~ ^/(api/v1/datasphere/status|status)\$ {
+            default_type application/json;
+            return 200 '{\"status\":\"online\",\"cluster\":\"datasphere-eu-central\",\"nodes_active\":148,\"telemetry_rate\":\"99.998%\",\"version\":\"3.14.8\"}';
+        }
+
+        location = /api/v1/datasphere/auth {
+            if (\$request_method = POST) {
+                add_header Content-Type \"application/json; charset=utf-8\" always;
+                return 401 '{\"status\":\"error\",\"code\":401,\"error\":\"Недействительный токен кластера или ключ авторизации узла. Доступ запрещен.\"}';
+            }
+            return 405;
+        }
+
+        location = / {
+            default_type text/html;
+            root $WEBROOT;
+            try_files /index.html =404;
+        }
+
+        location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|webp)\$ {
+            root $WEBROOT;
+            expires 7d;
+            access_log off;
+            try_files \$uri =404;
+        }
+
+        location / {
+            return 404;
+        }
+"
 elif [ "$DECOY_MODE" = "4" ]; then
     # Режим 4: CosmosCloud
     DECOY_LOCATION_BLOCKS="
@@ -1347,7 +1886,7 @@ elif [ "$DECOY_MODE" = "4" ]; then
         }
 "
 else
-    # Режимы 3 и 5: Локальный HTML (DataSphere или Welcome to nginx)
+    # Режим 5: Welcome to nginx
     DECOY_LOCATION_BLOCKS="
         location = / {
             default_type text/html;
@@ -1682,11 +2221,11 @@ fi
 
 DECOY_NAME="Локальный Front"
 if [ "$DECOY_MODE" = "1" ]; then
-    DECOY_NAME="Animesss Mirror (https://${MIRROR_TARGET_HOST})"
+    DECOY_NAME="AnimeGO Mirror (https://${MIRROR_TARGET_HOST})"
 elif [ "$DECOY_MODE" = "2" ]; then
     DECOY_NAME="IS74 Stream Mirror (http://${MIRROR_TARGET_HOST}${MIRROR_TARGET_URI})"
 elif [ "$DECOY_MODE" = "3" ]; then
-    DECOY_NAME="DataSphere IT SaaS"
+    DECOY_NAME="DataSphere IT SaaS (Интерактивная консоль)"
 elif [ "$DECOY_MODE" = "4" ]; then
     DECOY_NAME="CosmosCloud Front"
 elif [ "$DECOY_MODE" = "5" ]; then
@@ -1739,7 +2278,7 @@ echo -e "    * Flow: выбрать ${GREEN}xtls-rprx-vision${NC} (Ключи VL
 echo -e "  - ${YELLOW}Настройки подписок (Панель -> Подписка):${NC}"
 echo -e "    * Subscription Port: ${GREEN}$SUB_PORT${NC} | Subscription Path: ${GREEN}$SUB_PATH${NC}"
 echo -e "    * Subscription URL: ${CYAN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
-echo -e "  - ${YELLOW}В разделе «Хосты» (Hosts ??) добавьте 2 правила:${NC}"
+echo -e "  - ${YELLOW}В разделе «Хосты» (Hosts 🌐) добавьте 2 правила:${NC}"
 echo -e "    1) ${BOLD}MAIN_SAME_443:${NC} Инбаунды: ${CYAN}REALITY + Hysteria 2${NC} -> Порт: ${GREEN}443${NC} | Безопасность: ${GREEN}same${NC}"
 echo -e "    2) ${BOLD}XHTTP_TLS_443:${NC} Инбаунд: ${CYAN}VLESS_XHTTP${NC} -> Порт: ${GREEN}443${NC} | Безопасность: ${GREEN}tls${NC} (SNI: ${CYAN}$PRIMARY_DOMAIN${NC})"
 echo -e "${GREEN}=====================================================================${NC}"
