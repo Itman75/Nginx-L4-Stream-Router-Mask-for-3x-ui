@@ -1,5 +1,3 @@
-Ниже представлена полностью обновлённая, цельная и подробная документация (README), актуализированная под версию **v6.0.3 Universal** с учётом зеркалирования **AnimeGO (animego.org)**, интерактивного SPA-интерфейса **DataSphere Analytics (Режим 3)** с эмуляцией API и нативного шлюза **HTTP/2 xHTTP**:
-
 ---
 
 # 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.0.3 Universal)
