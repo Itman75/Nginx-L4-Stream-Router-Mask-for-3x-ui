@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v6.0.3 Universal (Native HTTP/2 Edition)
+# Production AutoSetup: Hardened Engine v6.0.4 Universal (Native HTTP/2 & AWG)
 # Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 5 Decoys 
 # ==============================================================================
 # Архитектура:
@@ -9,15 +9,16 @@
 #   2) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
 #   3) Classic External REALITY (Выделение портов для внешних SNI)
 #   4) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2 Streaming
-#   5) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
-#   6) 5 режимов маскировки (Decoy Front):
+#   5) Прямые UDP-туннели: Hysteria 2 (443/UDP) + AmneziaWG / AWG (8443/UDP)
+#   6) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
+#   7) 5 режимов маскировки (Decoy Front):
 #      - 1: Интеллектуальное зеркалирование animego.org (Anime/Media Portal)
 #      - 2: Интеллектуальное зеркалирование stream.is74.ru/0/streaming (Live Video Stream)
 #      - 3: Корпоративный IT SaaS (DataSphere Analytics - Интерактивный SPA)
 #      - 4: Облако CosmosCloud (с эмуляцией API и ассетами)
 #      - 5: Стандартная заглушка Nginx (Welcome to nginx)
-#   7) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
-#   8) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm)
+#   8) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
+#   9) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
 # ==============================================================================
 
 set -euo pipefail
@@ -38,7 +39,7 @@ die()  { echo -e "${RED}[X] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN} Nginx xHTTP VLESSENC+VISION Router v6.0 (NATIVE HTTP/2 UPSTREAM)  ${NC}"
+echo -e "${GREEN} Nginx xHTTP + REALITY + Hy2 (443) + AWG (8443) Router v6.0.4       ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 # ----------------------- Системные предусловия -----------------------
@@ -265,7 +266,7 @@ while true; do
 done
 
 echo
-echo -e "${YELLOW}Шаг 5: Привязка внутренних портов 3X-UI и HTTP/2 xHTTP (Stream-One)${NC}"
+echo -e "${YELLOW}Шаг 5: Привязка внутренних портов 3X-UI, xHTTP и AmneziaWG${NC}"
 prompt_default "Внутренний порт панели 3X-UI" "10443" PANEL_PORT
 prompt_default "Секретный URI-путь к веб-панели (без слэшей)" "my-3x-panel" RAW_PATH
 validate_path_segment "$RAW_PATH" "URI панели"
@@ -283,6 +284,8 @@ prompt_default "URI-путь для xHTTP Stream-One" "Stream-One-Path" RAW_XHTT
 validate_path_segment "$RAW_XHTTP_STREAM_PATH" "URI xHTTP"
 XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
 XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
+
+prompt_default "Внешний UDP-порт для AmneziaWG (AWG)" "8443" AWG_UDP_PORT
 
 echo
 echo -e "${YELLOW}Шаг 6: Параметры сайта-маскировки (1 и 2 - Streaming Mirror, 3-4-5 сайты-заглушки)${NC}"
@@ -376,7 +379,7 @@ if [ -n "$WAN_IP" ]; then
 fi
 
 # =============================================================
-#  ТЮНИНГ ЯДРА LINUX (SYSCTL BBR, SOMAXCONN & BUFFERS)
+#  ТЮНИНГ ЯДРА LINUX (SYSCTL BBR, SOMAXCONN & UDP BUFFERS)
 # =============================================================
 log "Применение расширенного тюнинга сетевого стека и ядра Linux..."
 
@@ -392,7 +395,7 @@ net.ipv4.conf.default.rp_filter = 1
 vm.swappiness = 10
 
 # ====================================================================
-# XRAY / NGINX ОПТИМИЗАЦИИ И ТЮНИНГ ОЧЕРЕДЕЙ
+# XRAY / AWG / NGINX ОПТИМИЗАЦИИ И ТЮНИНГ ОЧЕРЕДЕЙ
 # ====================================================================
 net.ipv4.ip_local_port_range = 1024 65535
 net.core.netdev_max_backlog = 16384
@@ -409,7 +412,7 @@ net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_orphan_retries = 2
 net.ipv4.tcp_slow_start_after_idle = 0
 
-# Оптимизация буферов TCP/UDP под видео-стриминг и туннели
+# Оптимизация буферов TCP/UDP под видео-стриминг, Hy2 и AmneziaWG
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 net.core.rmem_default = 212992
@@ -436,7 +439,7 @@ net.ipv4.tcp_notsent_lowat = 16384
 EOF
 
 sysctl --system >/dev/null 2>&1 || true
-ok "Параметры ядра BBR, fq и оптимизации сокетов успешно применены."
+ok "Параметры ядра BBR, fq, UDP и оптимизации сокетов успешно применены."
 
 # Увеличение лимитов безопасности для системы и служб
 cat << 'EOF' > /etc/security/limits.d/99-proxy-limits.conf
@@ -1513,7 +1516,7 @@ stream {
 }
 EOF
 
-# 2. Карта SNI для Stream L4
+# 2. Карта SNI для Stream L4 (443 и 8443 TCP)
 STREAM_MAP_RULES=""
 REALITY_UPSTREAMS=""
 
@@ -2234,7 +2237,7 @@ fi
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.0 NATIVE HTTP/2 EDITION)!   "
+echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.0.4 NATIVE H2 & AWG EDITION)! "
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Маска-Фронтенд:              ${CYAN}https://${PRIMARY_DOMAIN}${NC} (${DECOY_NAME})"
 echo -e "  Вход в панель 3X-UI:         ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
@@ -2244,8 +2247,8 @@ echo
 echo -e "${YELLOW}[SSL] ВЫПУЩЕННЫЕ СЕРТИФИКАТЫ:${NC}"
 echo -e "$SSL_CERT_REPORT"
 
-echo -e "${YELLOW}ШАГ 1: Настройка файервола UFW (Защита локальных сокетов):${NC}"
-echo -e "  ${CYAN}ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && ufw allow 8443/tcp && ufw allow 8443/udp${NC}"
+echo -e "${YELLOW}ШАГ 1: Настройка файервола UFW (Защита локальных сокетов и открытие VPN):${NC}"
+echo -e "  ${CYAN}ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && ufw allow 8443/tcp && ufw allow $AWG_UDP_PORT/udp${NC}"
 echo -e "  ${RED}ufw deny $PANEL_PORT/tcp && ufw deny $SUB_PORT/tcp && ufw deny $XHTTP_STREAM_PORT/tcp && ufw deny $REALITY_FALLBACK_PORT/tcp${UFW_DENY_LIST}${NC}"
 echo
 
@@ -2264,15 +2267,23 @@ echo -e "  - ${YELLOW}Вкладка «Безопасность»:${NC} ${RED}Н
 echo -e "  - ${YELLOW}Вкладка «Сниффинг»:${NC} Включить (${GREEN}HTTP, TLS, QUIC, FAKEDNS${NC})"
 echo
 
-echo -e "${YELLOW}ШАГ 4: Прямые SSL-инбаунды (Hysteria 2 / UDP):${NC}"
-echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}hysteria (v2)${NC} | Адрес: ${GREEN}0.0.0.0${NC} | Порт: ${GREEN}443${NC}"
+echo -e "${YELLOW}ШАГ 4: Инбаунд Hysteria 2 (UDP 443):${NC}"
+echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}hysteria (v2)${NC} | Адрес: ${GREEN}0.0.0.0${NC} | Порт: ${GREEN}443${NC} (UDP)"
 echo -e "  - ${YELLOW}Вкладка «Поток»:${NC} Masquerade: тип ${GREEN}proxy${NC} -> URL: ${CYAN}http://127.0.0.1:80${NC}"
 echo -e "  - ${YELLOW}Вкладка «Безопасность»:${NC} ${GREEN}TLS${NC} | SNI: ${CYAN}$PRIMARY_DOMAIN${NC} | ALPN: ${GREEN}h3${NC}"
 echo -e "    * Публичный ключ: ${CYAN}/etc/letsencrypt/live/$PRIMARY_DOMAIN/fullchain.pem${NC}"
 echo -e "    * Приватный ключ: ${CYAN}/etc/letsencrypt/live/$PRIMARY_DOMAIN/privkey.pem${NC}"
 echo
 
-echo -e "${YELLOW}ШАГ 5: Настройки Клиента и Подписок в 3X-UI:${NC}"
+echo -e "${YELLOW}ШАГ 5: Инбаунд AmneziaWG / AWG (UDP $AWG_UDP_PORT):${NC}"
+echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}amneziawg / wireguard${NC} | Адрес: ${GREEN}0.0.0.0${NC} | Порт: ${GREEN}$AWG_UDP_PORT${NC} (UDP)"
+echo -e "  - ${YELLOW}Вкладка «Параметры AWG» (Обфускация):${NC}"
+echo -e "    * Нажмите ${CYAN}«Сгенерировать случайные параметры»${NC} (панель создаст уникальные Jc, Jmin/Jmax, S1/S2, H1-H4)"
+echo -e "    * Рекомендуемые диапазоны: ${GREEN}Jc = 3-5${NC} | ${GREEN}Jmin-Jmax = 40-200${NC} | ${GREEN}S1-S2 = 15-60${NC}"
+echo -e "  - ${YELLOW}Вкладка «Клиенты»:${NC} Добавьте клиента, скачайте файл ${CYAN}.conf${NC} или отсканируйте QR-код в приложении ${GREEN}AmneziaVPN / AmneziaWG${NC}"
+echo
+
+echo -e "${YELLOW}ШАГ 6: Настройки Клиента и Подписок в 3X-UI:${NC}"
 echo -e "  - ${YELLOW}В карточке Клиента (Клиенты -> Учетные данные):${NC}"
 echo -e "    * Flow: выбрать ${GREEN}xtls-rprx-vision${NC} (Ключи VLESS-ENC панель подставит в подписку автоматически)"
 echo -e "  - ${YELLOW}Настройки подписок (Панель -> Подписка):${NC}"
