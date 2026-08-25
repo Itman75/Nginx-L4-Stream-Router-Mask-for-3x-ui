@@ -1,13 +1,13 @@
-# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.0.3 Universal)
+# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.0.4 Universal)
 
-> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing), полной изоляцией внутренних служб и 100% совместимостью с Nginx Open Source.**  
+> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, поддержкой AmneziaWG (AWG), многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing), полной изоляцией внутренних служб и 100% совместимостью с Nginx Open Source.**  
 > Развёртывается на чистых ОС семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
 
 ---
 
-## 🌟 Ключевые возможности архитектуры v6.0.3 Universal
+## 🌟 Ключевые возможности архитектуры v6.0.4 Universal
 
-Комплекс состоит из скрипта первичной настройки защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.0.3**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x**:
+Комплекс состоит из скрипта первичной настройки защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.0.4**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x** и модулями **AmneziaWG (AWG)**:
 
 ### 1. Сценарий 1: Steal-Oneself REALITY (Кража у самого себя с Anti-Loop Port 9443)
 * Выпуск легитимных SSL-сертификатов Let's Encrypt на собственные домены.
@@ -26,20 +26,25 @@
 * **XTLS-Vision поверх xHTTP:** В клиентах с версией ядра **Xray 24.9.27+** активируется `flow: xtls-rprx-vision` совместно с `vlessenc` для динамического паддинга и маскировки под стандартный веб-трафик.
 * **Паддинг заголовков:** Случайный мусор в HTTP-заголовках (`xPaddingBytes: 120-1120`, ключ `X-Amz-Meta-Trace`).
 
-### 4. Межпроцессная связь через Unix Sockets в RAM и Nginx Mainline (Open Source Ready)
+### 4. Раздельные скоростные UDP-туннели: Hysteria 2 (443/UDP) и AmneziaWG (8443/UDP)
+* **Hysteria 2 на `443/UDP`:** Сверхскоростной транспорт на базе протокола QUIC (HTTP/3) с маскировкой под мультимедийный трафик и контроллером перегрузок BBR.
+* **AmneziaWG (AWG) на `8443/UDP`:** Модифицированный протокол WireGuard с защитой от блокировок ТСПУ/DPI. Nginx Stream слушает только `8443/TCP`, оставляя порт `8443/UDP` полностью свободным для прямого приёма пакетов ядром AWG.
+* **Обфускация AWG:** Случайные мусорные пакеты (`Jc`, `Jmin-Jmax`), смещения заголовков (`S1`, `S2`) и подмена магических байтов (`H1-H4`).
+
+### 5. Межпроцессная связь через Unix Sockets в RAM и Nginx Mainline (Open Source Ready)
 * Подключение официального репозитория `nginx.org` (ветка **Mainline**).
 * Полная адаптация под Nginx Open Source без использования проприетарных директив Nginx Plus.
 * Внутренний обмен между L4 Stream и L7 HTTP Core осуществляется через сокет в оперативной памяти (**`unix:/dev/shm/nginx-http.sock`**), исключая задержки виртуального loopback.
 * Использование `ssl_reject_handshake on` на дефолтном сервере для мгновенного сброса сканеров по прямому IP без раскрытия сертификата.
 
-### 5. 5 режимов интеллектуальной маскировки (Decoy Fronts)
+### 6. 5 режимов интеллектуальной маскировки (Decoy Fronts)
 * **Режим 1:** Интеллектуальное зеркалирование медиа-портала `animego.org` с глубокой подменой URL (`sub_filter`) и кэшированием статики.
 * **Режим 2:** Зеркалирование live-видеотрансляции `stream.is74.ru/0/streaming` (HLS Video Chunks).
 * **Режим 3:** Корпоративный IT SaaS *DataSphere Analytics* — интерактивный SPA-интерфейс со стек-шрифтами *Plus Jakarta Sans / Inter*, модальным окном авторизации и эмуляцией бекенд-API (`/api/v1/datasphere/status`, `/api/v1/datasphere/auth`).
 * **Режим 4:** Облачный портал *CosmosCloud* с эмуляцией API авторизации (`/api/v1/auth/login`), верификацией WebP-графики и cookies.
 * **Режим 5:** Стандартная заглушка Nginx (*Welcome to nginx!*).
 
-### 6. Двухрежимный гибридный SSL-движок
+### 7. Двухрежимный гибридный SSL-движок
 * **Certbot (HTTP-01):** Автоматический выпуск через Snapd с деплой-хуками нормализации прав (`chmod 755 / 644`).
 * **acme.sh (Cloudflare DNS-01):** Выпуск сертификатов через Cloudflare API (Token или Global Key), включая Wildcard-сертификаты.
 
@@ -59,6 +64,7 @@
 graph TD
     Client443TCP[Клиент: 443/TCP или 8443/TCP] --> NginxStream(Nginx Stream L4 Router)
     Client443UDP[Клиент: 443/UDP] -->|Напрямую в обход Nginx| XrayHysteria[Xray: Hysteria 2 UDP :443]
+    Client8443UDP[Клиент: 8443/UDP] -->|Напрямую в обход Nginx| AWGServer[AmneziaWG / AWG UDP :8443]
 
     NginxStream -->|SNI: Главный домен / Пустой SNI| NginxSock[Unix Socket: /dev/shm/nginx-http.sock]
     NginxStream -->|SNI: Steal-Oneself cdn.yourdomain.online| XrayStealREALITY[Xray REALITY :45443]
@@ -80,17 +86,15 @@ graph TD
 
 ## 📱 Совместимость клиентских приложений
 
-Для полноценной работы связки **VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision** клиентское приложение должно использовать ядро **Xray-core v24.9.27 / v25.x / v26.x+**:
+Для полноценной работы стека протоколов клиентское ПО должно поддерживать соответствующие протоколы и обфускацию:
 
-| Платформа | Приложение | Минимальная версия | Поддержка VLESS-ENC + Vision |
+| Платформа | Приложение | Поддерживаемые протоколы | Особенности |
 | :--- | :--- | :--- | :--- |
-| **Windows** | **v2rayN** | `v6.40+` (с Xray v24.11+) | Полная (GUI + Ядро) |
-| **Android** | **v2rayNG** | `v1.9.15+` / **NekoBox** `v1.3.1+` | Полная |
-| **iOS / iPadOS** | **Happ Proxy** / **FoXray** | Последние версии из App Store | Полная |
-| **macOS** | **V2RayXS** / **v2rayN (Cross)** | С актуальным ядром Xray | Полная |
-| **Linux** | **Nekoray** / **v2rayA** | С обновлённым бинарником Xray | Полная |
-
-> *Примечание:* Клиенты на базе ранних версий ядра **Sing-box** (до добавления поддержки протокола VLESS Encryption) могут использовать данный шлюз в классическом режиме VLESS xHTTP (`security: tls`, без параметра `flow`).
+| **Windows** | **v2rayN** / **AmneziaVPN** | VLESS (xHTTP/REALITY), Hy2, AWG | v2rayN v6.40+ (Xray v24.11+) |
+| **Android** | **v2rayNG** / **AmneziaWG** / **NekoBox** | VLESS, Hysteria 2, AmneziaWG | v2rayNG v1.9.15+, NekoBox v1.3.1+ |
+| **iOS / iPadOS** | **Happ Proxy** / **FoXray** / **AmneziaWG** | VLESS, Hysteria 2, AmneziaWG | Актуальные версии из App Store |
+| **macOS** | **V2RayXS** / **AmneziaVPN** | VLESS, Hysteria 2, AmneziaWG | Нативная поддержка AWG и Xray |
+| **Роутеры** | **Keenetic** / **OpenWrt** | AmneziaWG (пакет AWG), Xray | Туннелирование всей домашней сети |
 
 ---
 
@@ -123,7 +127,7 @@ chmod +x secure-vps.sh
 
 ---
 
-## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.0.3)
+## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.0.4)
 
 На втором шаге подключается официальный репозиторий Nginx Mainline, генерируются SSL-сертификаты, разворачивается выбранная веб-маска и конфигурируется матрица безопасности.
 
@@ -153,6 +157,7 @@ chmod +x setup_mask.sh
 * **Секретный URI-путь подписок:** `my-post-key`
 * **Внутренний порт VLESS xHTTP:** `50443`
 * **URI-путь для xHTTP:** `Stream-One-Path`
+* **Внешний UDP-порт для AmneziaWG (AWG):** `8443`
 * **Вариант маскировки (DECOY_MODE):** `1` *(AnimeGO)*, `2` *(IS74 Video)*, `3` *(DataSphere SPA)*, `4` *(CosmosCloud)* или `5` *(Nginx Stub)*
 * **Метод сертификации:** `1` *(Certbot HTTP-01)* или `2` *(acme.sh + Cloudflare DNS-01)*
 
@@ -160,10 +165,10 @@ chmod +x setup_mask.sh
 
 ### Настройка брандмауэра UFW (Выполнить после setup_mask.sh и преднастройки панели 3x-ui)
 
-Заблокируйте прямой доступ к внутренним техническим портам снаружи:
+Заблокируйте прямой доступ к внутренним техническим портам снаружи и откройте внешние точки входа VPN:
 
 ```bash
-# Разрешаем внешние сетевые точки входа
+# Разрешаем внешние сетевые точки входа (Веб, REALITY, Hysteria 2 UDP 443 и AmneziaWG UDP 8443)
 ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && ufw allow 8443/tcp && ufw allow 8443/udp
 
 # Блокируем технические внутренние сокеты и порт Anti-Loop
@@ -195,7 +200,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ### 2. Конфигурирование Инбаундов в 3X-UI
 
-В разделе **Входящие (Inbounds)** создайте 4 входящих подключения:
+В разделе **Входящие (Inbounds)** создайте входящие подключения:
 
 ---
 
@@ -222,41 +227,20 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 ---
 
 #### C. Инбаунд `VLESS_XHTTP` (Stream-One + VLESSENC + XTLS-Vision) 🚀
-
-> **ВАЖНО:** Данная связка поддерживается на клиентах с версией ядра **Xray 24.9.27+** (v25.x / v26.x).
-
-##### Пошаговая инструкция создания инбаунда xHTTP:
-
-1. **Создание инбаунда:** Перейдите во **Входящие** -> **Добавить подключение**.
-2. **Вкладка «Основное»:**
-   * **Протокол:** `vless`
-   * **Порт:** `50443`
-   * **Listen IP:** `127.0.0.1`
-3. **Вкладка «Поток» (Stream Settings):**
-   * **Транспорт:** `xhttp`
-   * **Режим (Mode):** `stream-one`
-   * **Путь (Path):** `/Stream-One-Path/`
-   * **Хост (Host):** `yourdomain.online`
-   * **Паддинг (xPaddingBytes):** `120-1120`
-   * **xPaddingObfsMode:** `true` (Включить)
-   * **xPaddingKey:** `X-Amz-Meta-Trace`
-4. **Вкладка «Безопасность»:**
-   * **Безопасность (Security):** `none` *(TLS снимает Nginx)*
-   * **Accept Proxy Protocol:** `0` (Выключить)
-   * **SNI:** `yourdomain.online`
-   * **Fingerprint:** `chrome` или `firefox`
-5. **Вкладка «Протокол» (Генерация ключа дешифрования):**
-   * В поле **Decryption** на сервере выберите **ML-KEM-768 (native)** и сгенерируйте ключ `vlessenc` (или выполните в консоли сервера команду: `xray vlessenc`).
-6. **Настройка клиента (Client Settings):**
-   * **Flow:** **`xtls-rprx-vision`** ⚠️ *(Обязательно включить для клиентов с ядром 24.9.27+)*
-   * **Decryption:** Ключ **`vlessenc`** (панель автоматически подставит его в подписку).
-   * **Host / SNI:** `yourdomain.online`
-   * **Path:** `/Stream-One-Path/`
+* **Основное:** Порт `50443` | Listen IP `127.0.0.1` | Протокол `vless`
+* **Поток (Stream Settings):**
+  * **Транспорт:** `xhttp` | **Режим:** `stream-one`
+  * **Путь:** `/Stream-One-Path/` | **Хост:** `yourdomain.online`
+  * **Паддинг:** `120-1120` | **xPaddingObfsMode:** `true` | **Ключ:** `X-Amz-Meta-Trace`
+* **Безопасность:** `none` *(TLS снимает Nginx)* | Accept Proxy Protocol: `0` (Выключить)
+* **Протокол:** В поле **Decryption** выберите **ML-KEM-768 (native)** и сгенерируйте ключ `vlessenc`.
+* **Клиент (Client Settings):** Flow: **`xtls-rprx-vision`**, Decryption: сгенерированный ключ `vlessenc`.
 
 ---
 
-#### D. Инбаунд `Hysteria 2 (UDP)`
+#### D. Инбаунд `Hysteria 2 (UDP 443)`
 * **Основное:** Порт `443` | Listen IP `0.0.0.0` | Протокол `hysteria` (v2)
+* **Поток:** Masquerade: тип `proxy` -> URL: `http://127.0.0.1:80`
 * **Безопасность:** `TLS` | SNI `yourdomain.online` | ALPN `h3`
 * **Пути к сертификатам:**
   * Публичный ключ: `/etc/letsencrypt/live/yourdomain.online/fullchain.pem`
@@ -264,28 +248,33 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ---
 
+#### E. Инбаунд `AmneziaWG / AWG (UDP 8443)` ⚡
+* **Основное:** Протокол `amneziawg` (или `wireguard`) | Порт `8443` (UDP) | Listen IP `0.0.0.0`
+* **Подсеть интерфейса:** `10.8.0.1/24` (или `10.66.66.1/24`)
+* **Параметры AWG (Обфускация):**
+  * Нажмите кнопку **«Сгенерировать случайные параметры»**.
+  * *Рекомендуемые диапазоны:* `Jc = 3-5`, `Jmin-Jmax = 40-200`, `S1-S2 = 15-60`, `H1-H4 = уникальные числа`.
+  * **MTU:** `1280` – `1420`
+* **Клиенты:** Добавьте клиента, экспортируйте `.conf` файл или отсканируйте QR-код в приложении **AmneziaVPN** / **AmneziaWG**.
+
+---
+
 ### 3. Автоматизация ссылок подписок (Раздел «Хосты» / Hosts) 💡
 
-Поскольку инбаунд **`VLESS_XHTTP`** на сервере работает без локального SSL (`security: none`, TLS терминирует Nginx), для него в клиенте требуется принудительно включить TLS. Для этого в панели 3X-UI создаются **два раздельных правила** в разделе **Хосты** (`🌐`):
+Для того чтобы клиенты подключались к VLESS xHTTP по порту 443 с TLS, в разделе **Хосты** (`🌐`) панели 3X-UI создаются два правила:
 
-#### Правило 1: Для инбаундов REALITY и Hysteria 2 (`MAIN_SAME_443`)
+#### Правило 1: Для REALITY и Hysteria 2 (`MAIN_SAME_443`)
 * **Примечание:** `MAIN_SAME_443`
-* **Входящие:** Отметьте 3 инбаунда: `VLESS_STEAL`, `VLESS_CLASSIC`, `Hysteria 2`.
-* **Адрес (Target Address):** `yourdomain.online:443`
-* **Порт:** `443`
-* **Безопасность:** `same` *(Сохраняет тип безопасности: REALITY остаётся reality, Hysteria — tls)*
-* Нажмите **Сохранить**.
+* **Входящие:** Отметьте: `VLESS_STEAL`, `VLESS_CLASSIC`, `Hysteria 2`.
+* **Адрес (Target Address):** `yourdomain.online:443` | **Порт:** `443`
+* **Безопасность:** `same` *(Сохраняет тип: REALITY остаётся reality, Hysteria — tls)*
 
-#### Правило 2: Специально для VLESS xHTTP с принудительным TLS (`XHTTP_TLS_443`)
+#### Правило 2: Для VLESS xHTTP (`XHTTP_TLS_443`)
 * **Примечание:** `XHTTP_TLS_443`
-* **Входящие:** Отметьте только инбаунд: `VLESS_XHTTP`.
-* **Адрес (Target Address):** `yourdomain.online:443`
-* **Порт:** `443`
-* **Безопасность:** `tls` ⚠️ *(Принудительно переопределяет security: none на TLS для подключения к порту 443 Nginx)*
-* **SNI:** `yourdomain.online`
-* **ALPN:** `h2` *(или оставить пустым)*
-* **Fingerprint:** `chrome` *(или `firefox`)*
-* Нажмите **Сохранить**.
+* **Входящие:** Отметьте только: `VLESS_XHTTP`.
+* **Адрес (Target Address):** `yourdomain.online:443` | **Порт:** `443`
+* **Безопасность:** `tls` ⚠️ *(Принудительно подставляет TLS для внешнего порта 443 Nginx)*
+* **SNI:** `yourdomain.online` | **ALPN:** `h2` | **Fingerprint:** `chrome`
 
 ---
 
@@ -296,9 +285,9 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 | `60022/TCP` | Входящий | **Разрешён** | Защищённое SSH-подключение |
 | `80/TCP` | Входящий | **Разрешён** | Валидация Let's Encrypt (Certbot HTTP-01) и редирект |
 | `443/TCP` | Входящий | **Разрешён** | Вход Nginx Stream L4 (Маска, Панель, Подписки, xHTTP, REALITY) |
-| `443/UDP` | Входящий | **Разрешён** | Прямой доступ к Xray (Hysteria 2 UDP) |
+| `443/UDP` | Входящий | **Разрешён** | Прямой доступ к Xray (**Hysteria 2 UDP**) |
 | `8443/TCP` | Входящий | **Разрешён** | Резервная точка входа Nginx Stream L4 |
-| `8443/UDP` | Входящий | **Разрешён** | Резервный порт Hysteria 2 UDP |
+| `8443/UDP` | Входящий | **Разрешён** | Прямой доступ к **AmneziaWG (AWG UDP)** |
 | `9443/TCP` | Локальный | **Заблокирован** | **Anti-Loop Fallback:** Приём не-REALITY трафика от Xray с PROXY protocol |
 | `10443/TCP` | Локальный | **Заблокирован** | Внутренний веб-интерфейс панели 3X-UI |
 | `55443/TCP` | Локальный | **Заблокирован** | Внутренний сервер клиентских подписок 3X-UI |
@@ -328,7 +317,10 @@ curl -Iv --http2 https://yourdomain.online/Stream-One-Path/
 # 5. Проверка Fallback Steal-Oneself (должен отдавать маску без зацикливания)
 curl -Iv --resolve cdn.yourdomain.online:443:127.0.0.1 https://cdn.yourdomain.online
 
-# 6. Мониторинг логов Nginx в реальном времени
+# 6. Проверка доступности портов UDP (Hy2 и AWG)
+nc -zvu 127.0.0.1 443 && nc -zvu 127.0.0.1 8443
+
+# 7. Мониторинг логов Nginx в реальном времени
 tail -f /var/log/nginx/access.log
 tail -f /var/log/nginx/error.log
 ```
@@ -548,6 +540,43 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
       "alpn": [
         "h3"
       ]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>5. JSON: AmneziaWG / AWG UDP (Порт 8443)</b></summary>
+
+```json
+{
+  "listen": "0.0.0.0",
+  "port": 8443,
+  "protocol": "wireguard",
+  "tag": "in-amneziawg",
+  "settings": {
+    "secretKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
+    "peers": [
+      {
+        "publicKey": "PUBLIC_KEY_КЛИЕНТА",
+        "allowedIPs": [
+          "10.8.0.2/32"
+        ]
+      }
+    ],
+    "kernelMode": false,
+    "mtu": 1360,
+    "amneziaSettings": {
+      "jc": 4,
+      "jmin": 50,
+      "jmax": 200,
+      "s1": 45,
+      "s2": 60,
+      "h1": 1254879654,
+      "h2": 987451236,
+      "h3": 1452369874,
+      "h4": 369852147
     }
   }
 }
