@@ -1,13 +1,13 @@
-# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.0.4 Universal)
+# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.0.5 Universal)
 
-> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, поддержкой AmneziaWG (AWG), многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing), полной изоляцией внутренних служб и 100% совместимостью с Nginx Open Source.**  
+> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, аппаратным ускорением AmneziaWG (AWG), многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing), полной изоляцией внутренних служб и 100% совместимостью с Nginx Open Source.**  
 > Развёртывается на чистых ОС семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
 
 ---
 
-## 🌟 Ключевые возможности архитектуры v6.0.4 Universal
+## 🌟 Ключевые возможности архитектуры v6.0.5 Universal
 
-Комплекс состоит из скрипта первичной настройки защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.0.4**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x** и модулями **AmneziaWG (AWG)**:
+Комплекс состоит из скрипта первичной настройки защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.0.5**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x** и протоколами **AmneziaWG (AWG)**:
 
 ### 1. Сценарий 1: Steal-Oneself REALITY (Кража у самого себя с Anti-Loop Port 9443)
 * Выпуск легитимных SSL-сертификатов Let's Encrypt на собственные домены.
@@ -29,7 +29,8 @@
 ### 4. Раздельные скоростные UDP-туннели: Hysteria 2 (443/UDP) и AmneziaWG (8443/UDP)
 * **Hysteria 2 на `443/UDP`:** Сверхскоростной транспорт на базе протокола QUIC (HTTP/3) с маскировкой под мультимедийный трафик и контроллером перегрузок BBR.
 * **AmneziaWG (AWG) на `8443/UDP`:** Модифицированный протокол WireGuard с защитой от блокировок ТСПУ/DPI. Nginx Stream слушает только `8443/TCP`, оставляя порт `8443/UDP` полностью свободным для прямого приёма пакетов ядром AWG.
-* **Обфускация AWG:** Случайные мусорные пакеты (`Jc`, `Jmin-Jmax`), смещения заголовков (`S1`, `S2`) и подмена магических байтов (`H1-H4`).
+* **Аппаратное устранение дропов (MSS Clamping & NAT):** Скрипт автоматически включает `net.ipv4.ip_forward = 1`, зажимает `TCPMSS --clamp-mss-to-pmtu` и настраивает постоянный NAT Masquerade для подсети `10.8.1.0/24`, полностью исключая ограничение скорости в 5–25 кбит/с из-за фрагментации UDP.
+* **Обфускация AWG:** Случайные мусорные пакеты (`Jc`, `Jmin-Jmax`), смещения заголовков (`S1-S4 >= 12`), строковые `H1-H4` и отключение раздувания данных (`contentPaddingAddition: "0"`).
 
 ### 5. Межпроцессная связь через Unix Sockets в RAM и Nginx Mainline (Open Source Ready)
 * Подключение официального репозитория `nginx.org` (ветка **Mainline**).
@@ -127,9 +128,9 @@ chmod +x secure-vps.sh
 
 ---
 
-## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.0.4)
+## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.0.5)
 
-На втором шаге подключается официальный репозиторий Nginx Mainline, генерируются SSL-сертификаты, разворачивается выбранная веб-маска и конфигурируется матрица безопасности.
+На втором шаге подключается официальный репозиторий Nginx Mainline, генерируются SSL-сертификаты, разворачивается выбранная веб-маска, конфигурируются правила `iptables` для AWG и применяется матрица безопасности.
 
 Запустите скрипт автоматической настройки:
 
@@ -158,6 +159,7 @@ chmod +x setup_mask.sh
 * **Внутренний порт VLESS xHTTP:** `50443`
 * **URI-путь для xHTTP:** `Stream-One-Path`
 * **Внешний UDP-порт для AmneziaWG (AWG):** `8443`
+* **Подсеть интерфейса AmneziaWG (AWG):** `10.8.1.0/24`
 * **Вариант маскировки (DECOY_MODE):** `1` *(AnimeGO)*, `2` *(IS74 Video)*, `3` *(DataSphere SPA)*, `4` *(CosmosCloud)* или `5` *(Nginx Stub)*
 * **Метод сертификации:** `1` *(Certbot HTTP-01)* или `2` *(acme.sh + Cloudflare DNS-01)*
 
@@ -250,11 +252,13 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 #### E. Инбаунд `AmneziaWG / AWG (UDP 8443)` ⚡
 * **Основное:** Протокол `amneziawg` (или `wireguard`) | Порт `8443` (UDP) | Listen IP `0.0.0.0`
-* **Подсеть интерфейса:** `10.8.0.1/24` (или `10.66.66.1/24`)
-* **Параметры AWG (Обфускация):**
-  * Нажмите кнопку **«Сгенерировать случайные параметры»**.
-  * *Рекомендуемые диапазоны:* `Jc = 3-5`, `Jmin-Jmax = 40-200`, `S1-S2 = 15-60`, `H1-H4 = уникальные числа`.
-  * **MTU:** `1280` – `1420`
+* **Подсеть интерфейса:** `10.8.1.0/24`
+* **Параметры AWG (Обфускация для максимальной скорости):**
+  * **Content Padding Addition:** `"0"` *(Критично: отключает раздувание и фрагментацию пакетов)*
+  * **Random Trailers:** `false` (Выключить)
+  * **H1–H4 (Строковые значения в кавычках):** `"149419586"`, `"878791997"`, `"1251051976"`, `"1657628296"`
+  * **Смещения S1–S4 (Строго >= 12):** `S1 = 45`, `S2 = 60`, `S3 = 24`, `S4 = 16`
+  * **Junk packets:** `Jc = 4`, `Jmin = 50`, `Jmax = 160` | **MTU:** `1360`
 * **Клиенты:** Добавьте клиента, экспортируйте `.conf` файл или отсканируйте QR-код в приложении **AmneziaVPN** / **AmneziaWG**.
 
 ---
@@ -349,10 +353,11 @@ certbot renew --dry-run
 Для сохранения полной рабочей конфигурации шлюза выполните команду создания единого архива:
 
 ```bash
-# Создание резервной копии конфигурации Nginx, сертификатов и базы 3X-UI
+# Создание резервной копии конфигурации Nginx, сертификатов, правил iptables и базы 3X-UI
 tar -czvf backup_proxy_$(date +%F).tar.gz \
   /etc/nginx \
   /etc/letsencrypt \
+  /etc/iptables \
   /etc/x-ui/x-ui.db \
   /var/www/html
 ```
@@ -360,12 +365,13 @@ tar -czvf backup_proxy_$(date +%F).tar.gz \
 Для восстановления из архива:
 ```bash
 tar -xzvf backup_proxy_YYYY-MM-DD.tar.gz -C /
+iptables-restore < /etc/iptables/rules.v4 2>/dev/null || true
 nginx -t && systemctl restart nginx && systemctl restart x-ui
 ```
 
 ---
 
-## 📄 Готовые JSON-шаблоны Инбаундов Xray
+## 📄 Готовые JSON-шаблоны Инбаундов Xray и AmneziaWG
 
 <details>
 <summary><b>1. JSON: VLESS REALITY Steal-Oneself (Порт 45443, Anti-Loop Dest 9443)</b></summary>
@@ -547,36 +553,56 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 </details>
 
 <details>
-<summary><b>5. JSON: AmneziaWG / AWG UDP (Порт 8443)</b></summary>
+<summary><b>5. JSON: AmneziaWG / AWG UDP (Порт 8443, Скоростной профиль)</b></summary>
 
 ```json
 {
   "listen": "0.0.0.0",
   "port": 8443,
-  "protocol": "wireguard",
-  "tag": "in-amneziawg",
+  "protocol": "amneziawg",
+  "tag": "in-8443-awg",
   "settings": {
-    "secretKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
-    "peers": [
+    "clients": [
       {
-        "publicKey": "PUBLIC_KEY_КЛИЕНТА",
+        "privateKey": "ВАШ_PRIVATE_KEY_КЛИЕНТА",
+        "publicKey": "ВАШ_PUBLIC_KEY_КЛИЕНТА",
         "allowedIPs": [
-          "10.8.0.2/32"
-        ]
+          "10.8.1.2/32"
+        ],
+        "forwardedPorts": "",
+        "email": "user1",
+        "enable": true
       }
     ],
-    "kernelMode": false,
-    "mtu": 1360,
-    "amneziaSettings": {
+    "server": {
+      "contentPaddingAddition": "0",
+      "disableCookies": true,
+      "h1": "149419586",
+      "h2": "878791997",
+      "h3": "1251051976",
+      "h4": "1657628296",
+      "headerProtectionKey": "RFVwNXCrvzILDvbTs1sU/VNjAZbbWpjA1JIvZuGPxdY=",
+      "i1": "",
       "jc": 4,
+      "jmax": 160,
       "jmin": 50,
-      "jmax": 200,
+      "keepaliveTimeout": "15",
+      "maxHandshakeAttempts": "20",
+      "mtu": 1360,
+      "primaryDns": "1.1.1.1",
+      "secondaryDns": "8.8.8.8",
+      "privateKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
+      "publicKey": "ВАШ_PUBLIC_KEY_СЕРВЕРА",
+      "randomTrailers": false,
+      "rejectAfterTime": "180",
+      "rekeyAfterTime": "120",
+      "rekeyTimeout": "7",
       "s1": 45,
       "s2": 60,
-      "h1": 1254879654,
-      "h2": 987451236,
-      "h3": 1452369874,
-      "h4": 369852147
+      "s3": 24,
+      "s4": 16,
+      "subnetCidr": 24,
+      "subnetIp": "10.8.1.0"
     }
   }
 }
