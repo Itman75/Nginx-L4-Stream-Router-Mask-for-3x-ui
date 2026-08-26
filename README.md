@@ -581,7 +581,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
       "h2": "878791997",
       "h3": "1251051976",
       "h4": "1657628296",
-      "headerProtectionKey": "RFVwNXCrvzILDvbTs1sU/VNjAZbbWpjA1JIvZuGPxdY=",
+      "headerProtectionKey": "ВАШ_headerProtectionKey",
       "i1": "",
       "jc": 4,
       "jmax": 160,
