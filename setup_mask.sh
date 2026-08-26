@@ -195,7 +195,7 @@ if [[ "${ENABLE_STEAL_INPUT,,}" == "y" ]]; then
             STEAL_DOMAINS+=("$STEAL_DOM")
             DOMAIN_TO_PORT["$STEAL_DOM"]="$PORT_VAL"
             added_count_for_port=$((added_count_for_port + 1))
-            ok "    Домен $STEAL_DOM привязан к инбаунду $PORT_VAL"
+            ok "    Домен $STEAL_DOM привязан к инбаунд-порту $PORT_VAL"
         done
 
         read -rp "  Сконфигурировать еще один порт Steal-Oneself? [y/N]: " ADD_MORE_STEAL
