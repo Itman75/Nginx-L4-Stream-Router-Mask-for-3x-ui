@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v6.0.4 Universal (Native HTTP/2 & AWG)
+# Production AutoSetup: Hardened Engine v6.0.5 Universal (Native H2 & AWG Speed)
 # Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 5 Decoys 
 # ==============================================================================
 # Архитектура:
@@ -9,7 +9,7 @@
 #   2) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
 #   3) Classic External REALITY (Выделение портов для внешних SNI)
 #   4) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2 Streaming
-#   5) Прямые UDP-туннели: Hysteria 2 (443/UDP) + AmneziaWG / AWG (8443/UDP)
+#   5) Двойной скоростной UDP VPN: Hysteria 2 (443/UDP) + AmneziaWG / AWG (8443/UDP)
 #   6) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
 #   7) 5 режимов маскировки (Decoy Front):
 #      - 1: Интеллектуальное зеркалирование animego.org (Anime/Media Portal)
@@ -68,6 +68,7 @@ declare -A pkg_map=(
     [dig]="dnsutils"
     [socat]="socat"
     [cron]="cron"
+    [iptables]="iptables"
 )
 
 apt_updated=0
@@ -81,6 +82,18 @@ for cmd in "${!pkg_map[@]}"; do
         apt-get install -y "${pkg_map[$cmd]}" -q || true
     fi
 done
+
+# Неинтерактивная установка iptables-persistent
+export DEBIAN_FRONTEND=noninteractive
+if ! dpkg -s iptables-persistent >/dev/null 2>&1; then
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections || true
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections || true
+    if [ "$apt_updated" -eq 0 ]; then
+        apt-get update -q
+        apt_updated=1
+    fi
+    apt-get install -y iptables-persistent netfilter-persistent -q || true
+fi
 
 prompt_default() {
     local prompt_text="$1"
@@ -266,7 +279,7 @@ while true; do
 done
 
 echo
-echo -e "${YELLOW}Шаг 5: Привязка внутренних портов 3X-UI, xHTTP и AmneziaWG${NC}"
+echo -e "${YELLOW}Шаг 5: Привязка внутренних портов 3X-UI, xHTTP и AmneziaWG (AWG)${NC}"
 prompt_default "Внутренний порт панели 3X-UI" "10443" PANEL_PORT
 prompt_default "Секретный URI-путь к веб-панели (без слэшей)" "my-3x-panel" RAW_PATH
 validate_path_segment "$RAW_PATH" "URI панели"
@@ -286,6 +299,7 @@ XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
 XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
 
 prompt_default "Внешний UDP-порт для AmneziaWG (AWG)" "8443" AWG_UDP_PORT
+prompt_default "Подсеть интерфейса AmneziaWG (AWG)" "10.8.1.0/24" AWG_SUBNET
 
 echo
 echo -e "${YELLOW}Шаг 6: Параметры сайта-маскировки (1 и 2 - Streaming Mirror, 3-4-5 сайты-заглушки)${NC}"
@@ -379,7 +393,7 @@ if [ -n "$WAN_IP" ]; then
 fi
 
 # =============================================================
-#  ТЮНИНГ ЯДРА LINUX (SYSCTL BBR, SOMAXCONN & UDP BUFFERS)
+#  ТЮНИНГ ЯДРА LINUX (SYSCTL BBR, IP_FORWARD & UDP BUFFERS)
 # =============================================================
 log "Применение расширенного тюнинга сетевого стека и ядра Linux..."
 
@@ -387,6 +401,7 @@ cat << 'EOF' > /etc/sysctl.d/99-vless-tuning.conf
 # ====================================================================
 # БАЗОВЫЕ НАСТРОЙКИ СЕТИ И СИСТЕМЫ
 # ====================================================================
+net.ipv4.ip_forward = 1
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 net.ipv4.tcp_syncookies = 1
@@ -439,7 +454,7 @@ net.ipv4.tcp_notsent_lowat = 16384
 EOF
 
 sysctl --system >/dev/null 2>&1 || true
-ok "Параметры ядра BBR, fq, UDP и оптимизации сокетов успешно применены."
+ok "Параметры ядра BBR, fq, IP Forwarding и UDP буферов успешно применены."
 
 # Увеличение лимитов безопасности для системы и служб
 cat << 'EOF' > /etc/security/limits.d/99-proxy-limits.conf
@@ -452,6 +467,26 @@ www-data hard nofile 524288
 nginx soft nofile 524288
 nginx hard nofile 524288
 EOF
+
+# =============================================================
+#  МАРШРУТИЗАЦИЯ И УСКОРЕНИЕ AWG (TCP MSS & NAT MASQUERADE)
+# =============================================================
+log "Настройка сетевой маршрутизации Linux (NAT Forwarding и TCP MSS Clamping для AmneziaWG)..."
+WAN_IF=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -n1 || echo "")
+if [ -n "$WAN_IF" ]; then
+    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
+    iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
+
+    iptables -t nat -C POSTROUTING -s "$AWG_SUBNET" -o "$WAN_IF" -j MASQUERADE 2>/dev/null || \
+    iptables -t nat -A POSTROUTING -s "$AWG_SUBNET" -o "$WAN_IF" -j MASQUERADE || true
+
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    systemctl enable netfilter-persistent 2>/dev/null || true
+    ok "NAT Masquerade для $AWG_SUBNET на интерфейсе $WAN_IF и TCP MSS Clamping успешно настроены."
+else
+    warn "Не удалось автоматически определить WAN-интерфейс для iptables NAT. При необходимости задайте правило вручную."
+fi
 
 # =============================================================
 #  ПОДКЛЮЧЕНИЕ REPO NGINX MAINLINE И УСТАНОВКА
@@ -2237,7 +2272,7 @@ fi
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.0.4 NATIVE H2 & AWG EDITION)! "
+echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.0.4 NATIVE H2 & AWG SPEED)!   "
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Маска-Фронтенд:              ${CYAN}https://${PRIMARY_DOMAIN}${NC} (${DECOY_NAME})"
 echo -e "  Вход в панель 3X-UI:         ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
@@ -2277,10 +2312,13 @@ echo
 
 echo -e "${YELLOW}ШАГ 5: Инбаунд AmneziaWG / AWG (UDP $AWG_UDP_PORT):${NC}"
 echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}amneziawg / wireguard${NC} | Адрес: ${GREEN}0.0.0.0${NC} | Порт: ${GREEN}$AWG_UDP_PORT${NC} (UDP)"
-echo -e "  - ${YELLOW}Вкладка «Параметры AWG» (Обфускация):${NC}"
-echo -e "    * Нажмите ${CYAN}«Сгенерировать случайные параметры»${NC} (панель создаст уникальные Jc, Jmin/Jmax, S1/S2, H1-H4)"
-echo -e "    * Рекомендуемые диапазоны: ${GREEN}Jc = 3-5${NC} | ${GREEN}Jmin-Jmax = 40-200${NC} | ${GREEN}S1-S2 = 15-60${NC}"
-echo -e "  - ${YELLOW}Вкладка «Клиенты»:${NC} Добавьте клиента, скачайте файл ${CYAN}.conf${NC} или отсканируйте QR-код в приложении ${GREEN}AmneziaVPN / AmneziaWG${NC}"
+echo -e "  - ${YELLOW}Вкладка «Параметры AWG» (Обфускация для максимальной скорости):${NC}"
+echo -e "    * ${CYAN}Content Padding Addition:${NC} ${GREEN}\"0\"${NC}"
+echo -e "    * ${CYAN}Random Trailers:${NC} ${RED}false (Выключить)${NC}"
+echo -e "    * ${CYAN}H1-H4 (Строки в кавычках):${NC} ${GREEN}\"149419586\", \"878791997\", \"1251051976\", \"1657628296\"${NC}"
+echo -e "    * ${CYAN}Смещения (>= 12):${NC} ${GREEN}S1 = 45, S2 = 60, S3 = 24, S4 = 16${NC}"
+echo -e "    * ${CYAN}Junk packets:${NC} ${GREEN}Jc = 4, Jmin = 50, Jmax = 160${NC} | ${CYAN}MTU:${NC} ${GREEN}1360${NC}"
+echo -e "  - ${YELLOW}Вкладка «Клиенты»:${NC} Экспортируйте ${CYAN}.conf${NC} или отсканируйте QR-код в приложении ${GREEN}AmneziaVPN / AmneziaWG${NC}"
 echo
 
 echo -e "${YELLOW}ШАГ 6: Настройки Клиента и Подписок в 3X-UI:${NC}"
