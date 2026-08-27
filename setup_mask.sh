@@ -1,24 +1,23 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v6.0.5 Universal (Native H2 & AWG Speed)
-# Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 5 Decoys 
+# Production AutoSetup: Hardened Engine v6.1.0 Universal (Native H2 & Hy2 Speed)
+# Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 3 Decoys 
 # ==============================================================================
 # Архитектура:
 #   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org)
 #   2) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
 #   3) Classic External REALITY (Выделение портов для внешних SNI)
 #   4) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + H2 Streaming
-#   5) Двойной скоростной UDP VPN: Hysteria 2 (443/UDP) + AmneziaWG / AWG (8443/UDP)
+#   5) Высокоскоростной UDP VPN: Hysteria 2 (443/UDP) с маскировкой под веб-сервер
 #   6) Гибридный SSL-движок: Certbot (HTTP-01) или acme.sh + Cloudflare (DNS-01)
-#   7) 5 режимов маскировки (Decoy Front):
-#      - 1: Интеллектуальное зеркалирование animego.org (Anime/Media Portal)
-#      - 2: Интеллектуальное зеркалирование stream.is74.ru/0/streaming (Live Video Stream)
-#      - 3: Корпоративный IT SaaS (DataSphere Analytics - Интерактивный SPA)
-#      - 4: Облако CosmosCloud (с эмуляцией API и ассетами)
-#      - 5: Стандартная заглушка Nginx (Welcome to nginx)
+#   7) 3 автономных локальных режима маскировки (Decoy Front):
+#      - 1: Корпоративный IT SaaS (DataSphere Analytics - Интерактивный SPA)
+#      - 2: Облако CosmosCloud (с эмуляцией API и ассетами)
+#      - 3: Стандартная заглушка Nginx (Welcome to nginx)
 #   8) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
 #   9) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
+#  10) Чистая фильтрация портов через UFW без сторонних утилит трансляции NAT
 # ==============================================================================
 
 set -euo pipefail
@@ -39,7 +38,7 @@ die()  { echo -e "${RED}[X] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN} Nginx xHTTP + REALITY + Hy2 (443) + AWG (8443) Router v6.0.5       ${NC}"
+echo -e "${GREEN} Nginx xHTTP + REALITY + Hy2 (443 UDP) Router v6.1.0                ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 # ----------------------- Системные предусловия -----------------------
@@ -68,7 +67,7 @@ declare -A pkg_map=(
     [dig]="dnsutils"
     [socat]="socat"
     [cron]="cron"
-    [iptables]="iptables"
+    [ufw]="ufw"
 )
 
 apt_updated=0
@@ -76,24 +75,13 @@ for cmd in "${!pkg_map[@]}"; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         warn "Утилита '$cmd' не найдена. Установка пакета: ${pkg_map[$cmd]}..."
         if [ "$apt_updated" -eq 0 ]; then
+            export DEBIAN_FRONTEND=noninteractive
             apt-get update -q
             apt_updated=1
         fi
         apt-get install -y "${pkg_map[$cmd]}" -q || true
     fi
 done
-
-# Неинтерактивная установка iptables-persistent
-export DEBIAN_FRONTEND=noninteractive
-if ! dpkg -s iptables-persistent >/dev/null 2>&1; then
-    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections || true
-    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections || true
-    if [ "$apt_updated" -eq 0 ]; then
-        apt-get update -q
-        apt_updated=1
-    fi
-    apt-get install -y iptables-persistent netfilter-persistent -q || true
-fi
 
 prompt_default() {
     local prompt_text="$1"
@@ -279,7 +267,7 @@ while true; do
 done
 
 echo
-echo -e "${YELLOW}Шаг 5: Привязка внутренних портов 3X-UI, xHTTP и AmneziaWG (AWG)${NC}"
+echo -e "${YELLOW}Шаг 5: Привязка внутренних портов 3X-UI и xHTTP${NC}"
 prompt_default "Внутренний порт панели 3X-UI" "10443" PANEL_PORT
 prompt_default "Секретный URI-путь к веб-панели (без слэшей)" "my-3x-panel" RAW_PATH
 validate_path_segment "$RAW_PATH" "URI панели"
@@ -298,43 +286,12 @@ validate_path_segment "$RAW_XHTTP_STREAM_PATH" "URI xHTTP"
 XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
 XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
 
-prompt_default "Внешний UDP-порт для AmneziaWG (AWG)" "8443" AWG_UDP_PORT
-prompt_default "Подсеть интерфейса AmneziaWG (AWG)" "10.8.1.0/24" AWG_SUBNET
-
 echo
-echo -e "${YELLOW}Шаг 6: Параметры сайта-маскировки (1 и 2 - Streaming Mirror, 3-4-5 сайты-заглушки)${NC}"
-echo -e " 1) ${GREEN}Интеллектуальное зеркалирование animego.org${NC}"
-echo -e " 2) ${GREEN}Интеллектуальное зеркалирование stream.is74.ru/0/streaming (Live Video Stream)${NC}"
-echo -e " 3) ${GREEN}Корпоративный IT SaaS (Интерактивная консоль DataSphere Analytics)${NC}"
-echo -e " 4) Облако CosmosCloud"
-echo -e " 5) Стандартная заглушка Nginx (Welcome to nginx)"
-prompt_default "Выберите вариант маскировки (1, 2, 3, 4 или 5)" "1" DECOY_MODE
-
-MIRROR_TARGET_HOST="animego.org"
-MIRROR_TARGET_URI=""
-MIRROR_BRAND="AnimeGO"
-
-if [ "$DECOY_MODE" = "1" ]; then
-    prompt_default "Хост внешнего медиа-портала для зеркалирования" "animego.org" MIRROR_TARGET_HOST
-    prompt_default "Бренд для подмены в HTML-шапках" "AnimeGO" MIRROR_BRAND
-elif [ "$DECOY_MODE" = "2" ]; then
-    prompt_default "Хост внешнего медиа-сервера для зеркалирования" "stream.is74.ru" MIRROR_TARGET_HOST
-    prompt_default "Путь видеотрансляции / видеопотока" "/0/streaming" MIRROR_TARGET_URI
-    prompt_default "Бренд для подмены в HTML-шапках" "Интерсвязь" MIRROR_BRAND
-fi
-
-# Защита от указания собственного домена в качестве внешнего источника зеркала
-if [[ "$DECOY_MODE" = "1" || "$DECOY_MODE" = "2" ]]; then
-    if [ "$MIRROR_TARGET_HOST" = "$PRIMARY_DOMAIN" ] || [[ " ${ALL_DOMAINS[*]} " == *" ${MIRROR_TARGET_HOST} "* ]]; then
-        warn "Обнаружено совпадение хоста зеркалирования с собственным доменом сервера ($MIRROR_TARGET_HOST)!"
-        warn "Во избежание петли запросов хост автоматически сброшен на внешний источник по умолчанию."
-        if [ "$DECOY_MODE" = "1" ]; then
-            MIRROR_TARGET_HOST="animego.org"
-        else
-            MIRROR_TARGET_HOST="stream.is74.ru"
-        fi
-    fi
-fi
+echo -e "${YELLOW}Шаг 6: Параметры сайта-маскировки (Автономные локальные заглушки)${NC}"
+echo -e " 1) ${GREEN}Корпоративный IT SaaS (Интерактивная консоль DataSphere Analytics)${NC}"
+echo -e " 2) ${GREEN}Облако CosmosCloud (с эмуляцией API и ассетами)${NC}"
+echo -e " 3) Стандартная заглушка Nginx (Welcome to nginx)"
+prompt_default "Выберите вариант маскировки (1, 2 или 3)" "1" DECOY_MODE
 
 echo
 echo -e "${YELLOW}Шаг 7: Выбор архитектуры выпуска SSL-сертификатов${NC}"
@@ -393,7 +350,7 @@ if [ -n "$WAN_IP" ]; then
 fi
 
 # =============================================================
-#  ТЮНИНГ ЯДРА LINUX (SYSCTL BBR, IP_FORWARD & UDP BUFFERS)
+#  ТЮНИНГ ЯДРА LINUX (SYSCTL BBR & UDP BUFFERS FOR HYSTERIA 2)
 # =============================================================
 log "Применение расширенного тюнинга сетевого стека и ядра Linux..."
 
@@ -410,7 +367,7 @@ net.ipv4.conf.default.rp_filter = 1
 vm.swappiness = 10
 
 # ====================================================================
-# XRAY / AWG / NGINX ОПТИМИЗАЦИИ И ТЮНИНГ ОЧЕРЕДЕЙ
+# XRAY / NGINX / HYSTERIA 2 ОПТИМИЗАЦИИ И ТЮНИНГ ОЧЕРЕДЕЙ
 # ====================================================================
 net.ipv4.ip_local_port_range = 1024 65535
 net.core.netdev_max_backlog = 16384
@@ -427,7 +384,7 @@ net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_orphan_retries = 2
 net.ipv4.tcp_slow_start_after_idle = 0
 
-# Оптимизация буферов TCP/UDP под видео-стриминг, Hy2 и AmneziaWG
+# Оптимизация буферов TCP/UDP под видео-стриминг и Hysteria 2 (QUIC)
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 net.core.rmem_default = 212992
@@ -467,26 +424,6 @@ www-data hard nofile 524288
 nginx soft nofile 524288
 nginx hard nofile 524288
 EOF
-
-# =============================================================
-#  МАРШРУТИЗАЦИЯ И УСКОРЕНИЕ AWG (TCP MSS & NAT MASQUERADE)
-# =============================================================
-log "Настройка сетевой маршрутизации Linux (NAT Forwarding и TCP MSS Clamping для AmneziaWG)..."
-WAN_IF=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -n1 || echo "")
-if [ -n "$WAN_IF" ]; then
-    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
-    iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
-
-    iptables -t nat -C POSTROUTING -s "$AWG_SUBNET" -o "$WAN_IF" -j MASQUERADE 2>/dev/null || \
-    iptables -t nat -A POSTROUTING -s "$AWG_SUBNET" -o "$WAN_IF" -j MASQUERADE || true
-
-    mkdir -p /etc/iptables
-    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
-    systemctl enable netfilter-persistent 2>/dev/null || true
-    ok "NAT Masquerade для $AWG_SUBNET на интерфейсе $WAN_IF и TCP MSS Clamping успешно настроены."
-else
-    warn "Не удалось автоматически определить WAN-интерфейс для iptables NAT. При необходимости задайте правило вручную."
-fi
 
 # =============================================================
 #  ПОДКЛЮЧЕНИЕ REPO NGINX MAINLINE И УСТАНОВКА
@@ -690,8 +627,8 @@ done
 # =============================================================
 log "Формирование маскировочного контента..."
 
-if [ "$DECOY_MODE" = "3" ]; then
-    # 3) DataSphere Analytics (Интерактивная консоль с модальным окном и красивыми шрифтами)
+if [ "$DECOY_MODE" = "1" ]; then
+    # 1) DataSphere Analytics (Интерактивная консоль с модальным окном и красивыми шрифтами)
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
@@ -1250,8 +1187,8 @@ if [ "$DECOY_MODE" = "3" ]; then
 </html>
 EOF
 
-elif [ "$DECOY_MODE" = "4" ]; then
-    # 4) CosmosCloud
+elif [ "$DECOY_MODE" = "2" ]; then
+    # 2) CosmosCloud
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
@@ -1350,7 +1287,7 @@ EOF
     fi
 
 else
-    # 1, 2 и 5: Welcome to nginx
+    # 3) Welcome to nginx
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html>
@@ -1375,23 +1312,6 @@ chmod 644 "$WEBROOT/index.html" "$WEBROOT/404.html"
 #  ПОЛНАЯ КОНФИГУРАЦИЯ NGINX (STREAM + HTTP CORE + ANTI-BOT)
 # =============================================================
 log "Сборка конфигурации Nginx Mainline (Stream L4 + HTTP/2 Upstream Engine)..."
-
-UPSTREAM_DECOY_BLOCK=""
-if [ "$DECOY_MODE" = "1" ]; then
-    UPSTREAM_DECOY_BLOCK="
-    upstream mirror_backend {
-        server $MIRROR_TARGET_HOST:443;
-        keepalive 32;
-    }
-"
-elif [ "$DECOY_MODE" = "2" ]; then
-    UPSTREAM_DECOY_BLOCK="
-    upstream video_stream_backend {
-        server $MIRROR_TARGET_HOST:80;
-        keepalive 32;
-    }
-"
-fi
 
 # 1. Глобальный файл конфигурации /etc/nginx/nginx.conf
 cat << EOF > /etc/nginx/nginx.conf
@@ -1445,8 +1365,6 @@ http {
         server 127.0.0.1:$XHTTP_STREAM_PORT;
         keepalive 64;
     }
-
-    $UPSTREAM_DECOY_BLOCK
 
     proxy_cache_path /var/cache/nginx/img_cache levels=1:2 keys_zone=img_zone:10m max_size=1g inactive=7d use_temp_path=off;
     proxy_cache_path /var/cache/nginx/html_cache levels=1:2 keys_zone=html_zone:20m max_size=500m inactive=30d use_temp_path=off;
@@ -1618,243 +1536,11 @@ server {
 }
 EOF
 
-# 3. Конфигурация локаций маскировки / стрима
+# 3. Конфигурация локаций маскировки (Локальные автономные профили)
 DECOY_LOCATION_BLOCKS=""
 
 if [ "$DECOY_MODE" = "1" ]; then
-    # Режим 1: Зеркалирование animego.org
-    DECOY_LOCATION_BLOCKS="
-        location ~* ^/(uploads|public|engine|templates|static|system)/ {
-            root /var/www/mirror;
-            try_files \$uri @store_static;
-            access_log off;
-            expires 365d;
-        }
-
-        location @store_static {
-            internal;
-            proxy_pass https://mirror_backend;
-            proxy_store_access user:rw group:rw all:r;
-            proxy_ignore_headers Cache-Control Expires Set-Cookie;
-            proxy_set_header User-Agent \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36\";
-            proxy_ssl_server_name on;
-            proxy_ssl_name $MIRROR_TARGET_HOST;
-            proxy_set_header Host $MIRROR_TARGET_HOST;
-            proxy_set_header Accept-Encoding \"\";
-            proxy_http_version 1.1;
-            proxy_set_header Connection \"\";
-            proxy_store on;
-            root /var/www/mirror;
-            proxy_temp_path /var/www/proxy_temp;
-        }
-
-        location ~ ^/(assets|cdn|upload|api|player|video|media|ajax)/ {
-            access_log off;
-            limit_req zone=assets burst=150 nodelay;
-
-            rewrite ^/(.*)($PRIMARY_DOMAIN)(.*)\$ /\$1$MIRROR_TARGET_HOST\$3 break;
-
-            proxy_pass https://mirror_backend;
-            proxy_ssl_server_name on;
-            proxy_ssl_name $MIRROR_TARGET_HOST;
-            proxy_http_version 1.1;
-
-            proxy_buffering on;
-            proxy_request_buffering on;
-            proxy_ignore_headers Cache-Control Expires Set-Cookie;
-            proxy_cache img_zone;
-            proxy_cache_valid 200 206 304 3d;
-            proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
-            proxy_ssl_session_reuse on;
-
-            proxy_set_header Host $MIRROR_TARGET_HOST;
-            proxy_cookie_domain $MIRROR_TARGET_HOST \$host;
-            proxy_set_header Referer https://$MIRROR_TARGET_HOST/;
-            proxy_set_header Origin https://$MIRROR_TARGET_HOST;
-            proxy_set_header User-Agent \$http_user_agent;
-            proxy_set_header Accept-Language \$http_accept_language;
-            proxy_set_header Accept-Encoding \"\";
-
-            proxy_set_header X-Real-IP \"\";
-            proxy_set_header X-Forwarded-For \"\";
-            proxy_set_header Forwarded \"\";
-
-            proxy_buffer_size 128k;
-            proxy_buffers 4 256k;
-            proxy_busy_buffers_size 256k;
-
-            sub_filter 'https://$MIRROR_TARGET_HOST' 'https://\$host';
-            sub_filter 'http://$MIRROR_TARGET_HOST' 'http://\$host';
-            sub_filter '//$MIRROR_TARGET_HOST' '//\$host';
-            sub_filter '$MIRROR_BRAND' '$PRIMARY_DOMAIN';
-            sub_filter_once off;
-            sub_filter_types text/xml text/plain application/json application/javascript;
-        }
-
-        location ^~ /cdn-cgi/ {
-            default_type application/javascript;
-            return 200 \"\";
-            access_log off;
-            error_log off;
-        }
-
-        location / {
-            limit_req zone=bot burst=20 nodelay;
-            limit_conn addr 20;
-
-            proxy_pass https://mirror_backend;
-            proxy_ssl_server_name on;
-            proxy_ssl_name $MIRROR_TARGET_HOST;
-            proxy_http_version 1.1;
-
-            proxy_buffering on;
-            proxy_request_buffering on;
-            proxy_ignore_headers Cache-Control Expires Set-Cookie;
-            proxy_ssl_session_reuse on;
-
-            proxy_set_header Host $MIRROR_TARGET_HOST;
-            proxy_cookie_domain $MIRROR_TARGET_HOST \$host;
-            proxy_set_header User-Agent \$http_user_agent;
-            proxy_set_header Referer https://$MIRROR_TARGET_HOST/;
-            proxy_set_header Accept-Encoding \"\";
-            proxy_set_header Connection \"\";
-            proxy_cache html_zone;
-            proxy_cache_key \"\$scheme\$proxy_host\$request_uri\";
-
-            proxy_cache_valid 200 7d;
-            proxy_cache_valid 301 302 1d;
-            proxy_cache_valid 404 10m;
-
-            proxy_cache_lock on;
-            proxy_cache_background_update on;
-            proxy_cache_revalidate on;
-            proxy_cache_use_stale updating error timeout invalid_header http_500 http_502 http_503 http_504;
-
-            proxy_set_header X-Real-IP \"\";
-            proxy_set_header X-Forwarded-For \"\";
-            proxy_set_header Forwarded \"\";
-            proxy_set_header X-Forwarded-Proto \"\";
-
-            proxy_buffer_size 128k;
-            proxy_buffers 4 256k;
-            proxy_busy_buffers_size 256k;
-
-            sub_filter 'https://$MIRROR_TARGET_HOST' 'https://\$host';
-            sub_filter 'http://$MIRROR_TARGET_HOST' 'http://\$host';
-            sub_filter '//$MIRROR_TARGET_HOST' '//\$host';
-            sub_filter '$MIRROR_BRAND' '$PRIMARY_DOMAIN';
-            sub_filter_once off;
-            sub_filter_types text/xml text/plain;
-        }
-"
-elif [ "$DECOY_MODE" = "2" ]; then
-    # Режим 2: Зеркалирование stream.is74.ru/0/streaming
-    DECOY_LOCATION_BLOCKS="
-        location ~* ^/0/(streaming|live|hls|playlist|chunks|segments|video)/ {
-            access_log off;
-            limit_req zone=assets burst=200 nodelay;
-
-            proxy_pass http://video_stream_backend;
-            proxy_http_version 1.1;
-
-            proxy_buffering off;
-            proxy_request_buffering off;
-            proxy_ignore_headers Cache-Control Expires Set-Cookie;
-
-            proxy_set_header Host $MIRROR_TARGET_HOST;
-            proxy_set_header Origin http://$MIRROR_TARGET_HOST;
-            proxy_set_header Referer http://$MIRROR_TARGET_HOST/;
-            proxy_set_header User-Agent \$http_user_agent;
-            proxy_set_header Accept-Encoding \"\";
-
-            proxy_set_header X-Real-IP \"\";
-            proxy_set_header X-Forwarded-For \"\";
-            proxy_set_header Forwarded \"\";
-
-            proxy_read_timeout 600s;
-            proxy_send_timeout 600s;
-
-            sub_filter 'http://$MIRROR_TARGET_HOST' 'https://\$host';
-            sub_filter 'https://$MIRROR_TARGET_HOST' 'https://\$host';
-            sub_filter '//$MIRROR_TARGET_HOST' '//\$host';
-            sub_filter '$MIRROR_BRAND' '$PRIMARY_DOMAIN';
-            sub_filter_once off;
-            sub_filter_types application/vnd.apple.mpegurl application/x-mpegURL text/xml;
-        }
-
-        location ~* ^/(static|assets|css|js|images|fonts|player)/ {
-            root /var/www/mirror;
-            try_files \$uri @store_static;
-            access_log off;
-            expires 365d;
-        }
-
-        location @store_static {
-            internal;
-            proxy_pass http://video_stream_backend;
-            proxy_store_access user:rw group:rw all:r;
-            proxy_ignore_headers Cache-Control Expires Set-Cookie;
-            proxy_set_header User-Agent \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36\";
-            proxy_set_header Host $MIRROR_TARGET_HOST;
-            proxy_set_header Accept-Encoding \"\";
-            proxy_http_version 1.1;
-            proxy_set_header Connection \"\";
-            proxy_store on;
-            root /var/www/mirror;
-            proxy_temp_path /var/www/proxy_temp;
-        }
-
-        location ^~ /cdn-cgi/ {
-            default_type application/javascript;
-            return 200 \"\";
-            access_log off;
-            error_log off;
-        }
-
-        location / {
-            limit_req zone=bot burst=30 nodelay;
-            limit_conn addr 30;
-
-            proxy_pass http://video_stream_backend$MIRROR_TARGET_URI;
-            proxy_http_version 1.1;
-
-            proxy_buffering on;
-            proxy_request_buffering on;
-            proxy_ignore_headers Cache-Control Expires Set-Cookie;
-
-            proxy_set_header Host $MIRROR_TARGET_HOST;
-            proxy_set_header Origin http://$MIRROR_TARGET_HOST;
-            proxy_set_header Referer http://$MIRROR_TARGET_HOST/;
-            proxy_set_header User-Agent \$http_user_agent;
-            proxy_set_header Accept-Encoding \"\";
-            proxy_set_header Connection \"\";
-
-            proxy_cache html_zone;
-            proxy_cache_key \"\$scheme\$proxy_host\$request_uri\";
-            proxy_cache_valid 200 1d;
-            proxy_cache_valid 301 302 1h;
-            proxy_cache_valid 404 5m;
-            proxy_cache_use_stale updating error timeout invalid_header http_500 http_502 http_503 http_504;
-
-            proxy_set_header X-Real-IP \"\";
-            proxy_set_header X-Forwarded-For \"\";
-            proxy_set_header Forwarded \"\";
-            proxy_set_header X-Forwarded-Proto \"\";
-
-            proxy_buffer_size 128k;
-            proxy_buffers 4 256k;
-            proxy_busy_buffers_size 256k;
-
-            sub_filter 'http://$MIRROR_TARGET_HOST' 'https://\$host';
-            sub_filter 'https://$MIRROR_TARGET_HOST' 'https://\$host';
-            sub_filter '//$MIRROR_TARGET_HOST' '//\$host';
-            sub_filter '$MIRROR_BRAND' '$PRIMARY_DOMAIN';
-            sub_filter_once off;
-            sub_filter_types text/xml text/plain;
-        }
-"
-elif [ "$DECOY_MODE" = "3" ]; then
-    # Режим 3: DataSphere Analytics (API эмуляция и заголовки)
+    # Режим 1: DataSphere Analytics (API эмуляция и заголовки)
     DECOY_LOCATION_BLOCKS="
         add_header X-DataSphere-Engine \"v3.14.8-enterprise\" always;
 
@@ -1888,8 +1574,8 @@ elif [ "$DECOY_MODE" = "3" ]; then
             return 404;
         }
 "
-elif [ "$DECOY_MODE" = "4" ]; then
-    # Режим 4: CosmosCloud
+elif [ "$DECOY_MODE" = "2" ]; then
+    # Режим 2: CosmosCloud
     DECOY_LOCATION_BLOCKS="
         add_header X-Cosmoscloud-Version \"0.22.18\" always;
 
@@ -1924,7 +1610,7 @@ elif [ "$DECOY_MODE" = "4" ]; then
         }
 "
 else
-    # Режим 5: Welcome to nginx
+    # Режим 3: Welcome to nginx
     DECOY_LOCATION_BLOCKS="
         location = / {
             default_type text/html;
@@ -2259,20 +1945,16 @@ fi
 
 DECOY_NAME="Локальный Front"
 if [ "$DECOY_MODE" = "1" ]; then
-    DECOY_NAME="AnimeGO Mirror (https://${MIRROR_TARGET_HOST})"
-elif [ "$DECOY_MODE" = "2" ]; then
-    DECOY_NAME="IS74 Stream Mirror (http://${MIRROR_TARGET_HOST}${MIRROR_TARGET_URI})"
-elif [ "$DECOY_MODE" = "3" ]; then
     DECOY_NAME="DataSphere IT SaaS (Интерактивная консоль)"
-elif [ "$DECOY_MODE" = "4" ]; then
+elif [ "$DECOY_MODE" = "2" ]; then
     DECOY_NAME="CosmosCloud Front"
-elif [ "$DECOY_MODE" = "5" ]; then
+elif [ "$DECOY_MODE" = "3" ]; then
     DECOY_NAME="Default Nginx Stub"
 fi
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.0.4 NATIVE H2 & AWG SPEED)!   "
+echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.1.0)!    "
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Маска-Фронтенд:              ${CYAN}https://${PRIMARY_DOMAIN}${NC} (${DECOY_NAME})"
 echo -e "  Вход в панель 3X-UI:         ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
@@ -2283,7 +1965,7 @@ echo -e "${YELLOW}[SSL] ВЫПУЩЕННЫЕ СЕРТИФИКАТЫ:${NC}"
 echo -e "$SSL_CERT_REPORT"
 
 echo -e "${YELLOW}ШАГ 1: Настройка файервола UFW (Защита локальных сокетов и открытие VPN):${NC}"
-echo -e "  ${CYAN}ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && ufw allow 8443/tcp && ufw allow $AWG_UDP_PORT/udp${NC}"
+echo -e "  ${CYAN}ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && ufw allow 8443/tcp${NC}"
 echo -e "  ${RED}ufw deny $PANEL_PORT/tcp && ufw deny $SUB_PORT/tcp && ufw deny $XHTTP_STREAM_PORT/tcp && ufw deny $REALITY_FALLBACK_PORT/tcp${UFW_DENY_LIST}${NC}"
 echo
 
@@ -2310,24 +1992,13 @@ echo -e "    * Публичный ключ: ${CYAN}/etc/letsencrypt/live/$PRIMAR
 echo -e "    * Приватный ключ: ${CYAN}/etc/letsencrypt/live/$PRIMARY_DOMAIN/privkey.pem${NC}"
 echo
 
-echo -e "${YELLOW}ШАГ 5: Инбаунд AmneziaWG / AWG (UDP $AWG_UDP_PORT):${NC}"
-echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}amneziawg / wireguard${NC} | Адрес: ${GREEN}0.0.0.0${NC} | Порт: ${GREEN}$AWG_UDP_PORT${NC} (UDP)"
-echo -e "  - ${YELLOW}Вкладка «Параметры AWG» (Обфускация для максимальной скорости):${NC}"
-echo -e "    * ${CYAN}Content Padding Addition:${NC} ${GREEN}\"0\"${NC}"
-echo -e "    * ${CYAN}Random Trailers:${NC} ${RED}false (Выключить)${NC}"
-echo -e "    * ${CYAN}H1-H4 (Строки в кавычках):${NC} ${GREEN}\"149419586\", \"878791997\", \"1251051976\", \"1657628296\"${NC}"
-echo -e "    * ${CYAN}Смещения (>= 12):${NC} ${GREEN}S1 = 45, S2 = 60, S3 = 24, S4 = 16${NC}"
-echo -e "    * ${CYAN}Junk packets:${NC} ${GREEN}Jc = 4, Jmin = 50, Jmax = 160${NC} | ${CYAN}MTU:${NC} ${GREEN}1360${NC}"
-echo -e "  - ${YELLOW}Вкладка «Клиенты»:${NC} Экспортируйте ${CYAN}.conf${NC} или отсканируйте QR-код в приложении ${GREEN}AmneziaVPN / AmneziaWG${NC}"
-echo
-
-echo -e "${YELLOW}ШАГ 6: Настройки Клиента и Подписок в 3X-UI:${NC}"
+echo -e "${YELLOW}ШАГ 5: Настройки Клиента и Подписок в 3X-UI:${NC}"
 echo -e "  - ${YELLOW}В карточке Клиента (Клиенты -> Учетные данные):${NC}"
 echo -e "    * Flow: выбрать ${GREEN}xtls-rprx-vision${NC} (Ключи VLESS-ENC панель подставит в подписку автоматически)"
 echo -e "  - ${YELLOW}Настройки подписок (Панель -> Подписка):${NC}"
 echo -e "    * Subscription Port: ${GREEN}$SUB_PORT${NC} | Subscription Path: ${GREEN}$SUB_PATH${NC}"
 echo -e "    * Subscription URL: ${CYAN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
-echo -e "  - ${YELLOW}В разделе «Хосты» (Hosts 🌐) добавьте 2 правила:${NC}"
+echo -e "  - ${YELLOW}В разделе «Хосты» (Hosts) добавьте 2 правила:${NC}"
 echo -e "    1) ${BOLD}MAIN_SAME_443:${NC} Инбаунды: ${CYAN}REALITY + Hysteria 2${NC} -> Порт: ${GREEN}443${NC} | Безопасность: ${GREEN}same${NC}"
 echo -e "    2) ${BOLD}XHTTP_TLS_443:${NC} Инбаунд: ${CYAN}VLESS_XHTTP${NC} -> Порт: ${GREEN}443${NC} | Безопасность: ${GREEN}tls${NC} (SNI: ${CYAN}$PRIMARY_DOMAIN${NC})"
 echo -e "${GREEN}=====================================================================${NC}"
