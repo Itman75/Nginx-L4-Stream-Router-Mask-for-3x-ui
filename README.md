@@ -1,21 +1,21 @@
-# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.0.5 Universal)
+# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.1.0 Universal)
 
-> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, аппаратным ускорением AmneziaWG (AWG), многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing), полной изоляцией внутренних служб и 100% совместимостью с Nginx Open Source.**  
+> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, скоростным транспортом Hysteria 2 (UDP 443), многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing) и полной изоляцией внутренних служб через сокеты в RAM.**  
 > Развёртывается на чистых ОС семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
 
 ---
 
-## 🌟 Ключевые возможности архитектуры v6.0.5 Universal
+## 🌟 Ключевые возможности архитектуры v6.1.0 Universal
 
-Комплекс состоит из скрипта первичной настройки защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.0.5**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x** и протоколами **AmneziaWG (AWG)**:
+Комплекс состоит из скрипта первичной защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.1.0**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x**:
 
 ### 1. Сценарий 1: Steal-Oneself REALITY (Кража у самого себя с Anti-Loop Port 9443)
 * Выпуск легитимных SSL-сертификатов Let's Encrypt на собственные домены.
 * Входящий TLS-поток маршрутизируется через Nginx Stream на локальный порт Xray REALITY (`127.0.0.1:45443`).
-* **Защита Anti-Loop:** При подключении обычного браузера или зондирующего сканера Xray перенаправляет (*fallback*) запрос на выделенный изолированный слушатель **`127.0.0.1:9443`** (`xver: 1`), минуя внешний L4-роутер 443 и полностью исключая бесконечную петлю пересылки пакетов.
+* **Защита Anti-Loop:** При подключении обычного веб-браузера или сканера активного зондирования Xray перенаправляет (*fallback*) запрос на изолированный слушатель **`127.0.0.1:9443`** (`xver: 1`), минуя внешний L4-роутер 443 и полностью исключая бесконечную петлю пересылки пакетов.
 
 ### 2. Сценарий 2: Classic External REALITY (Внешний камуфляж)
-* Использование известных внешних доменов (`swdist.microsoft.com`, `www.samsung.com`, `gateway.icloud.com` и др.) в качестве SNI.
+* Использование доверенных внешних доменов (`swdist.microsoft.com`, `www.samsung.com`, `gateway.icloud.com` и др.) в качестве SNI.
 * Каждому внешнему пулу назначается независимый локальный порт (`46443`, `47443` и т.д.), исключая коллизии и балансировочные таймауты.
 
 ### 3. Шлюз VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision via Native HTTP/2
@@ -26,28 +26,28 @@
 * **XTLS-Vision поверх xHTTP:** В клиентах с версией ядра **Xray 24.9.27+** активируется `flow: xtls-rprx-vision` совместно с `vlessenc` для динамического паддинга и маскировки под стандартный веб-трафик.
 * **Паддинг заголовков:** Случайный мусор в HTTP-заголовках (`xPaddingBytes: 120-1120`, ключ `X-Amz-Meta-Trace`).
 
-### 4. Раздельные скоростные UDP-туннели: Hysteria 2 (443/UDP) и AmneziaWG (8443/UDP)
-* **Hysteria 2 на `443/UDP`:** Сверхскоростной транспорт на базе протокола QUIC (HTTP/3) с маскировкой под мультимедийный трафик и контроллером перегрузок BBR.
-* **AmneziaWG (AWG) на `8443/UDP`:** Модифицированный протокол WireGuard с защитой от блокировок ТСПУ/DPI. Nginx Stream слушает только `8443/TCP`, оставляя порт `8443/UDP` полностью свободным для прямого приёма пакетов ядром AWG.
-* **Аппаратное устранение дропов (MSS Clamping & NAT):** Скрипт автоматически включает `net.ipv4.ip_forward = 1`, зажимает `TCPMSS --clamp-mss-to-pmtu` и настраивает постоянный NAT Masquerade для подсети `10.8.1.0/24`, полностью исключая ограничение скорости в 5–25 кбит/с из-за фрагментации UDP.
-* **Обфускация AWG:** Случайные мусорные пакеты (`Jc`, `Jmin-Jmax`), смещения заголовков (`S1-S4 >= 12`), строковые `H1-H4` и отключение раздувания данных (`contentPaddingAddition: "0"`).
+### 4. Скоростной UDP-туннель: Hysteria 2 (443/UDP)
+* **Hysteria 2 на `443/UDP`:** Сверхскоростной транспорт на базе протокола QUIC (HTTP/3) с маскировкой под веб-сервер и контроллером перегрузок BBR.
+* Nginx Stream слушает только `443/TCP`, оставляя порт `443/UDP` полностью свободным для прямого приёма пакетов сервером Hysteria 2.
+* Выделенный пул системных буферов ядра Linux (`net.ipv4.udp_mem`, `rmem_max`, `wmem_max`) для стабильной работы под высокими нагрузками.
 
-### 5. Межпроцессная связь через Unix Sockets в RAM и Nginx Mainline (Open Source Ready)
+### 5. Межпроцессная связь через Unix Sockets в RAM и Nginx Mainline
 * Подключение официального репозитория `nginx.org` (ветка **Mainline**).
-* Полная адаптация под Nginx Open Source без использования проприетарных директив Nginx Plus.
 * Внутренний обмен между L4 Stream и L7 HTTP Core осуществляется через сокет в оперативной памяти (**`unix:/dev/shm/nginx-http.sock`**), исключая задержки виртуального loopback.
-* Использование `ssl_reject_handshake on` на дефолтном сервере для мгновенного сброса сканеров по прямому IP без раскрытия сертификата.
+* Использование `ssl_reject_handshake on` на дефолтном сервере для мгновенного сброса сканеров по прямому IP без раскрытия SSL-сертификата.
 
-### 6. 5 режимов интеллектуальной маскировки (Decoy Fronts)
-* **Режим 1:** Интеллектуальное зеркалирование медиа-портала `animego.org` с глубокой подменой URL (`sub_filter`) и кэшированием статики.
-* **Режим 2:** Зеркалирование live-видеотрансляции `stream.is74.ru/0/streaming` (HLS Video Chunks).
-* **Режим 3:** Корпоративный IT SaaS *DataSphere Analytics* — интерактивный SPA-интерфейс со стек-шрифтами *Plus Jakarta Sans / Inter*, модальным окном авторизации и эмуляцией бекенд-API (`/api/v1/datasphere/status`, `/api/v1/datasphere/auth`).
-* **Режим 4:** Облачный портал *CosmosCloud* с эмуляцией API авторизации (`/api/v1/auth/login`), верификацией WebP-графики и cookies.
-* **Режим 5:** Стандартная заглушка Nginx (*Welcome to nginx!*).
+### 6. 3 автономных локальных режима маскировки (Decoy Fronts)
+* **Режим 1 (Рекомендуемый):** Корпоративный IT SaaS *DataSphere Analytics* — интерактивный SPA-интерфейс со стек-шрифтами *Plus Jakarta Sans / Inter*, модальным окном авторизации и эмуляцией бекенд-API (`/api/v1/datasphere/status`, `/api/v1/datasphere/auth`).
+* **Режим 2:** Облачный портал *CosmosCloud* с эмуляцией API авторизации (`/api/v1/auth/login`), верификацией WebP-графики и сессионными cookies.
+* **Режим 3:** Стандартная заглушка веб-сервера (*Welcome to nginx!*).
 
 ### 7. Двухрежимный гибридный SSL-движок
 * **Certbot (HTTP-01):** Автоматический выпуск через Snapd с деплой-хуками нормализации прав (`chmod 755 / 644`).
 * **acme.sh (Cloudflare DNS-01):** Выпуск сертификатов через Cloudflare API (Token или Global Key), включая Wildcard-сертификаты.
+
+### 8. Чистая фильтрация через UFW (Pure Firewall)
+* Исключены сторонние утилиты трансляции адресов (`iptables-persistent`, `netfilter-persistent`).
+* Все правила блокировки внутренних сокетов и публикации внешних портов реализуются через стандартный межсетевой экран **UFW**.
 
 ---
 
@@ -65,7 +65,6 @@
 graph TD
     Client443TCP[Клиент: 443/TCP или 8443/TCP] --> NginxStream(Nginx Stream L4 Router)
     Client443UDP[Клиент: 443/UDP] -->|Напрямую в обход Nginx| XrayHysteria[Xray: Hysteria 2 UDP :443]
-    Client8443UDP[Клиент: 8443/UDP] -->|Напрямую в обход Nginx| AWGServer[AmneziaWG / AWG UDP :8443]
 
     NginxStream -->|SNI: Главный домен / Пустой SNI| NginxSock[Unix Socket: /dev/shm/nginx-http.sock]
     NginxStream -->|SNI: Steal-Oneself cdn.yourdomain.online| XrayStealREALITY[Xray REALITY :45443]
@@ -77,7 +76,7 @@ graph TD
     NginxSock --> NginxHTTPCore[Nginx HTTP L7 Engine]
     NginxFallbackHTTP --> NginxHTTPCore
 
-    NginxHTTPCore -->|Корень /| DecoySite[Decoy Маскировка 1-5]
+    NginxHTTPCore -->|Корень /| DecoySite[Decoy Маскировка 1-3]
     NginxHTTPCore -->|Секретный путь /my-3x-panel/| Panel3X[3X-UI Панель управления :10443]
     NginxHTTPCore -->|Путь подписок /my-post-key/| PanelSub[3X-UI Сервер подписок :55443]
     NginxHTTPCore -->|Путь xHTTP /Stream-One-Path/ via proxy_http_version 2| XrayXHTTP[Xray VLESS xHTTP :50443]
@@ -87,15 +86,15 @@ graph TD
 
 ## 📱 Совместимость клиентских приложений
 
-Для полноценной работы стека протоколов клиентское ПО должно поддерживать соответствующие протоколы и обфускацию:
+Для полноценной работы стека протоколов клиентское ПО должно поддерживать соответствующие транспорты, шифрование и обфускацию:
 
 | Платформа | Приложение | Поддерживаемые протоколы | Особенности |
 | :--- | :--- | :--- | :--- |
-| **Windows** | **v2rayN** / **AmneziaVPN** | VLESS (xHTTP/REALITY), Hy2, AWG | v2rayN v6.40+ (Xray v24.11+) |
-| **Android** | **v2rayNG** / **AmneziaWG** / **NekoBox** | VLESS, Hysteria 2, AmneziaWG | v2rayNG v1.9.15+, NekoBox v1.3.1+ |
-| **iOS / iPadOS** | **Happ Proxy** / **FoXray** / **AmneziaWG** | VLESS, Hysteria 2, AmneziaWG | Актуальные версии из App Store |
-| **macOS** | **V2RayXS** / **AmneziaVPN** | VLESS, Hysteria 2, AmneziaWG | Нативная поддержка AWG и Xray |
-| **Роутеры** | **Keenetic** / **OpenWrt** | AmneziaWG (пакет AWG), Xray | Туннелирование всей домашней сети |
+| **Windows** | **v2rayN** / **Sing-box** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2 | v2rayN v6.40+ (Xray-core v24.11+) |
+| **Android** | **v2rayNG** / **NekoBox** / **Sing-box** | VLESS (xHTTP/REALITY/Vision), Hysteria 2 | v2rayNG v1.9.15+, NekoBox v1.3.1+ |
+| **iOS / iPadOS** | **Happ Proxy** / **FoXray** / **Streisand** / **Karing** | VLESS (xHTTP/REALITY/Vision), Hysteria 2 | Актуальные версии из App Store |
+| **macOS** | **V2RayXS** / **FoXray** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2 | Нативная поддержка Xray-core |
+| **Роутеры** | **Keenetic** / **OpenWrt** | VLESS REALITY, VLESS xHTTP | Пакеты Xray-core / Sing-box |
 
 ---
 
@@ -128,9 +127,9 @@ chmod +x secure-vps.sh
 
 ---
 
-## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.0.5)
+## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.1.0)
 
-На втором шаге подключается официальный репозиторий Nginx Mainline, генерируются SSL-сертификаты, разворачивается выбранная веб-маска, конфигурируются правила `iptables` для AWG и применяется матрица безопасности.
+На втором шаге подключается официальный репозиторий Nginx Mainline, генерируются SSL-сертификаты, разворачивается выбранная веб-маска и применяется комплексная матрица безопасности.
 
 Запустите скрипт автоматической настройки:
 
@@ -158,22 +157,20 @@ chmod +x setup_mask.sh
 * **Секретный URI-путь подписок:** `my-post-key`
 * **Внутренний порт VLESS xHTTP:** `50443`
 * **URI-путь для xHTTP:** `Stream-One-Path`
-* **Внешний UDP-порт для AmneziaWG (AWG):** `8443`
-* **Подсеть интерфейса AmneziaWG (AWG):** `10.8.1.0/24`
-* **Вариант маскировки (DECOY_MODE):** `1` *(AnimeGO)*, `2` *(IS74 Video)*, `3` *(DataSphere SPA)*, `4` *(CosmosCloud)* или `5` *(Nginx Stub)*
+* **Вариант маскировки (DECOY_MODE):** `1` *(DataSphere SPA)*, `2` *(CosmosCloud)* или `3` *(Nginx Stub)*
 * **Метод сертификации:** `1` *(Certbot HTTP-01)* или `2` *(acme.sh + Cloudflare DNS-01)*
 
 ---
 
-### Настройка брандмауэра UFW (Выполнить после setup_mask.sh и преднастройки панели 3x-ui)
+### Настройка брандмауэра UFW (Выполнить после setup_mask.sh и преднастройки панели 3X-UI)
 
 Заблокируйте прямой доступ к внутренним техническим портам снаружи и откройте внешние точки входа VPN:
 
 ```bash
-# Разрешаем внешние сетевые точки входа (Веб, REALITY, Hysteria 2 UDP 443 и AmneziaWG UDP 8443)
-ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && ufw allow 8443/tcp && ufw allow 8443/udp
+# Разрешаем внешние сетевые точки входа (Веб, REALITY, Hysteria 2 UDP 443 и резервный 8443/TCP)
+ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && ufw allow 8443/tcp
 
-# Блокируем технические внутренние сокеты и порт Anti-Loop
+# Блокируем технические внутренние сокеты и порт Anti-Loop Fallback
 ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/tcp && ufw deny 45443/tcp && ufw deny 46443/tcp
 ```
 
@@ -250,22 +247,9 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ---
 
-#### E. Инбаунд `AmneziaWG / AWG (UDP 8443)` ⚡
-* **Основное:** Протокол `amneziawg` (или `wireguard`) | Порт `8443` (UDP) | Listen IP `0.0.0.0`
-* **Подсеть интерфейса:** `10.8.1.0/24`
-* **Параметры AWG (Обфускация для максимальной скорости):**
-  * **Content Padding Addition:** `"0"` *(Критично: отключает раздувание и фрагментацию пакетов)*
-  * **Random Trailers:** `false` (Выключить)
-  * **H1–H4 (Строковые значения в кавычках):** `"149419586"`, `"878791997"`, `"1251051976"`, `"1657628296"`
-  * **Смещения S1–S4 (Строго >= 12):** `S1 = 45`, `S2 = 60`, `S3 = 24`, `S4 = 16`
-  * **Junk packets:** `Jc = 4`, `Jmin = 50`, `Jmax = 160` | **MTU:** `1360`
-* **Клиенты:** Добавьте клиента, экспортируйте `.conf` файл или отсканируйте QR-код в приложении **AmneziaVPN** / **AmneziaWG**.
-
----
-
 ### 3. Автоматизация ссылок подписок (Раздел «Хосты» / Hosts) 💡
 
-Для того чтобы клиенты подключались к VLESS xHTTP по порту 443 с TLS, в разделе **Хосты** (`🌐`) панели 3X-UI создаются два правила:
+Для того чтобы клиенты автоматически подключались к VLESS xHTTP по порту 443 с корректным TLS, в разделе **Хосты** (`🌐`) панели 3X-UI создаются два правила:
 
 #### Правило 1: Для REALITY и Hysteria 2 (`MAIN_SAME_443`)
 * **Примечание:** `MAIN_SAME_443`
@@ -291,7 +275,6 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 | `443/TCP` | Входящий | **Разрешён** | Вход Nginx Stream L4 (Маска, Панель, Подписки, xHTTP, REALITY) |
 | `443/UDP` | Входящий | **Разрешён** | Прямой доступ к Xray (**Hysteria 2 UDP**) |
 | `8443/TCP` | Входящий | **Разрешён** | Резервная точка входа Nginx Stream L4 |
-| `8443/UDP` | Входящий | **Разрешён** | Прямой доступ к **AmneziaWG (AWG UDP)** |
 | `9443/TCP` | Локальный | **Заблокирован** | **Anti-Loop Fallback:** Приём не-REALITY трафика от Xray с PROXY protocol |
 | `10443/TCP` | Локальный | **Заблокирован** | Внутренний веб-интерфейс панели 3X-UI |
 | `55443/TCP` | Локальный | **Заблокирован** | Внутренний сервер клиентских подписок 3X-UI |
@@ -321,8 +304,8 @@ curl -Iv --http2 https://yourdomain.online/Stream-One-Path/
 # 5. Проверка Fallback Steal-Oneself (должен отдавать маску без зацикливания)
 curl -Iv --resolve cdn.yourdomain.online:443:127.0.0.1 https://cdn.yourdomain.online
 
-# 6. Проверка доступности портов UDP (Hy2 и AWG)
-nc -zvu 127.0.0.1 443 && nc -zvu 127.0.0.1 8443
+# 6. Проверка доступности порта Hysteria 2 UDP
+nc -zvu 127.0.0.1 443
 
 # 7. Мониторинг логов Nginx в реальном времени
 tail -f /var/log/nginx/access.log
@@ -350,14 +333,13 @@ certbot renew --dry-run
 
 ## 💾 Резервное копирование и восстановление
 
-Для сохранения полной рабочей конфигурации шлюза выполните команду создания единого архива:
+Для сохранения полной конфигурации шлюза выполните команду создания архива:
 
 ```bash
-# Создание резервной копии конфигурации Nginx, сертификатов, правил iptables и базы 3X-UI
+# Создание резервной копии конфигурации Nginx, сертификатов и базы данных 3X-UI
 tar -czvf backup_proxy_$(date +%F).tar.gz \
   /etc/nginx \
   /etc/letsencrypt \
-  /etc/iptables \
   /etc/x-ui/x-ui.db \
   /var/www/html
 ```
@@ -365,13 +347,12 @@ tar -czvf backup_proxy_$(date +%F).tar.gz \
 Для восстановления из архива:
 ```bash
 tar -xzvf backup_proxy_YYYY-MM-DD.tar.gz -C /
-iptables-restore < /etc/iptables/rules.v4 2>/dev/null || true
 nginx -t && systemctl restart nginx && systemctl restart x-ui
 ```
 
 ---
 
-## 📄 Готовые JSON-шаблоны Инбаундов Xray и AmneziaWG
+## 📄 Готовые JSON-шаблоны Инбаундов Xray
 
 <details>
 <summary><b>1. JSON: VLESS REALITY Steal-Oneself (Порт 45443, Anti-Loop Dest 9443)</b></summary>
@@ -546,63 +527,6 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
       "alpn": [
         "h3"
       ]
-    }
-  }
-}
-```
-</details>
-
-<details>
-<summary><b>5. JSON: AmneziaWG / AWG UDP (Порт 8443, Скоростной профиль)</b></summary>
-
-```json
-{
-  "listen": "0.0.0.0",
-  "port": 8443,
-  "protocol": "amneziawg",
-  "tag": "in-8443-awg",
-  "settings": {
-    "clients": [
-      {
-        "privateKey": "ВАШ_PRIVATE_KEY_КЛИЕНТА",
-        "publicKey": "ВАШ_PUBLIC_KEY_КЛИЕНТА",
-        "allowedIPs": [
-          "10.8.1.2/32"
-        ],
-        "forwardedPorts": "",
-        "email": "user1",
-        "enable": true
-      }
-    ],
-    "server": {
-      "contentPaddingAddition": "0",
-      "disableCookies": true,
-      "h1": "149419586",
-      "h2": "878791997",
-      "h3": "1251051976",
-      "h4": "1657628296",
-      "headerProtectionKey": "ВАШ_headerProtectionKey",
-      "i1": "",
-      "jc": 4,
-      "jmax": 160,
-      "jmin": 50,
-      "keepaliveTimeout": "15",
-      "maxHandshakeAttempts": "20",
-      "mtu": 1360,
-      "primaryDns": "1.1.1.1",
-      "secondaryDns": "8.8.8.8",
-      "privateKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
-      "publicKey": "ВАШ_PUBLIC_KEY_СЕРВЕРА",
-      "randomTrailers": false,
-      "rejectAfterTime": "180",
-      "rekeyAfterTime": "120",
-      "rekeyTimeout": "7",
-      "s1": 45,
-      "s2": 60,
-      "s3": 24,
-      "s4": 16,
-      "subnetCidr": 24,
-      "subnetIp": "10.8.1.0"
     }
   }
 }
