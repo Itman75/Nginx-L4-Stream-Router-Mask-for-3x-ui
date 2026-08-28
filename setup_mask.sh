@@ -18,6 +18,7 @@
 #   8) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
 #   9) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
 #  10) Чистая фильтрация портов через UFW без сторонних утилит трансляции NAT
+#  11) Унифицированные строгие заголовки безопасности для всех доменов и субдоменов
 # ==============================================================================
 
 set -euo pipefail
@@ -1821,8 +1822,22 @@ server {
     ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
     ssl_prefer_server_ciphers off;
 
-    root $WEBROOT;
-    index index.html;
+    ssl_buffer_size 4k;
+    ssl_session_tickets on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 4h;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header X-Robots-Tag "noindex, nofollow, noarchive, nosnippet" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+
+    if (\$is_scan_attempt) { return 404; }
+    if (\$badbot) { return 404; }
+    if (\$request_method !~ ^(GET|HEAD|POST)\$) { return 405; }
+
+    error_page 400 403 404 405 @notfound;
 
     $DECOY_LOCATION_BLOCKS
 
@@ -1862,7 +1877,26 @@ server {
         proxy_set_header Connection \$connection_upgrade;
     }
 
+    location = /robots.txt {
+        default_type text/plain;
+        access_log off;
+        return 200 "User-agent: *\nDisallow: /\n";
+    }
+
+    location = /favicon.ico {
+        root $WEBROOT;
+        expires 30d;
+        access_log off;
+    }
+
+    location = /.well-known/security.txt {
+        default_type text/plain;
+        access_log off;
+        return 200 "Contact: mailto:admin@$ext_dom\nPreferred-Languages: ru,en\n";
+    }
+
     location @notfound {
+        limit_req zone=scan burst=3 nodelay;
         root $WEBROOT;
         rewrite ^ /404.html break;
     }
