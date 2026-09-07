@@ -18,7 +18,7 @@
 #      - Certbot (HTTP-01): /etc/letsencrypt/live/
 #      - acme.sh + Cloudflare (DNS-01): /etc/ssl/acme/ (изоляция от /root/ и 755/644)
 #   8) 3 автономных локальных режима маскировки (Decoy Front):
-#      - 1: DataSphere Analytics Enterprise (Стиль Google Gemini Dark + Live ±10%)
+#      - 1: DataSphere Analytics Enterprise (Геометрический логотип + Live ±10%)
 #      - 2: Облако CosmosCloud (с эмуляцией API, ассетами и logo.webp)
 #      - 3: Стандартная заглушка Nginx (Welcome to nginx)
 #   9) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
@@ -376,7 +376,7 @@ done
 
 echo
 echo -e "${YELLOW}Шаг 9: Выбор темы для сайта-маскировки (Decoy Fronts Catalog)${NC}"
-echo -e " 1) ${GREEN}DataSphere Analytics Enterprise${NC} (Стиль Google Gemini Dark — живая телеметрия ±10%)"
+echo -e " 1) ${GREEN}DataSphere Analytics Enterprise${NC} (Строгий геометрический дизайн + Live телеметрия ±10%)"
 echo -e " 2) ${GREEN}CosmosCloud NextGen${NC} (Облачный диск с оригинальным логотипом и сессионными cookies)"
 echo -e " 3) Стандартная заглушка Nginx (Welcome to nginx)"
 prompt_default "Выберите вариант маскировки (1, 2 или 3)" "1" DECOY_MODE
@@ -713,12 +713,12 @@ else
 fi
 
 # =============================================================
-#  ГЕНЕРАЦИЯ ВЫБРАННОЙ ВЕБ-МАСКИ (GEMINI DARK + DYNAMIC TELEMETRY)
+#  ГЕНЕРАЦИЯ ВЫБРАННОЙ ВЕБ-МАСКИ
 # =============================================================
 log "Формирование выбранного маскировочного портала..."
 
 if [ "$DECOY_MODE" = "1" ]; then
-    # 1. DataSphere Analytics Enterprise (Google Gemini Dark Aesthetic + Dynamic Stats ±10%)
+    # 1. DataSphere Analytics Enterprise (Геометрический логотип + Dynamic Stats ±10%)
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
@@ -736,8 +736,6 @@ if [ "$DECOY_MODE" = "1" ]; then
             --accent-purple: #c58af9;
             --text: #e3e3e3;
             --text-muted: #9aa0a6;
-            --gemini-gradient: linear-gradient(135deg, #4285f4, #9b72cf, #d96570);
-            --btn-gradient: linear-gradient(135deg, #a8c7fa, #c58af9);
             --success: #81c995;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -780,7 +778,7 @@ if [ "$DECOY_MODE" = "1" ]; then
         .badge-dot { width: 7px; height: 7px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); }
         .hero h1 {
             font-size: clamp(34px, 5vw, 54px); font-weight: 700; line-height: 1.18; margin-bottom: 22px;
-            letter-spacing: -0.8px; color: #d1d5db;
+            letter-spacing: -0.8px; color: #d1d5db; 
         }
         .hero p { font-size: clamp(16px, 2vw, 18px); color: var(--text-muted); margin: 0 auto 36px; line-height: 1.65; max-width: 720px; }
         .hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
@@ -843,15 +841,28 @@ if [ "$DECOY_MODE" = "1" ]; then
 <body>
     <header>
         <div class="logo">
-            <svg viewBox="0 0 28 28" fill="none" width="24" height="24">
-                <defs>
-                    <linearGradient id="geminiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stop-color="#4285f4"/>
-                        <stop offset="50%" stop-color="#9b72cf"/>
-                        <stop offset="100%" stop-color="#d96570"/>
-                    </linearGradient>
-                </defs>
-                <path d="M14 0C14 7.732 7.732 14 0 14C7.732 14 14 20.268 14 28C14 20.268 20.268 14 28 14C20.268 14 14 7.732 14 0Z" fill="url(#geminiGrad)"/>
+            <svg viewBox="0 0 100 100" width="26" height="26" xmlns="http://www.w3.org/2000/svg">
+                <clipPath id="circleMask"><circle cx="50" cy="50" r="48"/></clipPath>
+                <g clip-path="url(#circleMask)">
+                    <rect x="0" y="0" width="100" height="100" fill="#008dd5"/>
+                    <polygon points="50,-8 100,21 100,79 50,108 0,79 0,21" fill="#ffffff"/>
+                    <polygon points="50,6.7 87.5,28.35 87.5,71.65 50,93.3 12.5,71.65 12.5,28.35" fill="#66a88f"/>
+                    <polygon points="50,28.35 68.75,39.17 68.75,60.83 50,71.65 31.25,60.83 31.25,39.17" fill="#e7ab21"/>
+                    <g stroke="#000000" stroke-width="4" stroke-linecap="round">
+                        <line x1="-10" y1="6.7" x2="110" y2="6.7"/>
+                        <line x1="-10" y1="28.35" x2="110" y2="28.35"/>
+                        <line x1="-10" y1="50" x2="110" y2="50"/>
+                        <line x1="-10" y1="71.65" x2="110" y2="71.65"/>
+                        <line x1="-10" y1="93.3" x2="110" y2="93.3"/>
+                        <line x1="15.36" y1="-10" x2="84.64" y2="110"/>
+                        <line x1="40.36" y1="-10" x2="109.64" y2="110"/>
+                        <line x1="-9.64" y1="-10" x2="59.64" y2="110"/>
+                        <line x1="84.64" y1="-10" x2="15.36" y2="110"/>
+                        <line x1="109.64" y1="-10" x2="40.36" y2="110"/>
+                        <line x1="59.64" y1="-10" x2="-9.64" y2="110"/>
+                    </g>
+                </g>
+                <circle cx="50" cy="50" r="48" fill="none" stroke="#000000" stroke-width="5"/>
             </svg>
             <span>DataSphere</span>
         </div>
@@ -930,7 +941,7 @@ if [ "$DECOY_MODE" = "1" ]; then
         </div>
     </div>
 
-    <!-- МОДАЛЬНОЕ ОКНО ДЕТАЛЬНОЙ СПЕЦИФИКАЦИИ (БЕЛАЯ ЛЕГЕНДА БЕЗ УПОМИНАНИЯ VPN) -->
+    <!-- МОДАЛЬНОЕ ОКНО ДЕТАЛЬНОЙ СПЕЦИФИКАЦИИ -->
     <div id="detailModal" class="modal-overlay" onclick="if(event.target===this)closeDetailModal()">
         <div class="modal-card" style="max-width: 500px;">
             <div class="modal-header">
@@ -1905,7 +1916,7 @@ if [ "$CLASSIC_ENABLED" -eq 1 ]; then
 fi
 
 DECOY_NAME="Локальный Front"
-if [ "$DECOY_MODE" = "1" ]; then DECOY_NAME="DataSphere Analytics Enterprise (Gemini Style)";
+if [ "$DECOY_MODE" = "1" ]; then DECOY_NAME="DataSphere Analytics Enterprise (Геометрическая маска)";
 elif [ "$DECOY_MODE" = "2" ]; then DECOY_NAME="CosmosCloud NextGen";
 elif [ "$DECOY_MODE" = "3" ]; then DECOY_NAME="Default Nginx Stub";
 fi
