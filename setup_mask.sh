@@ -756,30 +756,31 @@ if [ "$DECOY_MODE" = "1" ]; then
         }
         .logo { font-size: 21px; font-weight: 700; display: flex; align-items: center; gap: 10px; color: #fff; letter-spacing: -0.5px; }
         .btn {
-            background: var(--btn-gradient); color: #131314; border: none;
+            background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
             padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-            box-shadow: 0 4px 14px rgba(168, 199, 250, 0.2);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
         }
-        .btn:hover { transform: translateY(-1px); filter: brightness(1.08); box-shadow: 0 6px 20px rgba(168, 199, 250, 0.35); }
+        .btn:hover { 
+            transform: translateY(-1px); border-color: rgba(168, 199, 250, 0.4); 
+            background: #242628; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); 
+        }
         .btn-outline {
-            background: var(--surface); border: 1px solid var(--border); color: var(--text);
+            background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
             box-shadow: none; border-radius: 999px;
         }
-        .btn-outline:hover { background: #282a2c; border-color: rgba(255, 255, 255, 0.2); filter: none; }
+        .btn-outline:hover { background: #242628; border-color: rgba(168, 199, 250, 0.4); }
         .hero { text-align: center; padding: 90px 20px 70px; max-width: 900px; margin: 0 auto; }
         .badge {
             display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px;
-            background: var(--surface); border: 1px solid var(--border);
+            background: var(--surface-card); border: 1px solid var(--border);
             border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--accent); margin-bottom: 24px;
         }
         .badge-dot { width: 7px; height: 7px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); }
         .hero h1 {
             font-size: clamp(34px, 5vw, 54px); font-weight: 700; line-height: 1.18; margin-bottom: 22px;
-            letter-spacing: -0.8px;
-            background: linear-gradient(135deg, #ffffff 30%, #a8c7fa 70%, #c58af9 100%);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            letter-spacing: -0.8px; color: #d1d5db;
         }
         .hero p { font-size: clamp(16px, 2vw, 18px); color: var(--text-muted); margin: 0 auto 36px; line-height: 1.65; max-width: 720px; }
         .hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
@@ -859,7 +860,7 @@ if [ "$DECOY_MODE" = "1" ]; then
     <main>
         <section class="hero">
             <div class="badge"><span class="badge-dot"></span><span>DataSphere Cloud Engine v3.14 — Доступность <span id="heroSla">99.998%</span></span></div>
-            <h1>Инфраструктура распределённых данных нового поколения</h1>
+            <h1>Инфраструктура распределения данных нового поколения</h1>
             <p>Корпоративная аналитическая среда с аппаратным ускорением сетевого стека, сквозным TLS 1.3 шифрованием и Anycast-маршрутизацией узлов.</p>
             <div class="hero-actions">
                 <button class="btn" style="padding: 13px 28px; font-size: 15px;" onclick="openAuthModal('Подключение вычислительного узла')">
@@ -1117,7 +1118,7 @@ if [ "$DECOY_MODE" = "1" ]; then
 EOF
 
 elif [ "$DECOY_MODE" = "2" ]; then
-    # 2. CosmosCloud NextGen (с ассетами и оригинальным logo.webp из v6.1.0)
+    # 2. CosmosCloud NextGen (с ассетами и оригинальным logo.webp)
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
