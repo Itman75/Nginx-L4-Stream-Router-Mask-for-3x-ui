@@ -18,13 +18,12 @@
 #      - Certbot (HTTP-01): /etc/letsencrypt/live/
 #      - acme.sh + Cloudflare (DNS-01): /etc/ssl/acme/ (изоляция от /root/ и 755/644)
 #   8) 3 автономных локальных режима маскировки (Decoy Front):
-#      - 1: DataSphere Analytics Enterprise (Геометрический логотип + Live ±10%)
-#      - 2: Облако CosmosCloud (с эмуляцией API, ассетами и logo.webp)
+#      - 1: DataSphere Analytics Enterprise 
+#      - 2: Облако CosmosCloud 
 #      - 3: Стандартная заглушка Nginx (Welcome to nginx)
 #   9) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
 #  10) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
-#  11) Чистая фильтрация портов через UFW без сторонних утилит трансляции NAT
-# ==============================================================================
+#  ==============================================================================
 
 set -euo pipefail
 
