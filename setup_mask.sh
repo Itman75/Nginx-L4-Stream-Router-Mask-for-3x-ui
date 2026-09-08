@@ -923,7 +923,7 @@ if [ "$DECOY_MODE" = "1" ]; then
                 </button>
             </div>
             <div id="errorAlert" class="alert-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 <span id="errorMsg">Ошибка аутентификации</span>
             </div>
             <form id="authForm" onsubmit="handleDataSphereAuth(event)">
@@ -960,14 +960,12 @@ if [ "$DECOY_MODE" = "1" ]; then
     <footer>&copy; 2026 DataSphere Cloud Systems Inc. Платформа распределенной аналитики и защиты данных.</footer>
 
     <script>
-        // Функция динамической генерации случайных величин в диапазоне строго ±10%
         function randVar(base, pct = 10, dec = 0) {
             const delta = base * (pct / 100);
             const val = base + (Math.random() * 2 - 1) * delta;
             return dec > 0 ? val.toFixed(dec) : Math.round(val);
         }
 
-        // Обновление метрик Hero-секции при загрузке
         window.addEventListener('DOMContentLoaded', () => {
             const dynLat = randVar(1.18, 10, 1);
             const dynBw = randVar(99.4, 8, 1);
@@ -979,10 +977,10 @@ if [ "$DECOY_MODE" = "1" ]; then
         });
 
         function getDynamicData() {
-            const nodes = randVar(148, 10, 0);       // Диапазон 134 - 162
-            const rtt = randVar(1.15, 10, 1);        // Диапазон 1.0 - 1.3 ms
-            const bus = randVar(0.048, 10, 2);       // Диапазон 0.04 - 0.05 ms
-            const sla = (99.995 + Math.random() * 0.004).toFixed(3); // 99.995% - 99.999%
+            const nodes = randVar(148, 10, 0);
+            const rtt = randVar(1.15, 10, 1);
+            const bus = randVar(0.048, 10, 2);
+            const sla = (99.995 + Math.random() * 0.004).toFixed(3);
 
             return {
                 crypto: {
@@ -1964,14 +1962,27 @@ echo
 fi
 
 if [ "$ENABLE_AWG_V3" -eq 1 ] && [ -n "$AWG_V3_PORT" ]; then
-echo -e "${YELLOW}ШАГ 5: Инбаунд AmneziaWG v3.1 (Transport Protection — UDP $AWG_V3_PORT):${NC}"
-echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}amneziawg${NC} | Адрес: ${GREEN}0.0.0.0${NC} | Порт: ${GREEN}$AWG_V3_PORT${NC} (UDP)"
-echo -e "  - ${YELLOW}Вкладка «Параметры AWG» (Защита всего потока для смартфонов и ПК):${NC}"
-echo -e "    * ${CYAN}H1-H4:${NC} ${GREEN}\"1\", \"2\", \"3\", \"4\"${NC}"
-echo -e "    * ${CYAN}HeaderProtectionKey:${NC} сгенерировать 32-байтный ключ (ChaCha20)"
-echo -e "    * ${CYAN}Смещения (>= 12):${NC} ${GREEN}S1 = 45, S2 = 60, S3 = 24, S4 = 16${NC}"
-echo -e "    * ${CYAN}Junk packets:${NC} ${GREEN}Jc = 4, Jmin = 50, Jmax = 160${NC}"
-echo -e "    * ${CYAN}Content Padding Addition:${NC} ${GREEN}\"0\"${NC} | ${CYAN}DisableCookies:${NC} ${GREEN}true${NC} | ${CYAN}MTU:${NC} ${GREEN}1360${NC}"
+echo -e "${YELLOW}ШАГ 5: Инбаунд AmneziaWG v3.1 (WG3 — UDP $AWG_V3_PORT):${NC}"
+echo -e "  - ${YELLOW}Вкладка «Основное»:${NC}"
+echo -e "    * Включить: ${GREEN}Включено${NC} | Примечание: ${GREEN}WG3${NC} | Протокол: ${GREEN}amneziawg${NC}"
+echo -e "    * Адрес: ${GREEN}0.0.0.0${NC} | Стратегия адреса для ссылок: ${GREEN}Адрес прослушивания inbound${NC}"
+echo -e "    * Порядок в подписке: ${GREEN}1${NC} | Порт: ${GREEN}$AWG_V3_PORT${NC} (UDP)"
+echo -e "    * Общий расход: ${GREEN}0${NC} | Сброс трафика: ${GREEN}Никогда${NC}"
+echo -e "  - ${YELLOW}Вкладка «Протокол»:${NC}"
+echo -e "    * Ключи: нажать ${CYAN}«Сгенерировать»${NC} (иконка обновления рядом с приватным ключом)"
+echo -e "    * Сеть: Подсеть: ${GREEN}10.8.1.0${NC} | Маска подсети (CIDR): ${GREEN}24${NC} | MTU: ${GREEN}1360${NC}"
+echo -e "    * DNS: Основной DNS: ${GREEN}8.8.8.8${NC} | Резервный DNS: ${GREEN}8.8.4.4${NC}"
+echo -e "    * Внешний интерфейс: ${GREEN}eth0${NC} (или оставить пустым) | Включить IPv6: ${RED}Выключить${NC}"
+echo -e "  - ${YELLOW}Параметры обфускации:${NC}"
+echo -e "    * Мусорные пакеты: ${CYAN}Jc = 4${NC}, ${CYAN}Jmin = 50${NC}, ${CYAN}Jmax = 160${NC}"
+echo -e "    * Мусорные смещения: ${CYAN}S1 = 45${NC}, ${CYAN}S2 = 60${NC}, ${CYAN}S3 = 24${NC}, ${CYAN}S4 = 16${NC}"
+echo -e "    * Заголовки ${CYAN}H1 - H4${NC}: ${GREEN}Оставить ПУСТЫМИ${NC} (по умолчанию 1/2/3/4)"
+echo -e "    * Сигнатурные пакеты ${CYAN}I1 - I5${NC}: ${GREEN}Оставить ПУСТЫМИ${NC}"
+echo -e "    * Защита заголовков (${CYAN}HeaderProtectionKey${NC}): ${GREEN}Оставить ПУСТЫМ${NC}"
+echo -e "    * Паддинг содержимого (${CYAN}ContentPaddingAddition${NC}): ${GREEN}3-16${NC}"
+echo -e "    * Тайминги ключей: ${CYAN}RekeyAfterTime = 107-135${NC}, ${CYAN}RekeyTimeout = 3-4${NC}, ${CYAN}RejectAfterTime = 178-211${NC}"
+echo -e "    * Тайминги соединения: ${CYAN}KeepaliveTimeout = 8-10${NC}, ${CYAN}MaxHandshakeAttempts = 21-26${NC}"
+echo -e "    * Переключатели: ${CYAN}RandomTrailers:${NC} ${RED}Выключить${NC} | ${CYAN}DisableCookies:${NC} ${GREEN}Включить${NC}"
 echo
 fi
 
