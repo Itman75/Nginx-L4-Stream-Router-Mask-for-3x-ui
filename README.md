@@ -545,35 +545,63 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 <summary><b>5. JSON: AmneziaWG v3.1 (Transport Protection — Порт 8443)</b></summary>
 
 ```json
-[Interface]
-PrivateKey = YourPrivateKey
-Address = 10.8.1.2/32
-DNS = 8.8.8.8, 8.8.4.4
-MTU = 1360
-Jc = 4
-Jmin = 50
-Jmax = 160
-S1 = 45
-S2 = 60
-S3 = 24
-S4 = 16
-H1 = 1
-H2 = 2
-H3 = 3
-H4 = 4
-ContentPaddingAddition = 3-16
-RekeyAfterTime = 107-135
-RekeyTimeout = 3-4
-RejectAfterTime = 178-211
-KeepaliveTimeout = 8-10
-MaxHandshakeAttempts = 21-26
-DisableCookies = on
-
-# WG3 - My
-[Peer]
-PublicKey = YourPublicKey
-AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = yor.primary.domain:8443
+{
+  "listen": "0.0.0.0",
+  "port": 8443,
+  "protocol": "amneziawg",
+  "tag": "in-8443-udp",
+  "settings": {
+    "clients": [
+      {
+        "privateKey": "your privateKey",
+        "publicKey": "your publicKey",
+        "allowedIPs": [
+          "10.8.1.2/32"
+        ],
+        "forwardedPorts": "",
+        "email": "My",
+        "limitIp": 0,
+        "totalGB": 0,
+        "expiryTime": 0,
+        "enable": true,
+        "tgId": 471640941,
+        "subId": "Mine",
+        "comment": "",
+        "reset": 0,
+        "created_at": 1779267590000,
+        "updated_at": 1788840887000
+      }
+    ],
+    "server": {
+      "contentPaddingAddition": "3-16",
+      "disableCookies": true,
+      "h1": "",
+      "h2": "",
+      "h3": "",
+      "h4": "",
+      "jc": 4,
+      "jmax": 160,
+      "jmin": 50,
+      "keepaliveTimeout": "8-10",
+      "maxHandshakeAttempts": "21-26",
+      "mtu": 1360,
+      "primaryDns": "8.8.8.8",
+      "privateKey": "your privateKey",
+      "publicKey": "your publicKey",
+      "randomTrailers": false,
+      "rejectAfterTime": "178-211",
+      "rekeyAfterTime": "107-135",
+      "rekeyTimeout": "3-4",
+      "s1": 45,
+      "s2": 60,
+      "s3": 24,
+      "s4": 16,
+      "secondaryDns": "8.8.4.4",
+      "subnetCidr": 24,
+      "subnetIp": "10.8.1.0"
+    }
+  }
+}
 ```
 </details>
 
