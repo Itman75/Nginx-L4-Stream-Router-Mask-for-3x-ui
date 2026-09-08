@@ -257,6 +257,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
   * S1 = 45, S2 = 60, S3 = 24, S4 = 16
   * Jc = 4, Jmin = 50, Jmax = 160
   * DisableCookies: `true`, MTU: `1360`
+  * RandomTrailers: Off
 
 ---
 
