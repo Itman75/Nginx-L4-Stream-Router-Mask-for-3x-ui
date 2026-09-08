@@ -1,11 +1,11 @@
-# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.5.0 Universal)
+# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.5.1 Universal)
 
 > **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, скоростным транспортом Hysteria 2 (UDP 443), многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing) и полной изоляцией внутренних служб через сокеты в RAM.**  
 > Развёртывается на чистых ОС семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
 
 ---
 
-## 🌟 Ключевые возможности архитектуры v6.5.0 Universal
+## 🌟 Ключевые возможности архитектуры v6.5.1 Universal
 
 Комплекс состоит из скрипта первичной защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.5.0**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x**:
 
@@ -18,17 +18,18 @@
 * Использование доверенных внешних доменов (`swdist.microsoft.com`, `www.samsung.com`, `gateway.icloud.com` и др.) в качестве SNI.
 * Каждому внешнему пулу назначается независимый локальный порт (`46443`, `47443` и т.д.), исключая коллизии и балансировочные таймауты.
 
-### 3. Шлюз VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision via Native HTTP/2
+### 3. Шлюз VLESS xHTTP (Stream-One) + VLESSENC via Native HTTP/2 (Zero-Drop Engine)
 * **Нативное H2C-проксирование (`proxy_http_version 2`):** В Nginx Mainline (1.31.4+) проксирование к Xray xHTTP выполняется через честный протокол HTTP/2 без промежуточного преобразования в gRPC или деградации до HTTP/1.1.
-* **Тюнинг буфера приёма (`http2_recv_buffer_size 4m`):** Расширенный буфер воркеров Nginx исключает узкие места при передаче тяжёлых потоковых медиаданных.
+* **Тюнинг буфера приёма (`http2_recv_buffer_size 16m`):** Расширенный буфер воркеров Nginx и сокетные Keepalive (`proxy_socket_keepalive on; tcp_nodelay on;`) исключают зависания и деградацию скорости при передаче тяжёлых файлов (видео, спидтесты, 50+ МБ).
 * **Полнодуплексный стриминг без задержек:** Отключение буферизации тела (`proxy_request_buffering off; proxy_buffering off;`) обеспечивает сквозной двунаправленный обмен фреймами.
-* **Сквозное шифрование `vlessenc`:** Полезная нагрузка защищается постквантовым симметричным ключом шифрования (ML-KEM-768 / VLESS Encryption) на уровне протокола VLESS.
-* **XTLS-Vision поверх xHTTP:** В клиентах с версией ядра **Xray 24.9.27+** активируется `flow: xtls-rprx-vision` совместно с `vlessenc` для динамического паддинга и маскировки под стандартный веб-трафик.
-* **Паддинг заголовков:** Случайный мусор в HTTP-заголовках (`xPaddingBytes: 120-1120`, ключ `X-Amz-Meta-Trace`).
+* **Сквозное шифрование `vlessenc` (ML-KEM-768):** Полезная нагрузка защищается постквантовым симметричным ключом шифрования на уровне протокола VLESS, исключая сигнатуры в потоке.
+* **Чистый HTTP/2 без конфликта Vision:** В режиме xHTTP параметр `Flow` остаётся строго **`none` (пусто)**, так как Vision предназначен только для сырого TCP и ломает структуру HTTP/2-фреймов.
+* **Отключение очередей XMUX (`maxConcurrency: 0`):** Устраняет блокировку Head-of-Line и переполнение буферов, полностью предотвращая вылеты процессов по памяти на устройствах iOS (Apple Jetsam kill limit 50 MB) и зависание окна H2 на Android и ПК.
+* **Паддинг заголовков:** Случайный мусор в HTTP-заголовках (`xPaddingBytes: 100-500`, ключ `X-Amz-Meta-Trace`).
 
 ### 4. Скоростные UDP-туннели: Hysteria 2 и AmneziaWG (UDP 443 / 8443 / 8444)
 * **Hysteria 2 на `443/UDP`:** Сверхскоростной транспорт на базе протокола QUIC (HTTP/3) с маскировкой под веб-сервер и контроллером перегрузок BBR.
-* **AmneziaWG v3.1 / v2.0:** Опциональная установка защиты Transport Protection для мобильных устройств, ПК и роутеров Keenetic / OpenWrt (порты `8443/UDP` и `8444/UDP`).
+* **AmneziaWG v3.1 / v2.0:** Установка защиты Transport Protection для мобильных устройств, ПК и роутеров Keenetic / OpenWrt (порты `8443/UDP` и `8444/UDP`).
 * Nginx Stream слушает только TCP, оставляя UDP-порты полностью свободными для прямого приёма пакетов серверами VPN.
 
 ### 5. Межпроцессная связь через Unix Sockets в RAM и Nginx Mainline
@@ -223,15 +224,17 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ---
 
-#### C. Инбаунд `VLESS_XHTTP` (Stream-One + VLESSENC + XTLS-Vision) 🚀
+#### C. Инбаунд `VLESS_XHTTP` (Stream-One + VLESSENC + Zero-Drop Engine) 🚀
 * **Основное:** Порт `50443` | Listen IP `127.0.0.1` | Протокол `vless`
 * **Поток (Stream Settings):**
   * **Транспорт:** `xhttp` | **Режим:** `stream-one`
   * **Путь:** `/Stream-One-Path/` | **Хост:** `yourdomain.online`
-  * **Паддинг:** `120-1120` | **xPaddingObfsMode:** `true` | **Ключ:** `X-Amz-Meta-Trace`
+  * **Паддинг:** `100-500` | **xPaddingObfsMode:** `true` | **Ключ:** `X-Amz-Meta-Trace`
+  * **XMUX:** `maxConcurrency: 0` *(Выключить очереди для стабильности на iOS и ПК)*
+  * **QUIC / UDP:** `0` *(Строго выключено, трафик идёт через Nginx H2)*
 * **Безопасность:** `none` *(TLS снимает Nginx)* | Accept Proxy Protocol: `0` (Выключить)
 * **Протокол:** В поле **Decryption** выберите **ML-KEM-768 (native)** и сгенерируйте ключ `vlessenc`.
-* **Клиент (Client Settings):** Flow: **`xtls-rprx-vision`**, Decryption: сгенерированный ключ `vlessenc`.
+* **Клиент (Client Settings):** Flow: **строго `none` (пусто)** ⚠️, Decryption: сгенерированный ключ `vlessenc`.
 
 ---
 
@@ -479,19 +482,19 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 </details>
 
 <details>
-<summary><b>3. JSON: VLESS xHTTP Stream-One + VLESSENC + VISION (Порт 50443)</b></summary>
+<summary><b>3. JSON: VLESS xHTTP Stream-One + VLESSENC (Порт 50443)</b></summary>
 
 ```json
 {
   "listen": "127.0.0.1",
   "port": 50443,
   "protocol": "vless",
-  "tag": "in-xhttp-vision",
+  "tag": "in-xhttp-stream",
   "settings": {
     "clients": [
       {
         "id": "ВАШ_UUID",
-        "flow": "xtls-rprx-vision"
+        "flow": ""
       }
     ],
     "decryption": "ВАШ_VLESSENC_KEY"
@@ -506,9 +509,12 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
       "path": "/Stream-One-Path/",
       "host": "yourdomain.online",
       "mode": "stream-one",
-      "xPaddingBytes": "120-1120",
+      "xPaddingBytes": "100-500",
       "xPaddingObfsMode": true,
-      "xPaddingKey": "X-Amz-Meta-Trace"
+      "xPaddingKey": "X-Amz-Meta-Trace",
+      "xmux": {
+        "maxConcurrency": 0
+      }
     },
     "security": "none"
   }
@@ -579,8 +585,8 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
   "settings": {
     "clients": [
       {
-        "privateKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
-        "publicKey": "PUBLIC_KEY_КЛИЕНТА",
+        "privateKey": "your privateKey",
+        "publicKey": "your publicKey",
         "allowedIPs": [
           "10.8.1.2/32"
         ],
@@ -590,7 +596,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
         "totalGB": 0,
         "expiryTime": 0,
         "enable": true,
-        "tgId": ,
+        "tgId": 471640941,
         "subId": "Mine",
         "comment": "",
         "reset": 0,
@@ -612,8 +618,8 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
       "maxHandshakeAttempts": "21-26",
       "mtu": 1360,
       "primaryDns": "8.8.8.8",
-      "privateKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
-      "publicKey": "PUBLIC_KEY_КЛИЕНТА",
+      "privateKey": "your privateKey",
+      "publicKey": "your publicKey",
       "randomTrailers": false,
       "rejectAfterTime": "178-211",
       "rekeyAfterTime": "107-135",
@@ -667,3 +673,6 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
     }
   }
 }
+```
+</details>
+```
