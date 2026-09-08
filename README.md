@@ -583,8 +583,8 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
   "settings": {
     "clients": [
       {
-        "privateKey": "your privateKey",
-        "publicKey": "your publicKey",
+        "privateKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
+        "publicKey": "PUBLIC_KEY_КЛИЕНТА",
         "allowedIPs": [
           "10.8.1.2/32"
         ],
@@ -594,7 +594,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
         "totalGB": 0,
         "expiryTime": 0,
         "enable": true,
-        "tgId": 471640941,
+        "tgId": ,
         "subId": "Mine",
         "comment": "",
         "reset": 0,
@@ -616,8 +616,8 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
       "maxHandshakeAttempts": "21-26",
       "mtu": 1360,
       "primaryDns": "8.8.8.8",
-      "privateKey": "your privateKey",
-      "publicKey": "your publicKey",
+      "privateKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
+      "publicKey": "PUBLIC_KEY_КЛИЕНТА",
       "randomTrailers": false,
       "rejectAfterTime": "178-211",
       "rekeyAfterTime": "107-135",
