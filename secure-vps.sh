@@ -524,7 +524,7 @@ for port in "${TCP_PORTS[@]}"; do
 done
 
 # Дополнительные UDP порты
-UDP_PORTS=(443 8443)
+UDP_PORTS=(443 8443 8444)
 for port in "${UDP_PORTS[@]}"; do
     ufw allow "$port"/udp
 done
