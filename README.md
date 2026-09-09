@@ -389,7 +389,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 
 ---
 
-## 📄 Примерные конфиги (JSON-шаблоны) инбаундов Xray:
+## 📄 Примеры конфигов (JSON-шаблоны) инбаундов Xray:
 
 <details>
 <summary><b>1. JSON: VLESS REALITY Steal-Oneself (Порт 45443, Anti-Loop Dest 9443)</b></summary>
