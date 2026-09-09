@@ -92,9 +92,11 @@ prompt_default() {
     local prompt_text="$1"
     local default_val="$2"
     local var_name="$3"
+    local cur_val="${!var_name:-}"
+    local effective_default="${cur_val:-$default_val}"
     local input_val
-    read -rp "$(echo -e "${prompt_text} [${GREEN}${default_val}${NC}]: ")" input_val
-    declare -g "$var_name=${input_val:-$default_val}"
+    read -rp "$(echo -e "${prompt_text} [${GREEN}${effective_default}${NC}]: ")" input_val
+    declare -g "$var_name=${input_val:-$effective_default}"
 }
 
 validate_path_segment() {
@@ -271,20 +273,29 @@ done
 
 echo
 echo -e "${YELLOW}Шаг 5: Привязка внутренних портов 3X-UI и xHTTP${NC}"
-prompt_default "Внутренний порт панели 3X-UI" "10443" PANEL_PORT
-prompt_default "Секретный URI-путь к веб-панели (без слэшей)" "my-3x-panel" RAW_PATH
+prompt_default "Внутренний порт панели 3X-UI" "${PANEL_PORT:-10443}" PANEL_PORT
+RAW_PATH="${RAW_PATH:-${PANEL_PATH:-my-3x-panel}}"
+RAW_PATH="${RAW_PATH#/}"
+RAW_PATH="${RAW_PATH%/}"
+prompt_default "Секретный URI-путь к веб-панели (без слэшей)" "$RAW_PATH" RAW_PATH
 validate_path_segment "$RAW_PATH" "URI панели"
 PANEL_PATH="/${RAW_PATH#/}"
 PANEL_PATH="${PANEL_PATH%/}/"
 
-prompt_default "Внутренний порт сервера подписок 3X-UI" "55443" SUB_PORT
-prompt_default "Секретный URI-путь подписок (без слэшей)" "my-post-key" RAW_SUB_PATH
+prompt_default "Внутренний порт сервера подписок 3X-UI" "${SUB_PORT:-55443}" SUB_PORT
+RAW_SUB_PATH="${RAW_SUB_PATH:-${SUB_PATH:-my-post-key}}"
+RAW_SUB_PATH="${RAW_SUB_PATH#/}"
+RAW_SUB_PATH="${RAW_SUB_PATH%/}"
+prompt_default "Секретный URI-путь подписок (без слэшей)" "$RAW_SUB_PATH" RAW_SUB_PATH
 validate_path_segment "$RAW_SUB_PATH" "URI подписок"
 SUB_PATH="/${RAW_SUB_PATH#/}"
 SUB_PATH="${SUB_PATH%/}/"
 
-prompt_default "Внутренний порт инбаунда VLESS xHTTP (HTTP/2 Stream-One)" "50443" XHTTP_STREAM_PORT
-prompt_default "URI-путь для xHTTP Stream-One" "Stream-One-Path" RAW_XHTTP_STREAM_PATH
+prompt_default "Внутренний порт инбаунда VLESS xHTTP (HTTP/2 Stream-One)" "${XHTTP_STREAM_PORT:-50443}" XHTTP_STREAM_PORT
+RAW_XHTTP_STREAM_PATH="${RAW_XHTTP_STREAM_PATH:-${XHTTP_STREAM_PATH:-Stream-One-Path}}"
+RAW_XHTTP_STREAM_PATH="${RAW_XHTTP_STREAM_PATH#/}"
+RAW_XHTTP_STREAM_PATH="${RAW_XHTTP_STREAM_PATH%/}"
+prompt_default "URI-путь для xHTTP Stream-One" "$RAW_XHTTP_STREAM_PATH" RAW_XHTTP_STREAM_PATH
 validate_path_segment "$RAW_XHTTP_STREAM_PATH" "URI xHTTP"
 XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
 XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
