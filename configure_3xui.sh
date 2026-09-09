@@ -513,7 +513,7 @@ xhttp_stream = {
         "path": xhttp_path,
         "host": domain,
         "mode": "stream-one",
-        "xPaddingBytes": "120-1120",
+        "xPaddingBytes": "100-500",
         "xPaddingObfsMode": True,
         "xPaddingKey": "X-Amz-Meta-Trace"
     },
@@ -527,7 +527,7 @@ xhttp_stream = {
         "remark": "VLESS_XHTTP"
     }]
 }
-upsert_inbound(xhttp_port, "vless", "in-xhttp-vision", "VLESS_XHTTP", xhttp_settings, xhttp_stream, listen="127.0.0.1")
+upsert_inbound(xhttp_port, "vless", "in-xhttp-stream", "VLESS_XHTTP", xhttp_settings, xhttp_stream, listen="127.0.0.1")
 
 # D. Hysteria 2 (443)
 if enable_hy2:
