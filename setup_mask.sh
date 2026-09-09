@@ -151,6 +151,9 @@ AWG_V2_PORT="8444"
 # 3 = Welcome to nginx (Стандартная заглушка)
 DECOY_MODE="1"
 
+# --- 6. АВТОМАТИЧЕСКАЯ НАСТРОЙКА 3X-UI ---
+# Автоматически настроить инбаунды и пути подписок в базе данных 3X-UI через configure_3xui.sh [y/n]
+AUTO_SETUP_3XUI="y"
 EOF_CONF
     ok "Шаблон конфигурации успешно сгенерирован: '$target_file'"
 }
@@ -272,6 +275,8 @@ save_session_state() {
     local awg_v3_save="n"
     [[ "${ENABLE_AWG_V3:-}" == "1" || "${ENABLE_AWG_V3,,}" == "y" ]] && awg_v3_save="y"
     local awg_v2_save="n"
+    local auto_setup_3xui_save="n"
+    [[ "${AUTO_SETUP_3XUI:-}" == "1" || "${AUTO_SETUP_3XUI,,}" == "y" ]] && auto_setup_3xui_save="y"
 
     local _save_panel_path="${RAW_PATH:-${PANEL_PATH:-my-3x-panel}}"
     _save_panel_path="${_save_panel_path#/}"
@@ -327,6 +332,7 @@ ENABLE_AWG_V2="$awg_v2_save"
 AWG_V2_PORT="${AWG_V2_PORT:-8444}"
 
 DECOY_MODE="${DECOY_MODE:-1}"
+AUTO_SETUP_3XUI="$auto_setup_3xui_save"
 EOF_SAVE
     chmod 600 "$save_path"
     umask "$old_umask"
@@ -802,6 +808,10 @@ if [ "$SSL_ENGINE_CHOICE" = "2" ]; then
     fi
 fi
 
+echo
+echo -e "${YELLOW}Шаг 11: Автоматическая настройка базы данных панели 3X-UI${NC}"
+echo -e "${CYAN}Скрипт может автоматически настроить пути, подписки и создать все инбаунды в базе 3X-UI через configure_3xui.sh.${NC}"
+prompt_yes_no "Автоматически настроить инбаунды и пути в панели 3X-UI?" "${AUTO_SETUP_3XUI:-y}" AUTO_SETUP_3XUI
 
 # Определение системного каталога для хранения SSL
 if [ "$SSL_ENGINE_CHOICE" = "1" ]; then
@@ -2331,6 +2341,31 @@ elif [ "$DECOY_MODE" = "2" ]; then DECOY_NAME="CosmosCloud NextGen";
 elif [ "$DECOY_MODE" = "3" ]; then DECOY_NAME="Default Nginx Stub";
 fi
 
+# Автоматическая настройка 3X-UI через внешний скрипт configure_3xui.sh
+if [[ "${AUTO_SETUP_3XUI,,}" == "y" || "${AUTO_SETUP_3XUI:-}" == "1" ]]; then
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ ! -f "$script_dir/configure_3xui.sh" ]; then
+        log "Скрипт configure_3xui.sh не найден локально. Попытка загрузки из репозитория..."
+        raw_url="https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/configure_3xui.sh"
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL "$raw_url" -o "$script_dir/configure_3xui.sh" 2>/dev/null && chmod +x "$script_dir/configure_3xui.sh" 2>/dev/null || true
+        elif command -v wget >/dev/null 2>&1; then
+            wget -qO "$script_dir/configure_3xui.sh" "$raw_url" 2>/dev/null && chmod +x "$script_dir/configure_3xui.sh" 2>/dev/null || true
+        fi
+    fi
+
+    if [ -f "$script_dir/configure_3xui.sh" ]; then
+        echo
+        log "Запуск автоматической настройки базы 3X-UI ($script_dir/configure_3xui.sh)..."
+        if bash "$script_dir/configure_3xui.sh" --config "$SAVED_CONFIG_FILE" -y; then
+            ok "База данных 3X-UI успешно настроена автоматически!"
+        else
+            warn "Автоматическая настройка 3X-UI завершилась с ошибкой. Выполните настройку вручную."
+        fi
+    else
+        warn "Файл $script_dir/configure_3xui.sh не найден. Выполните настройку вручную."
+    fi
+fi
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
