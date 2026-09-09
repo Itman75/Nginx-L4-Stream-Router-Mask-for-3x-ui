@@ -15,7 +15,7 @@
 * **Защита Anti-Loop:** При подключении обычного веб-браузера или сканера активного зондирования Xray перенаправляет (*fallback*) запрос на изолированный слушатель **`127.0.0.1:9443`** (`xver: 1`), минуя внешний L4-роутер 443 и полностью исключая бесконечную петлю пересылки пакетов.
 
 ### 2. Сценарий 2: Classic External REALITY (Внешний камуфляж)
-* Использование доверенных внешних доменов (`swdist.microsoft.com`, `www.samsung.com`, `gateway.icloud.com` и др.) в качестве SNI.
+* Использование доверенных внешних доменов (`gateway.icloud.com`, `www.samsung.com`, `gateway.icloud.com` и др.) в качестве SNI.
 * Каждому внешнему пулу назначается независимый локальный порт (`46443`, `47443` и т.д.), исключая коллизии и балансировочные таймауты.
 
 ### 3. Шлюз VLESS xHTTP (Stream-One) + VLESSENC via Native HTTP/2 (Zero-Drop Engine)
@@ -65,10 +65,10 @@ graph TD
 
     NginxStream -->|SNI: Главный домен / Пустой SNI| NginxSock[Unix Socket: /dev/shm/nginx-http.sock]
     NginxStream -->|SNI: Steal-Oneself cdn.yourdomain.online| XrayStealREALITY[Xray REALITY :45443]
-    NginxStream -->|SNI: Внешний SNI swdist.microsoft.com| XrayClassicREALITY[Xray REALITY :46443]
+    NginxStream -->|SNI: Внешний SNI gateway.icloud.com| XrayClassicREALITY[Xray REALITY :46443]
 
     XrayStealREALITY -->|Fallback не-REALITY / xver=1| NginxFallbackHTTP[Nginx HTTP :9443 Anti-Loop]
-    XrayClassicREALITY -->|Fallback не-REALITY / Direct xver=0| ExternalSite[Внешний ресурс swdist.microsoft.com:443]
+    XrayClassicREALITY -->|Fallback не-REALITY / Direct xver=0| ExternalSite[Внешний ресурс gateway.icloud.com:443]
 
     NginxSock --> NginxHTTPCore[Nginx HTTP L7 Engine]
     NginxFallbackHTTP --> NginxHTTPCore
@@ -145,7 +145,7 @@ chmod +x setup_mask.sh
   * Добавить ещё порт Steal-Oneself? `n` (или `y` для настройки доп. портов)
 * **Classic External REALITY:** `y`
   * Локальный порт Xray: `46443`
-  * Внешний SNI: `swdist.microsoft.com`
+  * Внешний SNI: `gateway.icloud.com`
   * Добавить ещё порт Classic? `n`
 * **Дополнительные SSL-домены:** *(Enter для завершения)*
 * **Внутренний порт панели 3X-UI:** `10443`
@@ -218,9 +218,9 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 * **Поток:** Транспорт `tcp` | Accept Proxy Protocol: `1` (Включить) ⚠️
 * **Безопасность:** `reality` | uTLS `chrome`
 * **Flow:** `xtls-rprx-vision`
-* **Цель (Target):** `swdist.microsoft.com:443`
+* **Цель (Target):** `gateway.icloud.com:443`
 * **Proxy Protocol для Dest (xver):** `0` (Выключить) ⚠️
-* **Server Names (SNI):** `swdist.microsoft.com`
+* **Server Names (SNI):** `gateway.icloud.com`
 
 ---
 
@@ -467,9 +467,9 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
     "realitySettings": {
       "show": false,
       "xver": 0,
-      "dest": "swdist.microsoft.com:443",
+      "dest": "gateway.icloud.com:443",
       "serverNames": [
-        "swdist.microsoft.com"
+        "gateway.icloud.com"
       ],
       "privateKey": "ВАШ_PRIVATE_KEY",
       "shortIds": [

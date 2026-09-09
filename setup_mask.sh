@@ -223,7 +223,7 @@ if [[ "${ENABLE_CLASSIC_INPUT,,}" == "y" ]]; then
         echo -e "${CYAN}  Введите внешние SNI для порта $PORT_VAL (нажмите Enter на пустой строке для завершения):${NC}"
         added_sni_count=0
         while true; do
-            read -rp "    Внешний SNI (например, swdist.microsoft.com): " EXT_SNI
+            read -rp "    Внешний SNI (например, gateway.icloud.com): " EXT_SNI
             if [ -z "$EXT_SNI" ]; then
                 if [ "$added_sni_count" -eq 0 ]; then
                     warn "    Порт $PORT_VAL зарегистрирован для обработки fallback-трафика."
@@ -1401,9 +1401,7 @@ STREAM_MAP_RULES=""
 REALITY_UPSTREAMS=""
 
 for dom in "${ALL_DOMAINS[@]}"; do
-    if [ "$dom" = "$PRIMARY_DOMAIN" ] || [ "$dom" = "www.$PRIMARY_DOMAIN" ]; then
-        STREAM_MAP_RULES+="        ${dom}     nginx_http_backend;"$'\n'
-    elif [ "$STEAL_ENABLED" -eq 1 ] && [ -n "${DOMAIN_TO_PORT[$dom]:-}" ]; then
+    if [ "$STEAL_ENABLED" -eq 1 ] && [ -n "${DOMAIN_TO_PORT[$dom]:-}" ]; then
         port="${DOMAIN_TO_PORT[$dom]}"
         STREAM_MAP_RULES+="        ${dom}     reality_backend_${port};"$'\n'
     else
@@ -1903,7 +1901,7 @@ if [ "$CLASSIC_ENABLED" -eq 1 ]; then
                 p_snis+=("$ext_sni")
             fi
         done
-        [ ${#p_snis[@]} -gt 0 ] || p_snis=("swdist.microsoft.com")
+        [ ${#p_snis[@]} -gt 0 ] || p_snis=("gateway.icloud.com")
         primary_ext="${p_snis[0]}"
 
         REALITY_INBOUNDS_REPORT+="    - Инбаунд для порта ${GREEN}${port}${NC} (SNI: ${CYAN}${p_snis[*]}${NC}):
