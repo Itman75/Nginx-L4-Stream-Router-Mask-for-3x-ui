@@ -18,18 +18,17 @@
 * Использование доверенных внешних доменов (`gateway.icloud.com`, `www.samsung.com`, `gateway.icloud.com` и др.) в качестве SNI.
 * Каждому внешнему пулу назначается независимый локальный порт (`46443`, `47443` и т.д.), исключая коллизии и балансировочные таймауты.
 
-### 3. Шлюз VLESS xHTTP (Stream-One) + VLESSENC via Native HTTP/2 (Zero-Drop Engine)
+### 3. Шлюз VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision via Native HTTP/2
 * **Нативное H2C-проксирование (`proxy_http_version 2`):** В Nginx Mainline (1.31.4+) проксирование к Xray xHTTP выполняется через честный протокол HTTP/2 без промежуточного преобразования в gRPC или деградации до HTTP/1.1.
-* **Тюнинг буфера приёма (`http2_recv_buffer_size 16m`):** Расширенный буфер воркеров Nginx и сокетные Keepalive (`proxy_socket_keepalive on; tcp_nodelay on;`) исключают зависания и деградацию скорости при передаче тяжёлых файлов (видео, спидтесты, 50+ МБ).
+* **Тюнинг буфера приёма (`http2_recv_buffer_size 16m`):** Расширенный буфер воркеров Nginx исключает узкие места при передаче тяжёлых потоковых медиаданных.
 * **Полнодуплексный стриминг без задержек:** Отключение буферизации тела (`proxy_request_buffering off; proxy_buffering off;`) обеспечивает сквозной двунаправленный обмен фреймами.
-* **Сквозное шифрование `vlessenc` (ML-KEM-768):** Полезная нагрузка защищается постквантовым симметричным ключом шифрования на уровне протокола VLESS, исключая сигнатуры в потоке.
-* **Чистый HTTP/2 без конфликта Vision:** В режиме xHTTP параметр `Flow` остаётся строго **`none` (пусто)**, так как Vision предназначен только для сырого TCP и ломает структуру HTTP/2-фреймов.
-* **Отключение очередей XMUX (`maxConcurrency: 0`):** Устраняет блокировку Head-of-Line и переполнение буферов, полностью предотвращая вылеты процессов по памяти на устройствах iOS (Apple Jetsam kill limit 50 MB) и зависание окна H2 на Android и ПК.
+* **Сквозное шифрование `vlessenc`:** Полезная нагрузка защищается постквантовым симметричным ключом шифрования (ML-KEM-768 / VLESS Encryption) на уровне протокола VLESS.
+* **XTLS-Vision поверх xHTTP:** В клиентах с версией ядра **Xray 24.9.27+** активируется `flow: xtls-rprx-vision` совместно с `vlessenc` для динамического паддинга и маскировки под стандартный веб-трафик.
 * **Паддинг заголовков:** Случайный мусор в HTTP-заголовках (`xPaddingBytes: 100-500`, ключ `X-Amz-Meta-Trace`).
 
 ### 4. Скоростные UDP-туннели: Hysteria 2 и AmneziaWG (UDP 443 / 8443 / 8444)
 * **Hysteria 2 на `443/UDP`:** Сверхскоростной транспорт на базе протокола QUIC (HTTP/3) с маскировкой под веб-сервер и контроллером перегрузок BBR.
-* **AmneziaWG v3.1 / v2.0:** Установка защиты Transport Protection для мобильных устройств, ПК и роутеров Keenetic / OpenWrt (порты `8443/UDP` и `8444/UDP`).
+* **AmneziaWG v3.1 / v2.0:** Опциональная установка защиты Transport Protection для мобильных устройств, ПК и роутеров Keenetic / OpenWrt (порты `8443/UDP` и `8444/UDP`).
 * Nginx Stream слушает только TCP, оставляя UDP-порты полностью свободными для прямого приёма пакетов серверами VPN.
 
 ### 5. Межпроцессная связь через Unix Sockets в RAM и Nginx Mainline
@@ -37,7 +36,7 @@
 * Внутренний обмен между L4 Stream и L7 HTTP Core осуществляется через сокет в оперативной памяти (**`unix:/dev/shm/nginx-http.sock`**), исключая задержки виртуального loopback.
 * Использование `ssl_reject_handshake on` на дефолтном сервере для мгновенного сброса сканеров по прямому IP без раскрытия SSL-сертификата.
 
-### 6. Три автономных локальных режима маскировки (Decoy Fronts)
+### 6. 3 автономных локальных режима маскировки (Decoy Fronts)
 * **Режим 1 (Рекомендуемый):** Корпоративный IT SaaS *DataSphere Analytics* — интерактивный SPA-интерфейс в строгом стиле с геометрическим логотипом, эмуляцией бекенд-API и Live телеметрией ±10%.
 * **Режим 2:** Облачный портал *CosmosCloud* с эмуляцией API авторизации, верификацией графики и сессионными cookies.
 * **Режим 3:** Стандартная заглушка веб-сервера (*Welcome to nginx!*).
@@ -158,6 +157,34 @@ chmod +x setup_mask.sh
 * **Вариант маскировки (DECOY_MODE):** `1` *(DataSphere Analytics)*, `2` *(CosmosCloud)* или `3` *(Nginx Stub)*
 * **Метод сертификации:** `1` *(Certbot HTTP-01)* или `2` *(acme.sh + Cloudflare DNS-01)*
 
+### 🤖 Неинтерактивный режим и автоматизация (.env)
+
+Скрипт полностью поддерживает автоматическое развертывание и передачу параметров через конфигурационный файл без единого интерактивного вопроса.
+
+**Доступные флаги CLI:**
+* `-c, --config <FILE>` — Загрузить параметры из конфигурационного файла (.env).
+* `-y, --yes, --non-interactive` — Включить тихий режим (автоматическое подтверждение всех этапов).
+* `-d, --domain <DOMAIN>` — Быстро переопределить основной домен (PRIMARY_DOMAIN).
+* `--gen-config [FILE]` — Сгенерировать шаблон конфигурации (по умолчанию `setup_mask.env.example`) и выйти.
+* `-f, --force` — Игнорировать несоответствие DNS-записей (A-record) при проверке домена (удобно для CI/CD).
+* `-h, --help` — Вывести справку.
+
+**Примеры использования:**
+```bash
+# Шаг 1. Сгенерировать полный шаблон конфигурации (запуск без прав root):
+./setup_mask.sh --gen-config my_settings.env
+
+# Шаг 2. Отредактировать файл my_settings.env (заполнить домены, порты, токены CF)
+
+# Шаг 3. Запустить полностью автоматическую установку (например, через Ansible):
+./setup_mask.sh --config my_settings.env --non-interactive --force
+
+# Альтернативно: использовать сохраненную сессию.
+# Скрипт всегда автоматически сохраняет ваши ответы в 'setup_mask.env'.
+# Если SSH-сессия оборвалась, вы можете продолжить установку одной командой:
+./setup_mask.sh -c setup_mask.env -y
+```
+
 ---
 
 ### Настройка брандмауэра UFW (Выполнить после setup_mask.sh и преднастройки панели 3X-UI)
@@ -173,9 +200,25 @@ ufw allow 443/udp && ufw allow 8443/udp && ufw allow 8444/udp
 ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/tcp && ufw deny 45443/tcp && ufw deny 46443/tcp
 ```
 
+### ⚡ Автоматическая настройка базы 3X-UI (`configure_3xui.sh`)
+
+В проект включен вспомогательный скрипт **`configure_3xui.sh`**, который полностью автоматизирует конфигурирование панели 3X-UI и создание инбаундов напрямую в базе данных SQLite (`/etc/x-ui/x-ui.db`):
+* Настраивает системные пути панели и сервера подписок (`webBasePath`, `subPort`, `subURI`, `subReverseProxy`).
+* Генерирует криптографические ключи: UUID клиента, пару ключей REALITY (`x25519`), Reality Short ID, ключ дешифрования `vlessenc` (ML-KEM-768), пароль Hysteria 2 и ключи AmneziaWG.
+* Создает все необходимые инбаунды: VLESS REALITY Steal-Oneself, Classic REALITY, VLESS xHTTP Stream-One, Hysteria 2 (UDP 443), AmneziaWG v3.1 / v2.0.
+* Перезапускает службу `x-ui` (`systemctl restart x-ui`).
+
+**Использование:**
+При установке через `setup_mask.sh` мастер автоматически задает вопрос о запуске настройки 3X-UI. При ответе `y` (или наличии `AUTO_SETUP_3XUI="y"` в `.env`) скрипт выполнит всю настройку автономно.
+
+Скрипт также можно запустить отдельно в любой момент:
+```bash
+./configure_3xui.sh --config setup_mask.env -y
+```
+
 ---
 
-## ⚙️ Пошаговая настройка 3X-UI в Веб-Интерфейсе
+## ⚙️ Пошаговая настройка 3X-UI в Веб-Интерфейсе (Ручной вариант)
 
 ### 1. Синхронизация путей панели и подписок
 
@@ -224,17 +267,15 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ---
 
-#### C. Инбаунд `VLESS_XHTTP` (Stream-One + VLESSENC + Zero-Drop Engine) 🚀
+#### C. Инбаунд `VLESS_XHTTP` (Stream-One + VLESSENC + XTLS-Vision) 🚀
 * **Основное:** Порт `50443` | Listen IP `127.0.0.1` | Протокол `vless`
 * **Поток (Stream Settings):**
   * **Транспорт:** `xhttp` | **Режим:** `stream-one`
   * **Путь:** `/Stream-One-Path/` | **Хост:** `yourdomain.online`
   * **Паддинг:** `100-500` | **xPaddingObfsMode:** `true` | **Ключ:** `X-Amz-Meta-Trace`
-  * **XMUX:** `maxConcurrency: 0` *(Выключить очереди для стабильности на iOS и ПК)*
-  * **QUIC / UDP:** `0` *(Строго выключено, трафик идёт через Nginx H2)*
 * **Безопасность:** `none` *(TLS снимает Nginx)* | Accept Proxy Protocol: `0` (Выключить)
 * **Протокол:** В поле **Decryption** выберите **ML-KEM-768 (native)** и сгенерируйте ключ `vlessenc`.
-* **Клиент (Client Settings):** Flow: **строго `none` (пусто)** ⚠️, Decryption: сгенерированный ключ `vlessenc`.
+* **Клиент (Client Settings):** Flow: **`xtls-rprx-vision`**, Decryption: сгенерированный ключ `vlessenc`.
 
 ---
 
@@ -278,7 +319,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
   * **S4 (паддинг transport-пакета):** `16`
   * **H1 – H4 (магические заголовки):** **Оставить ПУСТЫМИ** *(для значений 1/2/3/4 по умолчанию)*
   * **I1 – I5 (сигнатурные пакеты):** **Оставить ПУСТЫМИ**
-  * **HeaderProtectionKey (защита заголовков):** **Ключ Base64 длиной 32 байта; должен совпадать в конфигурации каждого клиента. Или оставьте пустым, чтобы отключить защиту заголовков.** 
+  * **HeaderProtectionKey (защита заголовков):** **Оставить ПУСТЫМ** *(выключено)*
   * **ContentPaddingAddition (паддинг содержимого):** `3-16`
   * **RekeyAfterTime (секунды):** `107-135`
   * **RekeyTimeout (секунды):** `3-4`
@@ -355,7 +396,7 @@ tail -f /var/log/nginx/error.log
 
 Сертификаты Let's Encrypt обновляются в полностью автоматическом режиме:
 * **Certbot:** Системный таймер `snap.certbot.renew.timer` запускается дважды в сутки. При успешном продлении срабатывает скрипт-хук `/etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh`, который нормализует права доступа (`chmod 755 / 644`) для чтения демонами `nginx` и `nobody (Xray)` и выполняет мягкую перезагрузку `systemctl reload nginx`.
-* **acme.sh:** Обновление контролируется заданием Cron (`cron`), вызывающим установку обновлённых сертификатов в `/etc/ssl/acme/` с перезагрузкой веб-сервера.
+* **acme.sh:** Обновление контролируется заданием Cron (`cron`), вызывающим установку обновлённых сертификатов в `/etc/letsencrypt/live/` с перезагрузкой веб-сервера.
 
 Для принудительной проверки продления вручную:
 ```bash
@@ -389,7 +430,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 
 ---
 
-## 📄 Примеры конфигов (JSON-шаблоны) инбаундов Xray:
+## 📄 Готовые JSON-шаблоны Инбаундов Xray
 
 <details>
 <summary><b>1. JSON: VLESS REALITY Steal-Oneself (Порт 45443, Anti-Loop Dest 9443)</b></summary>
@@ -482,19 +523,19 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 </details>
 
 <details>
-<summary><b>3. JSON: VLESS xHTTP Stream-One + VLESSENC (Порт 50443)</b></summary>
+<summary><b>3. JSON: VLESS xHTTP Stream-One + VLESSENC + VISION (Порт 50443)</b></summary>
 
 ```json
 {
   "listen": "127.0.0.1",
   "port": 50443,
   "protocol": "vless",
-  "tag": "in-xhttp-stream",
+  "tag": "in-xhttp-vision",
   "settings": {
     "clients": [
       {
         "id": "ВАШ_UUID",
-        "flow": ""
+        "flow": "xtls-rprx-vision"
       }
     ],
     "decryption": "ВАШ_VLESSENC_KEY"
@@ -511,10 +552,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
       "mode": "stream-one",
       "xPaddingBytes": "100-500",
       "xPaddingObfsMode": true,
-      "xPaddingKey": "X-Amz-Meta-Trace",
-      "xmux": {
-        "maxConcurrency": 0
-      }
+      "xPaddingKey": "X-Amz-Meta-Trace"
     },
     "security": "none"
   }
@@ -585,8 +623,8 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
   "settings": {
     "clients": [
       {
-        "privateKey": "your privateKey",
-        "publicKey": "your publicKey",
+        "privateKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
+        "publicKey": "PUBLIC_KEY_КЛИЕНТА",
         "allowedIPs": [
           "10.8.1.2/32"
         ],
@@ -596,7 +634,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
         "totalGB": 0,
         "expiryTime": 0,
         "enable": true,
-        "tgId": 471640941,
+        "tgId": 0,
         "subId": "Mine",
         "comment": "",
         "reset": 0,
@@ -618,8 +656,8 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
       "maxHandshakeAttempts": "21-26",
       "mtu": 1360,
       "primaryDns": "8.8.8.8",
-      "privateKey": "your privateKey",
-      "publicKey": "your publicKey",
+      "privateKey": "ВАШ_PRIVATE_KEY_СЕРВЕРА",
+      "publicKey": "PUBLIC_KEY_КЛИЕНТА",
       "randomTrailers": false,
       "rejectAfterTime": "178-211",
       "rekeyAfterTime": "107-135",
@@ -673,5 +711,3 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
     }
   }
 }
-```
-</details>
