@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v6.5.1 Universal (Public Edition)
+# Production AutoSetup: Hardened Engine v6.5.0 Universal (Public Edition)
 # Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 3 Decoys
 # ==============================================================================
 # Архитектура:
 #   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org)
 #   2) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
 #   3) Classic External REALITY (Выделение портов для внешних SNI)
-#   4) VLESS xHTTP (Stream-One) + VLESSENC + Native H2 Streaming (без XMUX-блокировок)
+#   4) VLESS xHTTP (Stream-One) + VLESSENC + XTLS-Vision + Native H2 Streaming
 #      (СТРОГО по TCP/HTTP/2 без QUIC — полнодуплексное H2C-проксирование Nginx)
 #   5) Опциональный скоростной UDP VPN: Hysteria 2 (по умолчанию 443/UDP)
 #   6) Опциональный двухверсионный стек AmneziaWG / WireGuard:
-#      - AmneziaWG v3.1 (WG3, по умолчанию 8443/UDP, Transport Protection)
+#      - AmneziaWG v3.1 (по умолчанию 8443/UDP, Transport Protection)
 #      - AmneziaWG v2.0 / Legacy 1.0 (по умолчанию 8444/UDP, для роутеров)
 #   7) Гибридный SSL-движок с разделением каталогов:
 #      - Certbot (HTTP-01): /etc/letsencrypt/live/
@@ -42,14 +42,156 @@ die()  { echo -e "${RED}[X] $*${NC}" >&2; exit 1; }
 
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
+show_help() {
+    cat << 'EOF_HELP'
+Использование: ./setup_mask.sh [ОПЦИИ]
+
+Автоматизированный и интерактивный установщик L4/L7 Nginx Router + 3X-UI
+
+Опции:
+  -c, --config <FILE>          Загрузить параметры из конфигурационного файла (.env)
+  -y, --yes, --non-interactive Запуск в неинтерактивном режиме (без вопросов пользователю)
+  -d, --domain <DOMAIN>        Указать основной домен (PRIMARY_DOMAIN)
+  --gen-config [FILE]          Сгенерировать шаблон конфигурации (.env.example) и выйти
+  -f, --force                  Игнорировать ошибки и несовпадения DNS в неинтерактивном режиме
+  -h, --help                   Показать справку и выйти
+
+Примеры использования:
+  # Интерактивный режим (введенные параметры автоматически сохраняются в setup_mask.env):
+  ./setup_mask.sh
+
+  # Возобновление после обрыва связи или повторный запуск из сохраненного конфига:
+  ./setup_mask.sh -c setup_mask.env -y
+
+  # Развертывание через Ansible / Cloud-Init / CI:
+  ./setup_mask.sh --config /etc/setup_mask.env --non-interactive --force
+
+  # Генерация файла-шаблона:
+  ./setup_mask.sh --gen-config setup_mask.env.example
+EOF_HELP
+}
+
+generate_config_template() {
+    local target_file="${1:-setup_mask.env.example}"
+    cat << 'EOF_CONF' > "$target_file"
+# ==============================================================================
+# КОНФИГУРАЦИЯ NGINX L4 ROUTER + 3X-UI ДЛЯ SETUP_MASK.SH (v6.5.0 Universal)
+# ==============================================================================
+# Данный файл позволяет выполнять полностью автоматическую установку:
+# ./setup_mask.sh --config setup_mask.env --non-interactive --force
+
+# --- 1. ДОМЕНЫ И СЕРТИФИКАТЫ ---
+# Основной домен сервера (для панели, подписок, xHTTP и веб-маски) [ОБЯЗАТЕЛЬНО]
+PRIMARY_DOMAIN="yourdomain.online"
+
+# Добавить алиас 'www.<PRIMARY_DOMAIN>' в сертификационный стек [y/n]
+ADD_WWW="y"
+
+# Дополнительные домены для выпуска SSL (через пробел, например: "trojan.domain.com sub.domain.com")
+EXTRA_SSL_DOMAINS=""
+
+# Способ выпуска SSL-сертификатов:
+# 1 = Certbot (HTTP-01 через веб-сервер)
+# 2 = acme.sh (Cloudflare DNS-01 API)
+SSL_ENGINE_CHOICE="1"
+
+# Email для уведомлений Let's Encrypt (Enter/пусто - без email)
+LE_EMAIL="admin@yourdomain.online"
+
+# Настройки Cloudflare (требуются только при SSL_ENGINE_CHOICE=2):
+# 1 = API Token (рекомендуется), 2 = Global API Key
+CF_AUTH_METHOD="1"
+CF_Token=""
+CF_Account_ID=""
+CF_Email=""
+CF_Key=""
+
+# Игнорировать несовпадение DNS при проверке [1 = да, 0 = нет]
+FORCE_DNS="0"
+
+# --- 2. СЦЕНАРИИ REALITY ---
+# Сценарий 1: Steal-Oneself REALITY (Кража у самого себя с Anti-Loop) [y/n]
+ENABLE_STEAL="y"
+STEAL_PORT="45443"
+# Домены для Steal-Oneself (через пробел, например: "cdn.yourdomain.online")
+STEAL_DOMAINS="cdn.yourdomain.online"
+
+# Сценарий 2: Classic External REALITY (Внешний камуфляж) [y/n]
+ENABLE_CLASSIC="y"
+CLASSIC_PORT="46443"
+# Внешние доверенные SNI (через пробел, например: "gateway.icloud.com")
+CLASSIC_SNI="gateway.icloud.com"
+
+# --- 3. ВНУТРЕННИЕ ПОРТЫ И ПУТИ 3X-UI И xHTTP ---
+PANEL_PORT="10443"
+PANEL_PATH="my-3x-panel"
+
+SUB_PORT="55443"
+SUB_PATH="my-post-key"
+
+XHTTP_STREAM_PORT="50443"
+XHTTP_STREAM_PATH="Stream-One-Path"
+
+# --- 4. UDP ТУННЕЛИ (Hysteria 2 / AmneziaWG) ---
+# Hysteria 2 (UDP 443) [y/n]
+ENABLE_HY2="y"
+HY2_PORT="443"
+
+# AmneziaWG v3.1 (Transport Protection) [y/n]
+ENABLE_AWG_V3="y"
+AWG_V3_PORT="8443"
+
+# AmneziaWG v2.0 / Legacy (Для роутеров) [y/n]
+ENABLE_AWG_V2="y"
+AWG_V2_PORT="8444"
+
+# --- 5. САЙТ-МАСКИРОВКА (DECOY FRONT) ---
+# 1 = DataSphere Analytics Enterprise (SPA с живой телеметрией)
+# 2 = CosmosCloud NextGen (Облачное хранилище)
+# 3 = Welcome to nginx (Стандартная заглушка)
+DECOY_MODE="1"
+
+EOF_CONF
+    ok "Шаблон конфигурации успешно сгенерирован: '$target_file'"
+}
+
+# Ранняя обработка флагов справки и генерации шаблона (доступны без root и проверки ОС)
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        --gen-config)
+            target_gen_file="setup_mask.env.example"
+            args=("$@")
+            for ((idx=0; idx<${#args[@]}; idx++)); do
+                if [ "${args[idx]}" = "--gen-config" ] && [ $((idx+1)) -lt ${#args[@]} ]; then
+                    next_arg="${args[$((idx+1))]}"
+                    if [[ ! "$next_arg" =~ ^- ]]; then
+                        target_gen_file="$next_arg"
+                    fi
+                fi
+            done
+            generate_config_template "$target_gen_file"
+            exit 0
+            ;;
+    esac
+done
+
+
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN} Nginx xHTTP + REALITY + Hy2 + AWG Router v6.5.1 (Public Edition)    ${NC}"
+echo -e "${GREEN} Nginx xHTTP + REALITY + Hy2 + AWG Router v6.5.0 (Public Edition)    ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 # ----------------------- Системные предусловия -----------------------
-if [ "$EUID" -ne 0 ]; then
-  die "Пожалуйста, запустите установщик с правами суперпользователя root (через sudo)."
-fi
+# Проверка прав root только при реальной установке (пропускается для --help и --gen-config)
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        die "Пожалуйста, запустите установщик с правами суперпользователя root (через sudo)."
+    fi
+}
+check_root
 
 if [ -f /etc/os-release ]; then
     . /etc/os-release
@@ -88,14 +230,174 @@ for cmd in "${!pkg_map[@]}"; do
     fi
 done
 
+# =============================================================
+#  ФУНКЦИИ НЕИНТЕРАКТИВНОГО РЕЖИМА, CLI И .ENV
+# =============================================================
+# Примечание: show_help() и generate_config_template() определены выше (до проверки root/OS),
+# чтобы --help и --gen-config работали без привилегий суперпользователя.
+
+load_env_file() {
+    local env_file="$1"
+    [ -f "$env_file" ] || return 0
+    log "Загрузка параметров из конфигурационного файла: $env_file"
+    local re_dquote='^"(.*)"$'
+    local re_squote="^'(.*)'\$"
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]}"
+            local val="${BASH_REMATCH[2]}"
+            if [[ "$val" =~ $re_dquote ]] || [[ "$val" =~ $re_squote ]]; then
+                val="${BASH_REMATCH[1]}"
+            fi
+            declare -g "$key=$val"
+        fi
+    done < "$env_file"
+}
+
+save_session_state() {
+    local save_path="${1:-setup_mask.env}"
+    # Защита от утечки секретов: ограничиваем права доступа при создании файла
+    local old_umask
+    old_umask=$(umask)
+    umask 077
+
+    local steal_save="n"
+    [[ "${ENABLE_STEAL:-}" == "1" || "${ENABLE_STEAL,,}" == "y" ]] && steal_save="y"
+    local classic_save="n"
+    [[ "${ENABLE_CLASSIC:-}" == "1" || "${ENABLE_CLASSIC,,}" == "y" ]] && classic_save="y"
+    local hy2_save="n"
+    [[ "${ENABLE_HY2:-}" == "1" || "${ENABLE_HY2,,}" == "y" ]] && hy2_save="y"
+    local awg_v3_save="n"
+    [[ "${ENABLE_AWG_V3:-}" == "1" || "${ENABLE_AWG_V3,,}" == "y" ]] && awg_v3_save="y"
+    local awg_v2_save="n"
+
+    local _save_panel_path="${RAW_PATH:-${PANEL_PATH:-my-3x-panel}}"
+    _save_panel_path="${_save_panel_path#/}"
+    _save_panel_path="${_save_panel_path%/}"
+
+    local _save_sub_path="${RAW_SUB_PATH:-${SUB_PATH:-my-post-key}}"
+    _save_sub_path="${_save_sub_path#/}"
+    _save_sub_path="${_save_sub_path%/}"
+
+    local _save_xhttp_path="${RAW_XHTTP_STREAM_PATH:-${XHTTP_STREAM_PATH:-Stream-One-Path}}"
+    _save_xhttp_path="${_save_xhttp_path#/}"
+    _save_xhttp_path="${_save_xhttp_path%/}"
+
+    cat << EOF_SAVE > "$save_path"
+# ==============================================================================
+# АВТОМАТИЧЕСКИ СОХРАНЕННАЯ КОНФИГУРАЦИЯ СЕССИИ
+# Для перезапуска без вопросов: ./setup_mask.sh --config $save_path --non-interactive
+# ==============================================================================
+PRIMARY_DOMAIN="${PRIMARY_DOMAIN:-}"
+ADD_WWW="${ADD_WWW:-y}"
+EXTRA_SSL_DOMAINS="${EXTRA_SSL_DOMAINS:-}"
+SSL_ENGINE_CHOICE="${SSL_ENGINE_CHOICE:-1}"
+LE_EMAIL="${LE_EMAIL:-}"
+CF_AUTH_METHOD="${CF_AUTH_METHOD:-1}"
+CF_Token="${CF_Token:-}"
+CF_Account_ID="${CF_Account_ID:-}"
+CF_Email="${CF_Email:-}"
+CF_Key="${CF_Key:-}"
+FORCE_DNS="${FORCE_DNS:-0}"
+
+ENABLE_STEAL="$steal_save"
+STEAL_PORT="${STEAL_PORTS_LIST[0]:-45443}"
+STEAL_DOMAINS="${STEAL_DOMAINS[*]:-}"
+
+ENABLE_CLASSIC="$classic_save"
+CLASSIC_PORT="${CLASSIC_PORTS_LIST[0]:-46443}"
+CLASSIC_SNI="${EXT_SNI_LIST[*]:-}"
+
+PANEL_PORT="${PANEL_PORT:-10443}"
+PANEL_PATH="${_save_panel_path}"
+SUB_PORT="${SUB_PORT:-55443}"
+SUB_PATH="${_save_sub_path}"
+XHTTP_STREAM_PORT="${XHTTP_STREAM_PORT:-50443}"
+XHTTP_STREAM_PATH="${_save_xhttp_path}"
+
+ENABLE_HY2="$hy2_save"
+HY2_PORT="${HY2_PORT:-443}"
+
+ENABLE_AWG_V3="$awg_v3_save"
+AWG_V3_PORT="${AWG_V3_PORT:-8443}"
+
+ENABLE_AWG_V2="$awg_v2_save"
+AWG_V2_PORT="${AWG_V2_PORT:-8444}"
+
+DECOY_MODE="${DECOY_MODE:-1}"
+EOF_SAVE
+    chmod 600 "$save_path"
+    umask "$old_umask"
+    ok "Конфигурация текущей сессии сохранена в '$save_path' (chmod 600)."
+}
+
 prompt_default() {
     local prompt_text="$1"
     local default_val="$2"
     local var_name="$3"
     local cur_val="${!var_name:-}"
     local effective_default="${cur_val:-$default_val}"
+
+    if [ "$NON_INTERACTIVE" -eq 1 ]; then
+        declare -g "$var_name=$effective_default"
+        log "Параметр $var_name: ${GREEN}$effective_default${NC} (авто)"
+        return 0
+    fi
+
     local input_val
     read -rp "$(echo -e "${prompt_text} [${GREEN}${effective_default}${NC}]: ")" input_val
+    declare -g "$var_name=${input_val:-$effective_default}"
+}
+
+prompt_yes_no() {
+    local prompt_text="$1"
+    local default_val="$2"
+    local var_name="$3"
+    local cur_val="${!var_name:-}"
+    local effective_default="${cur_val:-$default_val}"
+
+    if [ "$NON_INTERACTIVE" -eq 1 ]; then
+        case "${effective_default,,}" in
+            y|yes|1|true) declare -g "$var_name=y" ;;
+            *) declare -g "$var_name=n" ;;
+        esac
+        log "Выбор $var_name: ${GREEN}${!var_name}${NC} (авто)"
+        return 0
+    fi
+
+    while true; do
+        local input_val
+        read -rp "$(echo -e "${prompt_text} [${GREEN}${effective_default}${NC}]: ")" input_val
+        input_val="${input_val:-$effective_default}"
+        case "${input_val,,}" in
+            y|yes|1|true) declare -g "$var_name=y"; return 0 ;;
+            n|no|0|false) declare -g "$var_name=n"; return 0 ;;
+            *) warn "Пожалуйста, введите 'y' или 'n'." ;;
+        esac
+    done
+}
+
+prompt_secret() {
+    local prompt_text="$1"
+    local default_val="$2"
+    local var_name="$3"
+    local cur_val="${!var_name:-}"
+    local effective_default="${cur_val:-$default_val}"
+
+    if [ "$NON_INTERACTIVE" -eq 1 ]; then
+        declare -g "$var_name=$effective_default"
+        if [ -n "$effective_default" ]; then
+            log "Параметр $var_name: ${GREEN}***скрыто***${NC} (авто)"
+        else
+            log "Параметр $var_name: ${GREEN}(пусто)${NC} (авто)"
+        fi
+        return 0
+    fi
+
+    local input_val
+    read -rp "$(echo -e "${prompt_text} [${GREEN}***${NC}]: ")" input_val
     declare -g "$var_name=${input_val:-$effective_default}"
 }
 
@@ -107,15 +409,96 @@ validate_path_segment() {
     fi
 }
 
+# ----------------- Обработка аргументов командной строки -----------------
+CONFIG_FILE=""
+NON_INTERACTIVE=${NON_INTERACTIVE:-0}
+GEN_CONFIG=0
+FORCE_DNS=${FORCE_DNS:-0}
+SAVED_CONFIG_FILE="setup_mask.env"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--config)
+            [[ -n "${2:-}" ]] || die "Параметр $1 требует аргумент: путь к файлу конфигурации."
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        -y|--yes|--non-interactive)
+            NON_INTERACTIVE=1
+            shift
+            ;;
+        -d|--domain)
+            [[ -n "${2:-}" ]] || die "Параметр $1 требует аргумент: доменное имя."
+            PRIMARY_DOMAIN="$2"
+            shift 2
+            ;;
+        --gen-config)
+            GEN_CONFIG=1
+            if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
+                TARGET_GEN_FILE="$2"
+                shift 2
+            else
+                TARGET_GEN_FILE="setup_mask.env.example"
+                shift
+            fi
+            ;;
+        -f|--force)
+            FORCE_DNS=1
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        *)
+            warn "Неизвестный параметр: $1"
+            shift
+            ;;
+    esac
+done
+
+# Автообнаружение конфигурационного файла, если путь не передан явно
+if [ -z "$CONFIG_FILE" ]; then
+    if [ -f "./setup_mask.env" ]; then
+        CONFIG_FILE="./setup_mask.env"
+        log "Автообнаружен конфигурационный файл: $CONFIG_FILE"
+    elif [ "$NON_INTERACTIVE" -eq 0 ] && [ -f "./.env" ]; then
+        # В неинтерактивном режиме .env не загружается автоматически — только setup_mask.env
+        CONFIG_FILE="./.env"
+        warn "Автообнаружен конфигурационный файл: $CONFIG_FILE (убедитесь, что он предназначен для этого скрипта)"
+    fi
+fi
+
+if [ -n "$CONFIG_FILE" ]; then
+    load_env_file "$CONFIG_FILE"
+fi
+
+# Сессия всегда сохраняется в setup_mask.env (не перезаписываем исходный -c файл)
+SAVED_CONFIG_FILE="./setup_mask.env"
+
+if [ "$NON_INTERACTIVE" -eq 1 ]; then
+    log "Включен НЕИНТЕРАКТИВНЫЙ режим (Ansible / Cloud-Init / CI)."
+fi
+
 # =============================================================
-#  ИНТЕРАКТИВНАЯ КОНФИГУРАЦИЯ И СЦЕНАРИИ МАРШРУТИЗАЦИИ
+#  КОНФИГУРАЦИЯ И СЦЕНАРИИ МАРШРУТИЗАЦИИ
 # =============================================================
 echo
 echo -e "${YELLOW}Шаг 1: Конфигурация Главного домена (PRIMARY_DOMAIN)${NC}"
 echo -e "${CYAN}Этот домен используется для входа в 3X-UI, подписок, xHTTP (VLESSENC) и Маски.${NC}"
-read -rp "Введите ваш основной домен (например, yourdomain.online): " PRIMARY_DOMAIN
-[[ "$PRIMARY_DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]] \
-    || die "Некорректный формат доменного имени: $PRIMARY_DOMAIN"
+
+if [ "$NON_INTERACTIVE" -eq 1 ]; then
+    [ -n "${PRIMARY_DOMAIN:-}" ] || die "Ошибка: PRIMARY_DOMAIN не задан в конфигурации или аргументах!"
+    ok "Основной домен (из конфигурации): $PRIMARY_DOMAIN"
+else
+    if [ -n "${PRIMARY_DOMAIN:-}" ]; then
+        prompt_default "Введите ваш основной домен" "$PRIMARY_DOMAIN" PRIMARY_DOMAIN
+    else
+        read -rp "Введите ваш основной домен (например, yourdomain.online): " PRIMARY_DOMAIN
+    fi
+fi
+
+[[ "$PRIMARY_DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]     || die "Некорректный формат доменного имени: $PRIMARY_DOMAIN"
 
 ALL_DOMAINS=("$PRIMARY_DOMAIN")
 declare -A DOMAIN_TO_PORT
@@ -123,6 +506,7 @@ declare -A EXT_SNI_TO_PORT
 STEAL_PORTS_LIST=()
 CLASSIC_PORTS_LIST=()
 ALL_REALITY_PORTS=()
+CONFIG_STEAL_DOMS="${STEAL_DOMAINS[*]:-}"
 STEAL_DOMAINS=()
 EXT_SNI_LIST=()
 
@@ -131,9 +515,8 @@ REALITY_FALLBACK_PORT="9443"
 if [[ ! "$PRIMARY_DOMAIN" =~ ^www\. ]]; then
     echo
     echo -e "${YELLOW}Защита от ошибок SSL (Certificate Name Mismatch):${NC}"
-    read -rp "Добавить алиас 'www.$PRIMARY_DOMAIN' для выпуска SSL и привязки к Nginx? [Y/n]: " ADD_WWW_INPUT
-    ADD_WWW_INPUT="${ADD_WWW_INPUT:-y}"
-    if [[ "${ADD_WWW_INPUT,,}" == "y" ]]; then
+    prompt_yes_no "Добавить алиас 'www.$PRIMARY_DOMAIN' для выпуска SSL и привязки к Nginx?" "${ADD_WWW:-y}" ADD_WWW
+    if [[ "${ADD_WWW,,}" == "y" ]]; then
         ALL_DOMAINS+=("www.$PRIMARY_DOMAIN")
         ok "Алиас www.$PRIMARY_DOMAIN добавлен в сертификационный стек."
     fi
@@ -142,58 +525,74 @@ fi
 echo
 echo -e "${YELLOW}Шаг 2: Настройка Steal-Oneself REALITY (Кража у самого себя)${NC}"
 echo -e "${CYAN}SSL-сертификаты выпускаются на ваши домены, трафик которых Nginx перенаправляет на порты REALITY.${NC}"
-read -rp "Включить Steal-Oneself REALITY? [Y/n]: " ENABLE_STEAL_INPUT
-ENABLE_STEAL_INPUT="${ENABLE_STEAL_INPUT:-y}"
+prompt_yes_no "Включить Steal-Oneself REALITY?" "${ENABLE_STEAL:-y}" ENABLE_STEAL
 
-if [[ "${ENABLE_STEAL_INPUT,,}" == "y" ]]; then
+if [[ "${ENABLE_STEAL,,}" == "y" ]]; then
     STEAL_ENABLED=1
-    while true; do
-        read -rp "  Введите локальный порт Xray для Steal-Oneself [45443]: " PORT_INPUT
-        PORT_VAL="${PORT_INPUT:-45443}"
-        if [[ ! "$PORT_VAL" =~ ^[0-9]+$ ]] || [ "$PORT_VAL" -le 0 ] || [ "$PORT_VAL" -gt 65535 ]; then
-            warn "  Некорректный номер порта. Назначен порт по умолчанию: 45443."
-            PORT_VAL="45443"
-        fi
-
-        if [[ ! " ${STEAL_PORTS_LIST[*]:-} " == *" ${PORT_VAL} "* ]]; then
-            STEAL_PORTS_LIST+=("$PORT_VAL")
-            if [[ ! " ${ALL_REALITY_PORTS[*]:-} " == *" ${PORT_VAL} "* ]]; then
-                ALL_REALITY_PORTS+=("$PORT_VAL")
+    if [ "$NON_INTERACTIVE" -eq 1 ]; then
+        PORT_VAL="${STEAL_PORT:-45443}"
+        STEAL_PORTS_LIST+=("$PORT_VAL")
+        ALL_REALITY_PORTS+=("$PORT_VAL")
+        DEFAULT_STEAL_DOM="cdn.$PRIMARY_DOMAIN"
+        STEAL_DOM_LIST="${CONFIG_STEAL_DOMS:-$DEFAULT_STEAL_DOM}"
+        for s_dom in $STEAL_DOM_LIST; do
+            [[ "$s_dom" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]] || continue
+            if [[ ! " ${ALL_DOMAINS[*]} " == *" ${s_dom} "* ]]; then
+                ALL_DOMAINS+=("$s_dom")
             fi
-        fi
-
-        echo -e "${CYAN}  Введите домены для порта $PORT_VAL (для завершения - пусто и Enter):${NC}"
-        added_count_for_port=0
+            STEAL_DOMAINS+=("$s_dom")
+            DOMAIN_TO_PORT["$s_dom"]="$PORT_VAL"
+            ok "    Домен $s_dom привязан к инбаунд-порту $PORT_VAL"
+        done
+    else
         while true; do
-            read -rp "    Собственный домен для порта $PORT_VAL: " STEAL_DOM
-            if [ -z "$STEAL_DOM" ]; then
-                if [ "$added_count_for_port" -eq 0 ]; then
-                    warn "    Необходимо добавить как минимум один домен для порта $PORT_VAL!"
+            read -rp "  Введите локальный порт Xray для Steal-Oneself [${STEAL_PORT:-45443}]: " PORT_INPUT
+            PORT_VAL="${PORT_INPUT:-${STEAL_PORT:-45443}}"
+            if [[ ! "$PORT_VAL" =~ ^[0-9]+$ ]] || [ "$PORT_VAL" -le 0 ] || [ "$PORT_VAL" -gt 65535 ]; then
+                warn "  Некорректный номер порта. Назначен порт по умолчанию: 45443."
+                PORT_VAL="45443"
+            fi
+
+            if [[ ! " ${STEAL_PORTS_LIST[*]:-} " == *" ${PORT_VAL} "* ]]; then
+                STEAL_PORTS_LIST+=("$PORT_VAL")
+                if [[ ! " ${ALL_REALITY_PORTS[*]:-} " == *" ${PORT_VAL} "* ]]; then
+                    ALL_REALITY_PORTS+=("$PORT_VAL")
+                fi
+            fi
+
+            echo -e "${CYAN}  Введите домены для порта $PORT_VAL (для завершения - пусто и Enter):${NC}"
+            added_count_for_port=0
+            while true; do
+                read -rp "    Собственный домен для порта $PORT_VAL: " STEAL_DOM
+                if [ -z "$STEAL_DOM" ]; then
+                    if [ "$added_count_for_port" -eq 0 ]; then
+                        warn "    Необходимо добавить как минимум один домен для порта $PORT_VAL!"
+                        continue
+                    fi
+                    break
+                fi
+
+                if [[ ! "$STEAL_DOM" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+                    warn "    Некорректный синтаксис домена '$STEAL_DOM'."
                     continue
                 fi
-                break
-            fi
 
-            if [[ ! "$STEAL_DOM" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
-                warn "    Некорректный синтаксис домена '$STEAL_DOM'."
-                continue
-            fi
+                if [[ " ${ALL_DOMAINS[*]} " == *" ${STEAL_DOM} "* ]]; then
+                    warn "    Домен '$STEAL_DOM' уже присутствует в списке."
+                    continue
+                fi
 
-            if [[ " ${ALL_DOMAINS[*]} " == *" ${STEAL_DOM} "* ]]; then
-                warn "    Домен '$STEAL_DOM' уже присутствует в списке."
-                continue
-            fi
+                ALL_DOMAINS+=("$STEAL_DOM")
+                STEAL_DOMAINS+=("$STEAL_DOM")
+                DOMAIN_TO_PORT["$STEAL_DOM"]="$PORT_VAL"
+                added_count_for_port=$((added_count_for_port + 1))
+                ok "    Домен $STEAL_DOM привязан к инбаунд-порту $PORT_VAL"
+            done
 
-            ALL_DOMAINS+=("$STEAL_DOM")
-            STEAL_DOMAINS+=("$STEAL_DOM")
-            DOMAIN_TO_PORT["$STEAL_DOM"]="$PORT_VAL"
-            added_count_for_port=$((added_count_for_port + 1))
-            ok "    Домен $STEAL_DOM привязан к инбаунд-порту $PORT_VAL"
+            read -rp "  Сконфигурировать еще один порт Steal-Oneself? [y/N]: " ADD_MORE_STEAL
+            [[ "${ADD_MORE_STEAL,,}" == "y" ]] || break
         done
-
-        read -rp "  Сконфигурировать еще один порт Steal-Oneself? [y/N]: " ADD_MORE_STEAL
-        [[ "${ADD_MORE_STEAL,,}" == "y" ]] || break
-    done
+    fi
 else
     STEAL_ENABLED=0
     log "Сценарий Steal-Oneself REALITY отключен."
@@ -202,51 +601,63 @@ fi
 echo
 echo -e "${YELLOW}Шаг 3: Настройка Classic External REALITY (Сторонние SNI маскировки)${NC}"
 echo -e "${CYAN}В этом режиме трафик с внешними SNI (Microsoft, Apple, Samsung и др.) пересылается на локальные порты Xray.${NC}"
-read -rp "Включить Classic External REALITY? [Y/n]: " ENABLE_CLASSIC_INPUT
-ENABLE_CLASSIC_INPUT="${ENABLE_CLASSIC_INPUT:-y}"
+prompt_yes_no "Включить Classic External REALITY?" "${ENABLE_CLASSIC:-y}" ENABLE_CLASSIC
 
-if [[ "${ENABLE_CLASSIC_INPUT,,}" == "y" ]]; then
+if [[ "${ENABLE_CLASSIC,,}" == "y" ]]; then
     CLASSIC_ENABLED=1
-    while true; do
-        read -rp "  Введите локальный порт Xray для Classic REALITY [46443]: " PORT_INPUT
-        PORT_VAL="${PORT_INPUT:-46443}"
-        if [[ ! "$PORT_VAL" =~ ^[0-9]+$ ]] || [ "$PORT_VAL" -le 0 ] || [ "$PORT_VAL" -gt 65535 ]; then
-            warn "  Некорректный номер порта. Назначен порт по умолчанию: 46443."
-            PORT_VAL="46443"
-        fi
-
-        if [[ ! " ${CLASSIC_PORTS_LIST[*]:-} " == *" ${PORT_VAL} "* ]]; then
-            CLASSIC_PORTS_LIST+=("$PORT_VAL")
-            if [[ ! " ${ALL_REALITY_PORTS[*]:-} " == *" ${PORT_VAL} "* ]]; then
-                ALL_REALITY_PORTS+=("$PORT_VAL")
-            fi
-        fi
-
-        echo -e "${CYAN}  Введите внешние SNI для порта $PORT_VAL (нажмите Enter на пустой строке для завершения):${NC}"
-        added_sni_count=0
-        while true; do
-            read -rp "    Внешний SNI (например, gateway.icloud.com): " EXT_SNI
-            if [ -z "$EXT_SNI" ]; then
-                if [ "$added_sni_count" -eq 0 ]; then
-                    warn "    Порт $PORT_VAL зарегистрирован для обработки fallback-трафика."
-                fi
-                break
-            fi
-
-            if [[ ! "$EXT_SNI" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
-                warn "    Некорректный формат SNI: '$EXT_SNI'."
-                continue
-            fi
-
-            EXT_SNI_TO_PORT["$EXT_SNI"]="$PORT_VAL"
-            EXT_SNI_LIST+=("$EXT_SNI")
-            added_sni_count=$((added_sni_count + 1))
-            ok "    SNI $EXT_SNI привязан к порту $PORT_VAL"
+    if [ "$NON_INTERACTIVE" -eq 1 ]; then
+        PORT_VAL="${CLASSIC_PORT:-46443}"
+        CLASSIC_PORTS_LIST+=("$PORT_VAL")
+        ALL_REALITY_PORTS+=("$PORT_VAL")
+        CLASSIC_SNI_LIST="${CLASSIC_SNI:-gateway.icloud.com}"
+        for ext_sni in $CLASSIC_SNI_LIST; do
+            [[ "$ext_sni" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]] || continue
+            EXT_SNI_TO_PORT["$ext_sni"]="$PORT_VAL"
+            ALL_EXT_SNIS+=("$ext_sni")
+            ok "    Внешний SNI $ext_sni привязан к инбаунд-порту $PORT_VAL"
         done
+    else
+        while true; do
+            read -rp "  Введите локальный порт Xray для Classic REALITY [${CLASSIC_PORT:-46443}]: " PORT_INPUT
+            PORT_VAL="${PORT_INPUT:-${CLASSIC_PORT:-46443}}"
+            if [[ ! "$PORT_VAL" =~ ^[0-9]+$ ]] || [ "$PORT_VAL" -le 0 ] || [ "$PORT_VAL" -gt 65535 ]; then
+                warn "  Некорректный номер порта. Назначен порт по умолчанию: 46443."
+                PORT_VAL="46443"
+            fi
 
-        read -rp "  Сконфигурировать еще один порт Classic REALITY? [y/N]: " ADD_MORE_CLASSIC
-        [[ "${ADD_MORE_CLASSIC,,}" == "y" ]] || break
-    done
+            if [[ ! " ${CLASSIC_PORTS_LIST[*]:-} " == *" ${PORT_VAL} "* ]]; then
+                CLASSIC_PORTS_LIST+=("$PORT_VAL")
+                if [[ ! " ${ALL_REALITY_PORTS[*]:-} " == *" ${PORT_VAL} "* ]]; then
+                    ALL_REALITY_PORTS+=("$PORT_VAL")
+                fi
+            fi
+
+            echo -e "${CYAN}  Введите внешние доверенные SNI для порта $PORT_VAL (для завершения - пусто и Enter):${NC}"
+            added_sni_count=0
+            while true; do
+                read -rp "    Внешний SNI (например, gateway.icloud.com): " EXT_SNI
+                if [ -z "$EXT_SNI" ]; then
+                    if [ "$added_sni_count" -eq 0 ]; then
+                        warn "    Порт $PORT_VAL зарегистрирован для обработки fallback-трафика."
+                    fi
+                    break
+                fi
+
+                if [[ ! "$EXT_SNI" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+                    warn "    Некорректный формат SNI: '$EXT_SNI'."
+                    continue
+                fi
+
+                EXT_SNI_TO_PORT["$EXT_SNI"]="$PORT_VAL"
+                EXT_SNI_LIST+=("$EXT_SNI")
+                added_sni_count=$((added_sni_count + 1))
+                ok "    SNI $EXT_SNI привязан к порту $PORT_VAL"
+            done
+
+            read -rp "  Сконфигурировать еще один порт Classic REALITY? [y/N]: " ADD_MORE_CLASSIC
+            [[ "${ADD_MORE_CLASSIC,,}" == "y" ]] || break
+        done
+    fi
 else
     CLASSIC_ENABLED=0
     log "Сценарий Classic External REALITY отключен."
@@ -254,26 +665,39 @@ fi
 
 echo
 echo -e "${YELLOW}Шаг 4: Дополнительные SSL-домены (Direct TLS / Hysteria 2 / Trojan)${NC}"
-while true; do
-    read -rp "Добавить собственный домен для выпуска SSL-сертификата? (Enter для пропуска): " EXTRA_DOM
-    if [ -z "$EXTRA_DOM" ]; then
-        break
+if [ "$NON_INTERACTIVE" -eq 1 ]; then
+    if [ -n "${EXTRA_SSL_DOMAINS:-}" ]; then
+        for EXTRA_DOM in $EXTRA_SSL_DOMAINS; do
+            if [[ "$EXTRA_DOM" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+                if [[ ! " ${ALL_DOMAINS[*]} " == *" ${EXTRA_DOM} "* ]]; then
+                    ALL_DOMAINS+=("$EXTRA_DOM")
+                    ok "Добавлен SSL-домен: $EXTRA_DOM"
+                fi
+            fi
+        done
     fi
-    if [[ "$EXTRA_DOM" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
-        if [[ " ${ALL_DOMAINS[*]} " == *" ${EXTRA_DOM} "* ]]; then
-            warn "Домен '$EXTRA_DOM' уже присутствует в очереди."
-        else
-            ALL_DOMAINS+=("$EXTRA_DOM")
-            ok "Добавлен SSL-домен: $EXTRA_DOM"
+else
+    while true; do
+        read -rp "Добавить собственный домен для выпуска SSL-сертификата? (Enter для пропуска): " EXTRA_DOM
+        if [ -z "$EXTRA_DOM" ]; then
+            break
         fi
-    else
-        warn "Некорректный формат доменного имени: '$EXTRA_DOM'."
-    fi
-done
+        if [[ "$EXTRA_DOM" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+            if [[ " ${ALL_DOMAINS[*]} " == *" ${EXTRA_DOM} "* ]]; then
+                warn "Домен '$EXTRA_DOM' уже присутствует в очереди."
+            else
+                ALL_DOMAINS+=("$EXTRA_DOM")
+                ok "Добавлен SSL-домен: $EXTRA_DOM"
+            fi
+        else
+            warn "Некорректный формат доменного имени: '$EXTRA_DOM'."
+        fi
+    done
+fi
 
 echo
 echo -e "${YELLOW}Шаг 5: Привязка внутренних портов 3X-UI и xHTTP${NC}"
-prompt_default "Внутренний порт панели 3X-UI" "${PANEL_PORT:-10443}" PANEL_PORT
+prompt_default "Внутренний порт панели 3X-UI" "10443" PANEL_PORT
 RAW_PATH="${RAW_PATH:-${PANEL_PATH:-my-3x-panel}}"
 RAW_PATH="${RAW_PATH#/}"
 RAW_PATH="${RAW_PATH%/}"
@@ -282,7 +706,7 @@ validate_path_segment "$RAW_PATH" "URI панели"
 PANEL_PATH="/${RAW_PATH#/}"
 PANEL_PATH="${PANEL_PATH%/}/"
 
-prompt_default "Внутренний порт сервера подписок 3X-UI" "${SUB_PORT:-55443}" SUB_PORT
+prompt_default "Внутренний порт сервера подписок 3X-UI" "55443" SUB_PORT
 RAW_SUB_PATH="${RAW_SUB_PATH:-${SUB_PATH:-my-post-key}}"
 RAW_SUB_PATH="${RAW_SUB_PATH#/}"
 RAW_SUB_PATH="${RAW_SUB_PATH%/}"
@@ -291,7 +715,7 @@ validate_path_segment "$RAW_SUB_PATH" "URI подписок"
 SUB_PATH="/${RAW_SUB_PATH#/}"
 SUB_PATH="${SUB_PATH%/}/"
 
-prompt_default "Внутренний порт инбаунда VLESS xHTTP (HTTP/2 Stream-One)" "${XHTTP_STREAM_PORT:-50443}" XHTTP_STREAM_PORT
+prompt_default "Внутренний порт инбаунда VLESS xHTTP (HTTP/2 Stream-One)" "50443" XHTTP_STREAM_PORT
 RAW_XHTTP_STREAM_PATH="${RAW_XHTTP_STREAM_PATH:-${XHTTP_STREAM_PATH:-Stream-One-Path}}"
 RAW_XHTTP_STREAM_PATH="${RAW_XHTTP_STREAM_PATH#/}"
 RAW_XHTTP_STREAM_PATH="${RAW_XHTTP_STREAM_PATH%/}"
@@ -300,89 +724,44 @@ validate_path_segment "$RAW_XHTTP_STREAM_PATH" "URI xHTTP"
 XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
 XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
 
-# -------------------------------------------------------------
-# ИНТЕРАКТИВНЫЙ ВЫБОР ПРОТОКОЛОВ С ОБЯЗАТЕЛЬНЫМ ВОПРОСОМ (Y/N)
-# -------------------------------------------------------------
 echo
 echo -e "${YELLOW}Шаг 6: Настройка скоростного протокола Hysteria 2 (UDP)${NC}"
-while true; do
-    read -rp "Установить и настроить Hysteria 2? [y/n]: " HY2_CHOICE
-    case "${HY2_CHOICE,,}" in
-        y|yes)
-            ENABLE_HY2=1
-            prompt_default "  Введите внешний UDP-порт для Hysteria 2" "443" HY2_PORT
-            while [[ ! "$HY2_PORT" =~ ^[0-9]+$ ]] || [ "$HY2_PORT" -le 0 ] || [ "$HY2_PORT" -gt 65535 ]; do
-                warn "  Некорректный номер порта."
-                prompt_default "  Введите внешний UDP-порт для Hysteria 2" "443" HY2_PORT
-            done
-            ok "Hysteria 2 активирована на порту ${HY2_PORT}/udp"
-            break
-            ;;
-        n|no)
-            ENABLE_HY2=0
-            HY2_PORT=""
-            log "Hysteria 2 отключена."
-            break
-            ;;
-        *)
-            warn "Пожалуйста, ответьте 'y' или 'n'."
-            ;;
-    esac
-done
+prompt_yes_no "Установить и настроить Hysteria 2?" "${ENABLE_HY2:-y}" ENABLE_HY2
+if [[ "${ENABLE_HY2,,}" == "y" ]]; then
+    ENABLE_HY2=1
+    prompt_default "  Введите внешний UDP-порт для Hysteria 2" "443" HY2_PORT
+    ok "Hysteria 2 активирована на порту ${HY2_PORT}/udp"
+else
+    ENABLE_HY2=0
+    HY2_PORT=""
+    log "Hysteria 2 отключена."
+fi
 
 echo
 echo -e "${YELLOW}Шаг 7: Настройка протокола AmneziaWG v3.1 (Transport Protection)${NC}"
-while true; do
-    read -rp "Установить и настроить AmneziaWG v3.1? [y/n]: " AWG_V3_CHOICE
-    case "${AWG_V3_CHOICE,,}" in
-        y|yes)
-            ENABLE_AWG_V3=1
-            prompt_default "  Введите внешний UDP-порт для AmneziaWG v3.1" "8443" AWG_V3_PORT
-            while [[ ! "$AWG_V3_PORT" =~ ^[0-9]+$ ]] || [ "$AWG_V3_PORT" -le 0 ] || [ "$AWG_V3_PORT" -gt 65535 ]; do
-                warn "  Некорректный номер порта."
-                prompt_default "  Введите внешний UDP-порт для AmneziaWG v3.1" "8443" AWG_V3_PORT
-            done
-            ok "AmneziaWG v3.1 активирована на порту ${AWG_V3_PORT}/udp"
-            break
-            ;;
-        n|no)
-            ENABLE_AWG_V3=0
-            AWG_V3_PORT=""
-            log "AmneziaWG v3.1 отключена."
-            break
-            ;;
-        *)
-            warn "Пожалуйста, ответьте 'y' или 'n'."
-            ;;
-    esac
-done
+prompt_yes_no "Установить и настроить AmneziaWG v3.1?" "${ENABLE_AWG_V3:-y}" ENABLE_AWG_V3
+if [[ "${ENABLE_AWG_V3,,}" == "y" ]]; then
+    ENABLE_AWG_V3=1
+    prompt_default "  Введите внешний UDP-порт для AmneziaWG v3.1" "8443" AWG_V3_PORT
+    ok "AmneziaWG v3.1 активирована на порту ${AWG_V3_PORT}/udp"
+else
+    ENABLE_AWG_V3=0
+    AWG_V3_PORT=""
+    log "AmneziaWG v3.1 отключена."
+fi
 
 echo
 echo -e "${YELLOW}Шаг 8: Настройка протокола AmneziaWG v2.0 / Legacy 1.0 (для роутеров)${NC}"
-while true; do
-    read -rp "Установить и настроить AmneziaWG v2.0 / Legacy? [y/n]: " AWG_V2_CHOICE
-    case "${AWG_V2_CHOICE,,}" in
-        y|yes)
-            ENABLE_AWG_V2=1
-            prompt_default "  Введите внешний UDP-порт для AmneziaWG v2.0" "8444" AWG_V2_PORT
-            while [[ ! "$AWG_V2_PORT" =~ ^[0-9]+$ ]] || [ "$AWG_V2_PORT" -le 0 ] || [ "$AWG_V2_PORT" -gt 65535 ]; do
-                warn "  Некорректный номер порта."
-                prompt_default "  Введите внешний UDP-порт для AmneziaWG v2.0" "8444" AWG_V2_PORT
-            done
-            ok "AmneziaWG v2.0 активирована на порту ${AWG_V2_PORT}/udp"
-            break
-            ;;
-        n|no)
-            ENABLE_AWG_V2=0
-            AWG_V2_PORT=""
-            log "AmneziaWG v2.0 отключена."
-            break
-            ;;
-        *)
-            warn "Пожалуйста, ответьте 'y' или 'n'."
-            ;;
-    esac
-done
+prompt_yes_no "Установить и настроить AmneziaWG v2.0 / Legacy?" "${ENABLE_AWG_V2:-y}" ENABLE_AWG_V2
+if [[ "${ENABLE_AWG_V2,,}" == "y" ]]; then
+    ENABLE_AWG_V2=1
+    prompt_default "  Введите внешний UDP-порт для AmneziaWG v2.0" "8444" AWG_V2_PORT
+    ok "AmneziaWG v2.0 активирована на порту ${AWG_V2_PORT}/udp"
+else
+    ENABLE_AWG_V2=0
+    AWG_V2_PORT=""
+    log "AmneziaWG v2.0 отключена."
+fi
 
 echo
 echo -e "${YELLOW}Шаг 9: Выбор темы для сайта-маскировки (Decoy Fronts Catalog)${NC}"
@@ -399,7 +778,7 @@ prompt_default "Выберите метод сертификации (1 или 2
 
 prompt_default "Email для Let's Encrypt уведомлений (Enter - без почты)" "" LE_EMAIL
 
-CF_AUTH_METHOD="1"
+CF_AUTH_METHOD="${CF_AUTH_METHOD:-1}"
 if [ "$SSL_ENGINE_CHOICE" = "2" ]; then
     echo
     echo -e "${YELLOW}Шаг 10.1: Аутентификация в Cloudflare API (acme.sh)${NC}"
@@ -408,20 +787,21 @@ if [ "$SSL_ENGINE_CHOICE" = "2" ]; then
     prompt_default "Выберите вариант (1 или 2)" "1" CF_AUTH_METHOD
 
     if [ "$CF_AUTH_METHOD" = "1" ]; then
-        read -rp "Введите Cloudflare API Token: " CF_Token
+        prompt_secret "Введите Cloudflare API Token" "${CF_Token:-}" CF_Token
         [ -n "$CF_Token" ] || die "API Token не может быть пустым."
-        read -rp "Введите Cloudflare Account ID (Enter для пропуска): " CF_Account_ID
+        prompt_default "Введите Cloudflare Account ID (Enter для пропуска)" "${CF_Account_ID:-}" CF_Account_ID
         export CF_Token
         [ -n "${CF_Account_ID:-}" ] && export CF_Account_ID="$CF_Account_ID"
     else
-        read -rp "Введите ваш Cloudflare Email: " CF_Email
+        prompt_default "Введите ваш Cloudflare Email" "${CF_Email:-}" CF_Email
         [ -n "$CF_Email" ] || die "Email не может быть пустым."
-        read -rp "Введите Cloudflare Global API Key: " CF_Key
+        prompt_secret "Введите Cloudflare Global API Key" "${CF_Key:-}" CF_Key
         [ -n "$CF_Key" ] || die "Global API Key не может быть пустым."
         export CF_Email
         export CF_Key
     fi
 fi
+
 
 # Определение системного каталога для хранения SSL
 if [ "$SSL_ENGINE_CHOICE" = "1" ]; then
@@ -442,18 +822,36 @@ if [ -n "$WAN_IP" ]; then
 
         if [ -z "$resolved_ip" ]; then
             warn "Домен $dom не разрешается в IP-адрес. Проверьте DNS A-запись."
-            read -rp "Продолжить установку? [y/N]: " dns_ans
-            [[ "${dns_ans,,}" == "y" ]] || die "Установка отменена пользователем."
+            if [ "$NON_INTERACTIVE" -eq 1 ]; then
+                if [ "$FORCE_DNS" -eq 1 ]; then
+                    warn "Внимание: продолжение установки без валидации DNS (флаг --force / FORCE_DNS=1)."
+                else
+                    die "Критическая ошибка: Домен $dom не разрешается. Укажите -f / --force или проверьте DNS."
+                fi
+            else
+                read -rp "Продолжить установку? [y/N]: " dns_ans
+                [[ "${dns_ans,,}" == "y" ]] || die "Установка отменена пользователем."
+            fi
         elif [ "$resolved_ip" != "$WAN_IP" ]; then
             warn "Несовпадение IP: $dom указывает на $resolved_ip, IP сервера: $WAN_IP."
-            read -rp "Продолжить установку? [y/N]: " dns_ans
-            [[ "${dns_ans,,}" == "y" ]] || die "Установка отменена пользователем."
+            if [ "$NON_INTERACTIVE" -eq 1 ]; then
+                if [ "$FORCE_DNS" -eq 1 ]; then
+                    warn "Внимание: несовпадение IP проигнорировано (флаг --force / FORCE_DNS=1)."
+                else
+                    die "Критическая ошибка: $dom указывает на $resolved_ip вместо $WAN_IP. Укажите -f / --force для игнорирования."
+                fi
+            else
+                read -rp "Продолжить установку? [y/N]: " dns_ans
+                [[ "${dns_ans,,}" == "y" ]] || die "Установка отменена пользователем."
+            fi
         else
             ok "DNS проверен: $dom -> $WAN_IP"
         fi
     done
 fi
 
+# Сохраняем состояние сессии в файл конфигурации для защиты от обрыва SSH или повторного вызова
+save_session_state "$SAVED_CONFIG_FILE"
 # =============================================================
 #  ТЮНИНГ ЯДРА LINUX (SYSCTL BBR & UDP BUFFERS FOR HY2 & AWG)
 # =============================================================
@@ -934,7 +1332,7 @@ if [ "$DECOY_MODE" = "1" ]; then
                 </button>
             </div>
             <div id="errorAlert" class="alert-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 <span id="errorMsg">Ошибка аутентификации</span>
             </div>
             <form id="authForm" onsubmit="handleDataSphereAuth(event)">
@@ -1120,7 +1518,7 @@ if [ "$DECOY_MODE" = "1" ]; then
                     body: JSON.stringify({ principal: document.getElementById("dsUser").value, secret: document.getElementById("dsKey").value })
                 });
                 const result = await response.json();
-                errText.innerText = result.error || "Недействительный токен кластера или ключ авторизации узла. Доступ запрещен.";
+                errText.innerText = result.error || "Недействительный токен кластера или ключ авторизации узла.";
                 errBox.style.display = "flex";
             } catch (err) {
                 errText.innerText = "Ошибка защищенного соединения с контроллером кластера.";
@@ -1281,9 +1679,7 @@ http {
     resolver 1.1.1.1 8.8.8.8 ipv6=off valid=300s;
     resolver_timeout 5s;
 
-    # Оптимизация окна и стриминга HTTP/2 для устранения просадок больших потоков
-    http2_recv_buffer_size 16m;
-    http2_max_concurrent_streams 512;
+    http2_recv_buffer_size 4m;
 
     map \$proxy_protocol_addr \$ak_real_ip {
         ""      \$remote_addr;
@@ -1680,7 +2076,7 @@ server {
         proxy_set_header Connection \$connection_upgrade;
     }
 
-    # --- ЛОКАЦИЯ 3: VLESS xHTTP (Native HTTP/2 Stream-One + VLESSENC + Безотказный сокет) ---
+    # --- ЛОКАЦИЯ 3: VLESS xHTTP (Native HTTP/2 Stream-One + VLESSENC + VISION) ---
     location ^~ ${XHTTP_STREAM_PATH} {
         if (\$request_method != POST) {
             return 404;
@@ -1692,11 +2088,8 @@ server {
         proxy_set_header X-Forwarded-For \$ak_real_ip;
         proxy_set_header X-Forwarded-Proto \$scheme;
 
-        # Полное отключение задержек и буферизации для сквозного H2C-потока
         proxy_request_buffering off;
         proxy_buffering off;
-        tcp_nodelay on;
-        proxy_socket_keepalive on;
 
         proxy_read_timeout 1h;
         proxy_send_timeout 1h;
@@ -1885,7 +2278,8 @@ if [ "$STEAL_ENABLED" -eq 1 ]; then
     REALITY_INBOUNDS_REPORT+="\n  ${BOLD}[Сценарий 1: Steal-Oneself (Кража у самого себя с защитой Anti-Loop)]${NC}\n"
     for port in "${STEAL_PORTS_LIST[@]}"; do
         p_doms=()
-        for s_dom in "${STEAL_DOMAINS[@]:-}"; do
+        for s_dom in "${STEAL_DOMAINS[@]}"; do
+            [ -n "$s_dom" ] || continue
             if [ "${DOMAIN_TO_PORT[$s_dom]:-}" = "$port" ]; then
                 p_doms+=("$s_dom")
             fi
@@ -1932,9 +2326,10 @@ elif [ "$DECOY_MODE" = "2" ]; then DECOY_NAME="CosmosCloud NextGen";
 elif [ "$DECOY_MODE" = "3" ]; then DECOY_NAME="Default Nginx Stub";
 fi
 
+
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.5.1 PUBLIC EDITION)!       "
+echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.5.0 PUBLIC EDITION)!       "
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Главная страница:            ${CYAN}https://${PRIMARY_DOMAIN}/${NC} (${DECOY_NAME})"
 echo -e "  Вход в панель 3X-UI:         ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
@@ -1952,15 +2347,15 @@ echo
 echo -e "${YELLOW}ШАГ 2: Инбаунды VLESS REALITY (3X-UI):${NC}"
 echo -e "$REALITY_INBOUNDS_REPORT"
 
-echo -e "${YELLOW}ШАГ 3: Инбаунд VLESS xHTTP (Native H2 Stream-One + VLESSENC + Анти-Дроп):${NC}"
+echo -e "${YELLOW}ШАГ 3: Инбаунд VLESS xHTTP (Native H2 Stream-One + VLESSENC + VISION):${NC}"
 echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}vless${NC} | Адрес: ${GREEN}127.0.0.1${NC} | Порт: ${GREEN}$XHTTP_STREAM_PORT${NC}"
 echo -e "  - ${YELLOW}Вкладка «Протокол»:${NC} Генерация ключей: выбрать ${GREEN}ML-KEM-768 (native)${NC} и нажать ${CYAN}«Сгенерировать»${NC}"
 echo -e "  - ${YELLOW}Вкладка «Поток»:${NC}"
 echo -e "    * Транспорт: ${GREEN}xHTTP${NC} | Режим: ${GREEN}stream-one${NC}"
 echo -e "    * Хост: ${CYAN}$PRIMARY_DOMAIN${NC} | Путь: ${CYAN}$XHTTP_STREAM_PATH${NC}"
-echo -e "    * Padding Bytes: ${GREEN}100-500${NC} | Padding Obfs Mode: ${GREEN}Включить${NC} | Key: ${GREEN}X-Amz-Meta-Trace${NC}"
-echo -e "    * XMUX: ${GREEN}maxConcurrency: 0 (Выключено)${NC} — исключает раздувание буферов и вылеты на iOS/ПК"
+echo -e "    * Padding Bytes: ${GREEN}120-1120${NC} | Padding Obfs Mode: ${GREEN}Включить${NC} | Key: ${GREEN}X-Amz-Meta-Trace${NC}"
 echo -e "    * ${RED}ВНИМАНИЕ:${NC} ${YELLOW}QUIC / UDP ПАРАМЕТРЫ СТРОГО ВЫКЛЮЧИТЬ (0)${NC} — поток идёт строго по HTTP/2 TCP через Nginx!"
+echo -e "    * XMUX: ${GREEN}Включить (maxConcurrency: 16)${NC}"
 echo -e "  - ${YELLOW}Вкладка «Безопасность»:${NC} ${RED}Нет (None)${NC} | Accept Proxy Protocol: ${RED}Выключить (0)${NC}"
 echo -e "  - ${YELLOW}Вкладка «Сниффинг»:${NC} Включить (${GREEN}HTTP, TLS, QUIC, FAKEDNS${NC})"
 echo
@@ -2013,8 +2408,7 @@ fi
 
 echo -e "${YELLOW}ШАГ 7: Настройки Клиента и Подписок в 3X-UI:${NC}"
 echo -e "  - ${YELLOW}В карточке Клиента (Клиенты -> Учетные данные):${NC}"
-echo -e "    * Для инбаунда REALITY: Flow: выбрать ${GREEN}xtls-rprx-vision${NC}"
-echo -e "    * Для инбаунда xHTTP: Flow: строго ${RED}пусто (none)${NC} | Decryption: ключ ${GREEN}vlessenc${NC}"
+echo -e "    * Flow: выбрать ${GREEN}xtls-rprx-vision${NC} (Ключи VLESS-ENC панель подставит в подписку автоматически)"
 echo -e "  - ${YELLOW}Настройки подписок (Панель -> Подписка):${NC}"
 echo -e "    * Subscription Port: ${GREEN}$SUB_PORT${NC} | Subscription Path: ${GREEN}$SUB_PATH${NC}"
 echo -e "    * Subscription URL: ${CYAN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
