@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  CONFIGURE 3X-UI INBOUNDS & SETTINGS (v6.5.1 Universal Companion)
+#  CONFIGURE 3X-UI INBOUNDS & SETTINGS (v6.5.2 Universal Companion & Smart Reconcile)
 # ==============================================================================
-#  Скрипт автоматической настройки базы данных 3X-UI (/etc/x-ui/x-ui.db).
-#  Настраивает внутренние пути панели, подписки и добавляет инбаунды:
-#    - VLESS REALITY Steal-Oneself (Anti-Loop Fallback 9443)
-#    - VLESS REALITY Classic External (gateway.icloud.com)
-#    - VLESS xHTTP (Native H2 Stream-One + VLESSENC + XTLS-Vision)
-#    - Hysteria 2 (UDP 443 с маскировкой на 127.0.0.1:80)
-#    - AmneziaWG v3.1 (UDP 8443) и v2.0 Legacy (UDP 8444)
+#  Скрипт автоматического конфигурирования и самовосстановления базы 3X-UI.
+#  Безопасен для повторного запуска:
+#    1. 100% сохранность существующих клиентов (UUID, пароли Hy2, ключи AWG, лимиты);
+#    2. 100% сохранность действующих серверных ключей REALITY и AmneziaWG;
+#    3. Самоисправление скрытых ошибок (reality settings.publicKey, мертвый SNI swdist);
+#    4. Автоматическая настройка externalProxy :443 для корректных ссылок подписок;
+#    5. Защита существующей кастомной подписки (не затирает кастомный домен/путь);
+#    6. Режим безопасного аудита (--dry-run) и авто-бэкап базы перед записью.
 # ==============================================================================
 
 set -euo pipefail
@@ -29,21 +30,30 @@ show_help() {
     cat << 'EOF_HELP'
 Использование: ./configure_3xui.sh [ОПЦИИ]
 
-Скрипт автоматического конфигурирования базы данных 3X-UI (инбаунды, пути и подписки).
+Скрипт автоматического конфигурирования и самовосстановления базы 3X-UI (инбаунды, пути, подписки).
+Безопасен для повторного запуска: сохраняет существующих клиентов, ключи и кастомные подписки.
 
 Опции:
   -c, --config <FILE>     Путь к файлу параметров (.env) (по умолчанию: ./setup_mask.env)
   --db <PATH>             Путь к файлу базы данных SQLite 3X-UI (по умолчанию: /etc/x-ui/x-ui.db)
+  --dry-run               Только аудит и проверка (без внесения изменений)
+  --force-sub             Принудительно перезаписать кастомные параметры подписки из .env
   -y, --yes               Неинтерактивное выполнение (без подтверждений)
   -h, --help              Показать эту справку и выйти
 
-Пример использования:
+Примеры использования:
+  # 1. Обычная настройка / обновление:
   ./configure_3xui.sh --config ./setup_mask.env -y
+
+  # 2. Безопасный аудит (посмотреть, что изменится, без записи):
+  ./configure_3xui.sh --dry-run
 EOF_HELP
 }
 
 CONFIG_FILE=""
 DB_PATH="/etc/x-ui/x-ui.db"
+DRY_RUN=0
+FORCE_SUB=0
 NON_INTERACTIVE=0
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +67,14 @@ while [[ $# -gt 0 ]]; do
             [[ -n "${2:-}" ]] || die "Параметр $1 требует аргумент: путь к базе данных x-ui.db."
             DB_PATH="$2"
             shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
+            ;;
+        --force-sub)
+            FORCE_SUB=1
+            shift
             ;;
         -y|--yes|--non-interactive)
             NON_INTERACTIVE=1
@@ -73,14 +91,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Проверка прав суперпользователя
-if [ "${EUID:-$(id -u)}" -ne 0 ] && [ ! -f "$DB_PATH" ]; then
-    warn "Для записи в базу данных /etc/x-ui/x-ui.db требуются права суперпользователя (sudo)."
+# Проверка root
+if [ "${EUID:-$(id -u)}" -ne 0 ] && [ "$DRY_RUN" -eq 0 ]; then
+    warn "Для записи в базу данных /etc/x-ui/x-ui.db могут потребоваться права суперпользователя (sudo)."
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo -e "${YELLOW}>>> РЕЖИМ ПРЕДВАРИТЕЛЬНОГО АУДИТА (--dry-run). ИЗМЕНЕНИЯ НЕ ЗАПИСЫВАЮТСЯ <<<${NC}\n"
 fi
 
 # Автопоиск конфигурационного файла, если не передан
 if [ -z "$CONFIG_FILE" ]; then
-    if [ -f "./setup_mask.env" ]; then
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -f "$script_dir/setup_mask.env" ]; then
+        CONFIG_FILE="$script_dir/setup_mask.env"
+    elif [ -f "./setup_mask.env" ]; then
         CONFIG_FILE="./setup_mask.env"
     elif [ -f "/root/setup_mask.env" ]; then
         CONFIG_FILE="/root/setup_mask.env"
@@ -104,9 +129,11 @@ if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
             declare -g "$key=$val"
         fi
     done < "$CONFIG_FILE"
+else
+    warn "Конфигурационный файл .env не найден. Параметры будут считаны из базы данных 3X-UI."
 fi
 
-# Дефолтные значения переменных, если не определены
+# Дефолтные значения переменных, если не определены в .env
 PRIMARY_DOMAIN="${PRIMARY_DOMAIN:-yourdomain.online}"
 PANEL_PORT="${PANEL_PORT:-10443}"
 PANEL_PATH="${PANEL_PATH:-my-3x-panel}"
@@ -141,21 +168,27 @@ else
     SSL_KEY_PATH="/etc/ssl/acme/$PRIMARY_DOMAIN/privkey.pem"
 fi
 
-# Определение команды python (в Ubuntu/Debian это python3, кроссплатформенный fallback)
+# Определение работоспособной команды Python
 PYTHON_CMD=""
-if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
-    PYTHON_CMD="python3"
-elif command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
-    PYTHON_CMD="python"
-else
-    log "Установка python3..."
-    apt-get update -q && apt-get install -y python3 -q || die "Не удалось установить python3."
-    PYTHON_CMD="python3"
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys" >/dev/null 2>&1; then
+        PYTHON_CMD="$candidate"
+        break
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    if [ "$DRY_RUN" -eq 0 ]; then
+        log "Установка python3..."
+        apt-get update -q && apt-get install -y python3 -q || die "Не удалось установить python3."
+        PYTHON_CMD="python3"
+    else
+        die "Работоспособный Python 3 не найден в системе. Необходим для анализа базы SQLite."
+    fi
 fi
 
 # Проверка наличия базы данных 3X-UI
 if [ ! -f "$DB_PATH" ]; then
-    # Проверка альтернативных путей
     alt_paths=("/usr/local/x-ui/bin/x-ui.db" "/etc/x-ui/db/x-ui.db")
     found=0
     for p in "${alt_paths[@]}"; do
@@ -173,34 +206,120 @@ fi
 log "Используется база данных 3X-UI: $DB_PATH"
 
 # Резервное копирование базы данных перед внесением изменений
-BACKUP_DB="${DB_PATH}.bak.$(date +%Y%m%d_%H%M%S)"
-cp -a "$DB_PATH" "$BACKUP_DB"
-chmod 600 "$BACKUP_DB" 2>/dev/null || true
-ok "Создана резервная копия базы данных: $BACKUP_DB"
+if [ "$DRY_RUN" -eq 0 ]; then
+    BACKUP_TS="$(date +%Y%m%d_%H%M%S)"
+    BACKUP_DB="${DB_PATH}.bak.${BACKUP_TS}"
+    cp -a "$DB_PATH" "$BACKUP_DB"
+    chmod 600 "$BACKUP_DB" 2>/dev/null || true
+    ok "Создана резервная копия базы данных: $BACKUP_DB"
+fi
 
-# Генерация криптографических параметров через Xray / OpenSSL / Python
-log "Генерация криптографических ключей..."
+# Экспорт переменных окружения для Python
+export DB_PATH
+export DRY_RUN
+export FORCE_SUB
+export PRIMARY_DOMAIN
+export PANEL_PORT
+export PANEL_PATH
+export SUB_PORT
+export SUB_PATH
+export XHTTP_STREAM_PORT
+export XHTTP_STREAM_PATH
+export ENABLE_STEAL
+export STEAL_PORT
+export STEAL_DOMAINS
+export ENABLE_CLASSIC
+export CLASSIC_PORT
+export CLASSIC_SNI
+export ENABLE_HY2
+export HY2_PORT
+export ENABLE_AWG_V3
+export AWG_V3_PORT
+export ENABLE_AWG_V2
+export AWG_V2_PORT
+export SSL_CERT_PATH
+export SSL_KEY_PATH
 
-# 1. UUID клиента
-CLIENT_UUID=$("$PYTHON_CMD" -c "import uuid; print(uuid.uuid4())")
-
-# 2. Reality Keypair (x25519)
-REALITY_PRIV=""
-REALITY_PUB=""
-XRAY_BIN=$(command -v xray || ls /usr/local/x-ui/bin/xray-linux-* /usr/local/x-ui/bin/xray* 2>/dev/null | head -n 1 || true)
-if [ -n "$XRAY_BIN" ] && [ -x "$XRAY_BIN" ]; then
-    xray_out=$("$XRAY_BIN" x25519 2>/dev/null || true)
-    if [ -n "$xray_out" ]; then
-        REALITY_PRIV=$(echo "$xray_out" | awk -F': ' '/Private/ {print $2}' | tr -d ' \r\n')
-        REALITY_PUB=$(echo "$xray_out" | awk -F': ' '/Public|Password/ {print $2}' | tr -d ' \r\n')
+# Приостановка службы x-ui на время реальной транзакции во избежание блокировок SQLite
+WAS_ACTIVE=0
+if [ "$DRY_RUN" -eq 0 ]; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet x-ui 2>/dev/null; then
+        log "Приостановка службы 3X-UI на время обновления конфигурации базы..."
+        systemctl stop x-ui
+        WAS_ACTIVE=1
     fi
 fi
 
-# Fallback для Reality ключей через чистый Python (стандарт RFC 7748 Curve25519)
-if [ -z "$REALITY_PRIV" ] || [ -z "$REALITY_PUB" ]; then
-    keys=$("$PYTHON_CMD" - << 'EOF_KEYGEN'
-import os, base64
+log "Конфигурирование таблиц settings и inbounds (Smart Reconcile Engine)..."
 
+"$PYTHON_CMD" - << 'EOF_PYTHON_CONFIG'
+import os
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+import sqlite3
+import json
+import uuid
+import secrets
+import base64
+
+db_path = os.environ["DB_PATH"]
+dry_run = os.environ.get("DRY_RUN", "0") == "1"
+force_sub = os.environ.get("FORCE_SUB", "0") == "1"
+
+conn = sqlite3.connect(db_path, timeout=30.0)
+cur = conn.cursor()
+
+# Извлечение существующих параметров из таблицы settings
+existing_settings = {}
+try:
+    cur.execute("SELECT key, value FROM settings")
+    for k, v in cur.fetchall():
+        existing_settings[k] = v
+except Exception as e:
+    print(f"[!] Предупреждение: ошибка чтения таблицы settings: {e}")
+
+domain = os.environ.get("PRIMARY_DOMAIN") or existing_settings.get("subDomain") or "localhost"
+panel_port = os.environ.get("PANEL_PORT") or existing_settings.get("webPort") or "10443"
+panel_path = (os.environ.get("PANEL_PATH") or existing_settings.get("webBasePath") or "my-3x-panel").strip("/")
+
+sub_port = os.environ.get("SUB_PORT") or existing_settings.get("subPort") or "55443"
+sub_path = (os.environ.get("SUB_PATH") or existing_settings.get("subPath") or "my-post-key").strip("/")
+
+xhttp_port = int(os.environ.get("XHTTP_STREAM_PORT") or "50443")
+xhttp_raw_path = os.environ.get("XHTTP_STREAM_PATH") or "Stream-One-Path"
+xhttp_path = "/" + xhttp_raw_path.strip("/") + "/"
+
+enable_steal = os.environ.get("ENABLE_STEAL", "y").lower() in ("1", "y", "true")
+steal_port = int(os.environ.get("STEAL_PORT") or "45443")
+steal_dom = os.environ.get("STEAL_DOMAINS") or f"cdn.{domain}"
+steal_dom = steal_dom.split()[0] if steal_dom.strip() else f"cdn.{domain}"
+
+enable_classic = os.environ.get("ENABLE_CLASSIC", "y").lower() in ("1", "y", "true")
+classic_port = int(os.environ.get("CLASSIC_PORT") or "46443")
+classic_sni = os.environ.get("CLASSIC_SNI") or "gateway.icloud.com"
+classic_sni = classic_sni.split()[0] if classic_sni.strip() else "gateway.icloud.com"
+
+enable_hy2 = os.environ.get("ENABLE_HY2", "y").lower() in ("1", "y", "true")
+hy2_port = int(os.environ.get("HY2_PORT") or "443")
+
+enable_awg_v3 = os.environ.get("ENABLE_AWG_V3", "y").lower() in ("1", "y", "true")
+awg_v3_port = int(os.environ.get("AWG_V3_PORT") or "8443")
+
+enable_awg_v2 = os.environ.get("ENABLE_AWG_V2", "y").lower() in ("1", "y", "true")
+awg_v2_port = int(os.environ.get("AWG_V2_PORT") or "8444")
+
+ssl_cert = os.environ.get("SSL_CERT_PATH", "")
+ssl_key = os.environ.get("SSL_KEY_PATH", "")
+
+# Определение ID администратора
+cur.execute("SELECT id FROM users LIMIT 1")
+user_row = cur.fetchone()
+admin_id = user_row[0] if user_row else 1
+
+# Curve25519 helper (RFC 7748) для генерации, валидации и починки ключей
 P = 2**255 - 19
 A24 = 121665
 
@@ -238,432 +357,419 @@ def x25519(k, u=9):
             z2, z3 = z3, z2
     return (x2 * pow(z2, P - 2, P)) % P
 
-priv_raw = os.urandom(32)
-k = clamp(priv_raw)
-pub_raw = x25519(k, 9).to_bytes(32, "little")
+def curve25519_pubkey(priv_b64):
+    try:
+        raw_priv = base64.b64decode(priv_b64)
+        k = clamp(raw_priv)
+        pub_raw = x25519(k, 9).to_bytes(32, "little")
+        return base64.b64encode(pub_raw).decode()
+    except Exception:
+        return None
 
-priv_b64 = base64.urlsafe_b64encode(priv_raw).decode().rstrip("=")
-pub_b64 = base64.urlsafe_b64encode(pub_raw).decode().rstrip("=")
-print(f"{priv_b64} {pub_b64}")
-EOF_KEYGEN
-)
-    REALITY_PRIV=$(echo "$keys" | awk '{print $1}')
-    REALITY_PUB=$(echo "$keys" | awk '{print $2}')
-fi
+def curve25519_reality_pubkey(priv_b64url):
+    try:
+        padding = "=" * ((4 - len(priv_b64url) % 4) % 4)
+        raw_priv = base64.urlsafe_b64decode(priv_b64url + padding)
+        k = clamp(raw_priv)
+        pub_raw = x25519(k, 9).to_bytes(32, "little")
+        return base64.urlsafe_b64encode(pub_raw).decode().rstrip("=")
+    except Exception:
+        return None
 
-[ -n "$REALITY_PRIV" ] && [ -n "$REALITY_PUB" ] || die "Критическая ошибка: не удалось сгенерировать пару ключей Reality x25519."
+def generate_reality_keypair():
+    priv_raw = os.urandom(32)
+    k = clamp(priv_raw)
+    pub_raw = x25519(k, 9).to_bytes(32, "little")
+    priv_b64 = base64.urlsafe_b64encode(priv_raw).decode().rstrip("=")
+    pub_b64 = base64.urlsafe_b64encode(pub_raw).decode().rstrip("=")
+    return priv_b64, pub_b64
 
-# 3. ShortId для Reality
-REALITY_SHORT_ID=$(openssl rand -hex 8 2>/dev/null || "$PYTHON_CMD" -c "import secrets; print(secrets.token_hex(8))")
+def generate_wg_keypair():
+    priv_raw = os.urandom(32)
+    k = clamp(priv_raw)
+    pub_raw = x25519(k, 9).to_bytes(32, "little")
+    priv_b64 = base64.b64encode(priv_raw).decode()
+    pub_b64 = base64.b64encode(pub_raw).decode()
+    return priv_b64, pub_b64
 
-# 4. vlessenc Decryption Key (ML-KEM-768 / postquantum)
-VLESSENC_KEY=$(openssl rand -base64 32 2>/dev/null | tr -d '\r\n' || "$PYTHON_CMD" -c "import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())")
+# ----------------- 1. Настройки панели и подписок (settings) -----------------
+print("\n[+] Синхронизация системных настроек панели и подписок...")
 
-# 5. Hysteria 2 Password
-HY2_PASS=$(openssl rand -hex 12 2>/dev/null || "$PYTHON_CMD" -c "import secrets; print(secrets.token_hex(12))")
+old_sub_domain = existing_settings.get("subDomain", "").strip()
+old_sub_uri = existing_settings.get("subURI", "").strip()
+old_sub_path = existing_settings.get("subPath", "").strip()
 
-# 6. WireGuard Server & Client Keypairs
-if ! command -v wg >/dev/null 2>&1; then
-    log "Установка wireguard-tools для генерации ключей WireGuard/AmneziaWG..."
-    apt-get update -q && apt-get install -y wireguard-tools -q || true
-fi
+# Проверка: настроена ли кастомная подписка
+is_custom_sub = bool(old_sub_uri and (old_sub_domain != domain or old_sub_path.strip("/") != sub_path))
 
-if command -v wg >/dev/null 2>&1; then
-    WG_SERVER_PRIV=$(wg genkey)
-    WG_SERVER_PUB=$(echo "$WG_SERVER_PRIV" | wg pubkey)
-    WG_CLIENT_PRIV=$(wg genkey)
-    WG_CLIENT_PUB=$(echo "$WG_CLIENT_PRIV" | wg pubkey)
-else
-    WG_SERVER_PRIV=$(openssl rand -base64 32 | tr -d '\r\n')
-    WG_CLIENT_PRIV=$(openssl rand -base64 32 | tr -d '\r\n')
-    WG_SERVER_PUB=$("$PYTHON_CMD" -c "
-import base64
-from cryptography.hazmat.primitives.asymmetric import x25519
-from cryptography.hazmat.primitives import serialization
-priv = x25519.X25519PrivateKey.from_private_bytes(base64.b64decode('$WG_SERVER_PRIV'))
-pub = priv.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-print(base64.b64encode(pub).decode())
-")
-    WG_CLIENT_PUB=$("$PYTHON_CMD" -c "
-import base64
-from cryptography.hazmat.primitives.asymmetric import x25519
-from cryptography.hazmat.primitives import serialization
-priv = x25519.X25519PrivateKey.from_private_bytes(base64.b64decode('$WG_CLIENT_PRIV'))
-pub = priv.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-print(base64.b64encode(pub).decode())
-")
-fi
+if is_custom_sub and not force_sub:
+    print(f"  [СОХРАНЕНО] Кастомная подписка сохранена: {old_sub_uri}")
+    target_sub_uri = old_sub_uri
+    target_sub_domain = old_sub_domain
+    target_sub_path = old_sub_path
+else:
+    target_sub_uri = f"https://{domain}/{sub_path}/"
+    target_sub_domain = domain
+    target_sub_path = f"/{sub_path}/"
 
-# Экспорт переменных для Python скрипта настройки БД
-export DB_PATH
-export PRIMARY_DOMAIN
-export PANEL_PORT
-export PANEL_PATH
-export SUB_PORT
-export SUB_PATH
-export XHTTP_STREAM_PORT
-export XHTTP_STREAM_PATH
-export ENABLE_STEAL
-export STEAL_PORT
-export STEAL_DOMAINS
-export ENABLE_CLASSIC
-export CLASSIC_PORT
-export CLASSIC_SNI
-export ENABLE_HY2
-export HY2_PORT
-export ENABLE_AWG_V3
-export AWG_V3_PORT
-export ENABLE_AWG_V2
-export AWG_V2_PORT
-export SSL_CERT_PATH
-export SSL_KEY_PATH
-export CLIENT_UUID
-export REALITY_PRIV
-export REALITY_PUB
-export REALITY_SHORT_ID
-export VLESSENC_KEY
-export HY2_PASS
-export WG_SERVER_PRIV
-export WG_SERVER_PUB
-export WG_CLIENT_PRIV
-export WG_CLIENT_PUB
+settings_updates = {
+    "webPort": panel_port,
+    "webBasePath": f"/{panel_path}/",
+    "subPort": sub_port,
+    "subPath": target_sub_path,
+    "subURI": target_sub_uri,
+    "subDomain": target_sub_domain,
+    "subCertFile": "",
+    "subKeyFile": ""
+}
 
-# Приостановка службы x-ui на время транзакции во избежание блокировок SQLite
-WAS_ACTIVE=0
-if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet x-ui 2>/dev/null; then
-    log "Приостановка службы 3X-UI на время обновления конфигурации базы..."
-    systemctl stop x-ui
-    WAS_ACTIVE=1
-fi
-
-log "Конфигурирование таблиц settings и inbounds в базе данных SQLite..."
-
-"$PYTHON_CMD" - << 'EOF_PYTHON_CONFIG'
-import os
-import sys
-import sqlite3
-import json
-import time
-
-db_path = os.environ["DB_PATH"]
-domain = os.environ["PRIMARY_DOMAIN"]
-panel_port = os.environ["PANEL_PORT"]
-panel_path = os.environ["PANEL_PATH"].strip("/")
-sub_port = os.environ["SUB_PORT"]
-sub_path = os.environ["SUB_PATH"].strip("/")
-xhttp_port = int(os.environ["XHTTP_STREAM_PORT"])
-xhttp_path = "/" + os.environ["XHTTP_STREAM_PATH"].strip("/") + "/"
-
-enable_steal = os.environ["ENABLE_STEAL"].lower() in ("1", "y", "true")
-steal_port = int(os.environ["STEAL_PORT"])
-steal_dom = os.environ["STEAL_DOMAINS"].split()[0] if os.environ["STEAL_DOMAINS"].strip() else f"cdn.{domain}"
-
-enable_classic = os.environ["ENABLE_CLASSIC"].lower() in ("1", "y", "true")
-classic_port = int(os.environ["CLASSIC_PORT"])
-classic_sni = os.environ["CLASSIC_SNI"].split()[0] if os.environ["CLASSIC_SNI"].strip() else "gateway.icloud.com"
-
-enable_hy2 = os.environ["ENABLE_HY2"].lower() in ("1", "y", "true")
-hy2_port = int(os.environ["HY2_PORT"])
-
-enable_awg_v3 = os.environ["ENABLE_AWG_V3"].lower() in ("1", "y", "true")
-awg_v3_port = int(os.environ["AWG_V3_PORT"])
-
-enable_awg_v2 = os.environ["ENABLE_AWG_V2"].lower() in ("1", "y", "true")
-awg_v2_port = int(os.environ["AWG_V2_PORT"])
-
-ssl_cert = os.environ["SSL_CERT_PATH"]
-ssl_key = os.environ["SSL_KEY_PATH"]
-
-client_uuid = os.environ["CLIENT_UUID"]
-reality_priv = os.environ["REALITY_PRIV"]
-reality_pub = os.environ["REALITY_PUB"]
-reality_short_id = os.environ["REALITY_SHORT_ID"]
-vlessenc_key = os.environ["VLESSENC_KEY"]
-hy2_pass = os.environ["HY2_PASS"]
-wg_server_priv = os.environ["WG_SERVER_PRIV"]
-wg_server_pub = os.environ["WG_SERVER_PUB"]
-wg_client_priv = os.environ["WG_CLIENT_PRIV"]
-wg_client_pub = os.environ["WG_CLIENT_PUB"]
-
-conn = sqlite3.connect(db_path, timeout=30.0)
-cur = conn.cursor()
-
-# Динамическое определение ID администратора
-cur.execute("SELECT id FROM users LIMIT 1")
-user_row = cur.fetchone()
-admin_id = user_row[0] if user_row else 1
-
-# ----------------- 1. Настройки панели (settings) -----------------
-def upsert_setting(k, v):
-    cur.execute("SELECT id FROM settings WHERE key = ?", (k,))
-    row = cur.fetchone()
-    if row:
-        cur.execute("UPDATE settings SET value = ? WHERE key = ?", (str(v), k))
+for k, v in settings_updates.items():
+    current_val = existing_settings.get(k)
+    if current_val != v:
+        if not dry_run:
+            cur.execute("SELECT id FROM settings WHERE key = ?", (k,))
+            if cur.fetchone():
+                cur.execute("UPDATE settings SET value = ? WHERE key = ?", (str(v), k))
+            else:
+                cur.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
+        print(f"  [ИСПРАВЛЕНО] Настройка {k}: '{current_val}' -> '{v}'")
     else:
-        cur.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
+        print(f"  [В ПОРЯДКЕ] Настройка {k}: '{v}'")
 
-upsert_setting("webPort", panel_port)
-upsert_setting("webBasePath", f"/{panel_path}/")
-upsert_setting("subPort", sub_port)
-upsert_setting("subPath", f"/{sub_path}/")
-upsert_setting("subURI", f"https://{domain}/{sub_path}/")
-upsert_setting("subDomain", domain)
-upsert_setting("subCertFile", "")
-upsert_setting("subKeyFile", "")
+# ----------------- 2. Интеллектуальное согласование инбаундов (Smart Reconcile) -----------------
+print("\n[+] Аудит и согласование инбаундов (Smart Reconcile Engine)...")
 
-# ----------------- 2. Инбаунды (inbounds) -----------------
-now_ms = int(time.time() * 1000)
+def smart_reconcile_inbound(port, protocol, tag, remark, default_settings, default_stream, listen="127.0.0.1"):
+    cur.execute("SELECT id, settings, stream_settings, protocol, tag, remark, listen FROM inbounds WHERE port = ? OR tag = ?", (port, tag))
+    row = cur.fetchone()
+    
+    if not row:
+        # Инбаунд отсутствует -> создаем под ключ
+        settings_json = json.dumps(default_settings, ensure_ascii=False)
+        stream_json = json.dumps(default_stream, ensure_ascii=False)
+        sniffing_json = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"]})
+        if not dry_run:
+            cur.execute("""
+                INSERT INTO inbounds (
+                    user_id, up, down, total, remark, enable, expiry_time,
+                    listen, port, protocol, settings, stream_settings, tag, sniffing
+                ) VALUES (?, 0, 0, 0, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)
+            """, (admin_id, remark, listen, port, protocol, settings_json, stream_json, tag, sniffing_json))
+        print(f"  [СОЗДАНО] Отсутствующий инбаунд: {remark} ({protocol.upper()} на порту {port}) добавлен.")
+        return
 
-def upsert_inbound(port, protocol, tag, remark, settings_dict, stream_dict, listen="127.0.0.1"):
-    settings_json = json.dumps(settings_dict, ensure_ascii=False)
-    stream_json = json.dumps(stream_dict, ensure_ascii=False)
+    inbound_id, raw_s, raw_st, proto, cur_tag, cur_remark, cur_listen = row
+    try:
+        cur_settings = json.loads(raw_s) if raw_s else {}
+    except Exception:
+        cur_settings = {}
+    try:
+        cur_stream = json.loads(raw_st) if raw_st else {}
+    except Exception:
+        cur_stream = {}
+
+    target_settings = json.loads(json.dumps(default_settings))
+    target_stream = json.loads(json.dumps(default_stream))
+    repairs = []
+    preserved = []
+
+    # А. Сохранение пользователей (UUID, пароли, лимиты)
+    existing_clients = cur_settings.get("clients", [])
+    if existing_clients and len(existing_clients) > 0:
+        target_settings["clients"] = existing_clients
+        preserved.append(f"клиенты ({len(existing_clients)} польз.)")
+    else:
+        repairs.append("добавлен клиент по умолчанию")
+
+    # Б. Проверка и ремонт VLESS REALITY
+    if protocol == "vless" and "realitySettings" in target_stream:
+        cur_reality = cur_stream.get("realitySettings", {})
+        
+        # Сохранение privateKey
+        priv = cur_reality.get("privateKey")
+        if priv:
+            target_stream["realitySettings"]["privateKey"] = priv
+            preserved.append("privateKey Reality")
+        
+        # Сохранение shortIds
+        sids = cur_reality.get("shortIds")
+        if sids:
+            target_stream["realitySettings"]["shortIds"] = sids
+            preserved.append("shortIds")
+
+        # Ремонт / сохранение settings.publicKey
+        pub = cur_reality.get("settings", {}).get("publicKey") or cur_reality.get("publicKey")
+        if pub:
+            target_stream["realitySettings"]["settings"]["publicKey"] = pub
+            if not cur_reality.get("settings", {}).get("publicKey"):
+                repairs.append("исправлен отсутствующий settings.publicKey (устранена ошибка empty password)")
+            else:
+                preserved.append("publicKey")
+        else:
+            derived_pub = curve25519_reality_pubkey(target_stream["realitySettings"]["privateKey"])
+            if derived_pub:
+                target_stream["realitySettings"]["settings"]["publicKey"] = derived_pub
+                repairs.append("восстановлен settings.publicKey по x25519")
+
+        # Ремонт мертвого swdist.microsoft.com SNI
+        old_snis = cur_reality.get("serverNames", [])
+        old_dest = cur_reality.get("dest", "")
+        if any("swdist.microsoft.com" in s for s in old_snis) or "swdist.microsoft.com" in old_dest:
+            repairs.append(f"заменен мертвый SNI swdist.microsoft.com -> {classic_sni}")
+            target_stream["realitySettings"]["serverNames"] = [classic_sni]
+            target_stream["realitySettings"]["dest"] = f"{classic_sni}:443"
+        elif old_snis:
+            target_stream["realitySettings"]["serverNames"] = old_snis
+            target_stream["realitySettings"]["dest"] = old_dest or target_stream["realitySettings"]["dest"]
+            preserved.append(f"SNI ({','.join(old_snis)})")
+
+        # Проверка Anti-Loop для Steal-Oneself
+        if tag == "in-steal-reality":
+            if cur_reality.get("dest") != "127.0.0.1:9443":
+                repairs.append("установлен dest: 127.0.0.1:9443 (защита от петли Steal-Oneself)")
+                target_stream["realitySettings"]["dest"] = "127.0.0.1:9443"
+            else:
+                preserved.append("anti-loop dest 9443")
+
+    # В. Проверка и ремонт xHTTP
+    if protocol == "vless" and "xhttpSettings" in target_stream:
+        cur_xh = cur_stream.get("xhttpSettings", {})
+        if cur_xh.get("path"):
+            target_stream["xhttpSettings"]["path"] = cur_xh["path"]
+            preserved.append(f"path ({cur_xh['path']})")
+        target_stream["xhttpSettings"]["mode"] = "stream-one"
+
+    # Г. Проверка и ремонт Hysteria 2
+    if protocol == "hysteria":
+        if cur_settings.get("clients"):
+            target_settings["clients"] = cur_settings["clients"]
+            preserved.append("пароль Hysteria 2")
+        
+        cur_certs = cur_stream.get("tlsSettings", {}).get("certificates", [])
+        if cur_certs and cur_certs[0].get("certificateFile") and os.path.exists(cur_certs[0]["certificateFile"]):
+            target_stream["tlsSettings"]["certificates"] = cur_certs
+            preserved.append("действующие SSL-сертификаты Hy2")
+
+    # Д. Проверка и ремонт AmneziaWG
+    if protocol == "amneziawg":
+        cur_srv = cur_settings.get("server", {})
+        if cur_srv.get("privateKey"):
+            target_settings["server"]["privateKey"] = cur_srv["privateKey"]
+            preserved.append("серверный privateKey AWG")
+            
+            # Валидация Curve25519
+            expected_pub = curve25519_pubkey(cur_srv["privateKey"])
+            actual_pub = cur_srv.get("publicKey")
+            if actual_pub and expected_pub and actual_pub == expected_pub:
+                target_settings["server"]["publicKey"] = actual_pub
+                preserved.append("валидный publicKey AWG (Handshake OK)")
+            elif expected_pub:
+                target_settings["server"]["publicKey"] = expected_pub
+                repairs.append("исправлен поврежденный publicKey сервера Curve25519")
+        
+        # Сохранение параметров обфускации
+        for param in ["jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "mtu", "subnetIp", "subnetCidr"]:
+            if param in cur_srv:
+                target_settings["server"][param] = cur_srv[param]
+
+    # Е. Проверка и сохранение externalProxy (:443 и кастомных хостов узлов)
+    cur_ext = cur_stream.get("externalProxy", [])
+    expected_ext_port = 443 if protocol in ("vless", "hysteria") and port != hy2_port else (hy2_port if protocol == "hysteria" else port)
+
+    # Сохраняем кастомный хост узла (dest), если он был настроен и не равен localhost
+    target_dest = domain
+    if cur_ext and len(cur_ext) > 0 and cur_ext[0].get("dest"):
+        ext_dest = str(cur_ext[0]["dest"]).strip()
+        if ext_dest and ext_dest not in ("127.0.0.1", "localhost", "0.0.0.0"):
+            target_dest = ext_dest
+            if ext_dest != domain:
+                preserved.append(f"кастомный хост узла ({ext_dest})")
+
+    if not cur_ext or cur_ext[0].get("port") != expected_ext_port or cur_ext[0].get("dest") != target_dest:
+        force_tls_val = "same" if protocol == "vless" and "realitySettings" in target_stream else "tls"
+        target_stream["externalProxy"] = [{
+            "dest": target_dest,
+            "port": expected_ext_port,
+            "forceTls": force_tls_val,
+            "remark": remark
+        }]
+        repairs.append(f"исправлен externalProxy -> {target_dest}:{expected_ext_port}")
+    else:
+        target_stream["externalProxy"] = cur_ext
+        preserved.append(f"externalProxy :{expected_ext_port}")
+
+    # Запись в SQLite
+    settings_json = json.dumps(target_settings, ensure_ascii=False)
+    stream_json = json.dumps(target_stream, ensure_ascii=False)
     sniffing_json = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"]})
 
-    cur.execute("SELECT id FROM inbounds WHERE port = ? OR tag = ?", (port, tag))
-    row = cur.fetchone()
-    if row:
-        inbound_id = row[0]
+    if not dry_run:
         cur.execute("""
             UPDATE inbounds
             SET protocol = ?, tag = ?, remark = ?, settings = ?, stream_settings = ?, listen = ?, sniffing = ?, enable = 1
             WHERE id = ?
         """, (protocol, tag, remark, settings_json, stream_json, listen, sniffing_json, inbound_id))
-        print(f"[OK] Инбаунд {remark} (порт {port}) обновлен.")
-    else:
-        cur.execute("""
-            INSERT INTO inbounds (
-                user_id, up, down, total, remark, enable, expiry_time,
-                listen, port, protocol, settings, stream_settings, tag, sniffing
-            ) VALUES (?, 0, 0, 0, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)
-        """, (admin_id, remark, listen, port, protocol, settings_json, stream_json, tag, sniffing_json))
-        print(f"[OK] Инбаунд {remark} (порт {port}) добавлен.")
 
-# A. VLESS REALITY Steal-Oneself (45443)
+    status_str = f"  [ОБНОВЛЕН] {remark} (порт {port}):"
+    if repairs:
+        status_str += f"\n    -> Исправлено: {', '.join(repairs)}"
+    if preserved:
+        status_str += f"\n    -> Сохранено: {', '.join(preserved)}"
+    print(status_str)
+
+# --- Генерация дефолтных эталонных профилей (для отсутствующих инбаундов) ---
+def_uuid = str(uuid.uuid4())
+def_reality_priv, def_reality_pub = generate_reality_keypair()
+def_reality_sid = secrets.token_hex(8)
+def_hy2_pass = secrets.token_hex(12)
+def_wg_s_priv, def_wg_s_pub = generate_wg_keypair()
+def_wg_c_priv, def_wg_c_pub = generate_wg_keypair()
+
+# 1. Steal-Oneself REALITY (45443)
 if enable_steal:
-    steal_settings = {
-        "clients": [{"id": client_uuid, "flow": "xtls-rprx-vision"}],
-        "decryption": "none"
-    }
-    steal_stream = {
+    s_set = {"clients": [{"id": def_uuid, "flow": "xtls-rprx-vision"}], "decryption": "none"}
+    s_str = {
         "network": "tcp",
         "tcpSettings": {"acceptProxyProtocol": True},
         "security": "reality",
         "realitySettings": {
-            "show": False,
-            "xver": 1,
-            "dest": "127.0.0.1:9443",
-            "serverNames": [steal_dom],
-            "privateKey": reality_priv,
-            "shortIds": [reality_short_id],
-            "settings": {
-                "publicKey": reality_pub,
-                "fingerprint": "chrome",
-                "spiderX": f"/{reality_short_id}"
-            }
+            "show": False, "xver": 1, "dest": "127.0.0.1:9443",
+            "serverNames": [steal_dom], "privateKey": def_reality_priv,
+            "shortIds": [def_reality_sid],
+            "settings": {"publicKey": def_reality_pub, "fingerprint": "chrome", "spiderX": f"/{def_reality_sid}"}
         },
-        "externalProxy": [{
-            "dest": domain,
-            "port": 443,
-            "forceTls": "same",
-            "remark": "VLESS_STEAL"
-        }]
+        "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": "VLESS_STEAL"}]
     }
-    upsert_inbound(steal_port, "vless", "in-steal-reality", "VLESS_STEAL", steal_settings, steal_stream, listen="127.0.0.1")
+    smart_reconcile_inbound(steal_port, "vless", "in-steal-reality", "VLESS_STEAL", s_set, s_str, listen="127.0.0.1")
 
-# B. VLESS REALITY Classic External (46443)
+# 2. Classic REALITY (46443)
 if enable_classic:
-    classic_settings = {
-        "clients": [{"id": client_uuid, "flow": "xtls-rprx-vision"}],
-        "decryption": "none"
-    }
-    classic_stream = {
+    c_set = {"clients": [{"id": def_uuid, "flow": "xtls-rprx-vision"}], "decryption": "none"}
+    c_str = {
         "network": "tcp",
         "tcpSettings": {"acceptProxyProtocol": True},
         "security": "reality",
         "realitySettings": {
-            "show": False,
-            "xver": 0,
-            "dest": f"{classic_sni}:443",
-            "serverNames": [classic_sni],
-            "privateKey": reality_priv,
-            "shortIds": [reality_short_id],
-            "settings": {
-                "publicKey": reality_pub,
-                "fingerprint": "chrome",
-                "spiderX": f"/{reality_short_id}"
-            }
+            "show": False, "xver": 0, "dest": f"{classic_sni}:443",
+            "serverNames": [classic_sni], "privateKey": def_reality_priv,
+            "shortIds": [def_reality_sid],
+            "settings": {"publicKey": def_reality_pub, "fingerprint": "chrome", "spiderX": f"/{def_reality_sid}"}
         },
-        "externalProxy": [{
-            "dest": domain,
-            "port": 443,
-            "forceTls": "same",
-            "remark": "VLESS_CLASSIC"
-        }]
+        "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": "VLESS_CLASSIC"}]
     }
-    upsert_inbound(classic_port, "vless", "in-classic-reality", "VLESS_CLASSIC", classic_settings, classic_stream, listen="127.0.0.1")
+    smart_reconcile_inbound(classic_port, "vless", "in-classic-reality", "VLESS_CLASSIC", c_set, c_str, listen="127.0.0.1")
 
-# C. VLESS xHTTP (50443)
-xhttp_settings = {
-    "clients": [{"id": client_uuid}],
-    "decryption": "none"
-}
-xhttp_stream = {
+# 3. VLESS xHTTP (50443)
+x_set = {"clients": [{"id": def_uuid}], "decryption": "none"}
+x_str = {
     "network": "xhttp",
     "xhttpSettings": {
-        "path": xhttp_path,
-        "host": domain,
-        "mode": "stream-one",
-        "xPaddingBytes": "100-500",
-        "xPaddingObfsMode": True,
-        "xPaddingKey": "X-Amz-Meta-Trace"
+        "path": xhttp_path, "host": domain, "mode": "stream-one",
+        "xPaddingBytes": "100-500", "xPaddingObfsMode": True, "xPaddingKey": "X-Amz-Meta-Trace"
     },
     "security": "none",
-    "externalProxy": [{
-        "dest": domain,
-        "port": 443,
-        "forceTls": "tls",
-        "sni": domain,
-        "fingerprint": "chrome",
-        "remark": "VLESS_XHTTP"
-    }]
+    "externalProxy": [{"dest": domain, "port": 443, "forceTls": "tls", "sni": domain, "fingerprint": "chrome", "remark": "VLESS_XHTTP"}]
 }
-upsert_inbound(xhttp_port, "vless", "in-xhttp-stream", "VLESS_XHTTP", xhttp_settings, xhttp_stream, listen="127.0.0.1")
+smart_reconcile_inbound(xhttp_port, "vless", "in-xhttp-stream", "VLESS_XHTTP", x_set, x_str, listen="127.0.0.1")
 
-# D. Hysteria 2 (443)
+# 4. Hysteria 2 (443)
 if enable_hy2:
-    hy2_settings = {
-        "clients": [{"id": hy2_pass}],
-        "version": 2
-    }
-    hy2_stream = {
+    h_set = {"clients": [{"id": def_hy2_pass}], "version": 2}
+    h_str = {
         "network": "hysteria",
-        "hysteriaSettings": {
-            "version": 2,
-            "udpIdleTimeout": 60,
-            "masquerade": {"type": "proxy", "url": "http://127.0.0.1:80"}
-        },
+        "hysteriaSettings": {"version": 2, "udpIdleTimeout": 60, "masquerade": {"type": "proxy", "url": "http://127.0.0.1:80"}},
         "security": "tls",
         "tlsSettings": {
-            "serverName": domain,
-            "minVersion": "1.3",
-            "maxVersion": "1.3",
-            "certificates": [{
-                "certificateFile": ssl_cert,
-                "keyFile": ssl_key
-            }],
-            "alpn": ["h3"]
+            "serverName": domain, "minVersion": "1.3", "maxVersion": "1.3",
+            "certificates": [{"certificateFile": ssl_cert, "keyFile": ssl_key}], "alpn": ["h3"]
         },
-        "externalProxy": [{
-            "dest": domain,
-            "port": hy2_port,
-            "forceTls": "tls",
-            "remark": "Hysteria 2"
-        }]
+        "externalProxy": [{"dest": domain, "port": hy2_port, "forceTls": "tls", "remark": "Hysteria 2"}]
     }
-    upsert_inbound(hy2_port, "hysteria", "in-hysteria2", "Hysteria 2", hy2_settings, hy2_stream, listen="0.0.0.0")
+    smart_reconcile_inbound(hy2_port, "hysteria", "in-hysteria2", "Hysteria 2", h_set, h_str, listen="0.0.0.0")
 
-# E. AmneziaWG v3.1 (8443)
+# 5. AmneziaWG v3.1 (8443)
 if enable_awg_v3:
-    awg3_settings = {
+    a3_set = {
         "clients": [{
-            "privateKey": wg_client_priv,
-            "publicKey": wg_client_pub,
-            "allowedIPs": ["10.8.1.2/32"],
-            "email": "Client-1",
-            "enable": True
+            "privateKey": def_wg_c_priv, "publicKey": def_wg_c_pub,
+            "allowedIPs": ["10.8.1.2/32"], "email": "Client-1", "enable": True
         }],
         "server": {
-            "contentPaddingAddition": "3-16",
-            "disableCookies": True,
-            "h1": "", "h2": "", "h3": "", "h4": "",
-            "jc": 4, "jmax": 160, "jmin": 50,
-            "keepaliveTimeout": "8-10",
-            "maxHandshakeAttempts": "21-26",
-            "mtu": 1360,
-            "primaryDns": "8.8.8.8",
-            "secondaryDns": "8.8.4.4",
-            "privateKey": wg_server_priv,
-            "publicKey": wg_server_pub,
-            "randomTrailers": False,
-            "rejectAfterTime": "178-211",
-            "rekeyAfterTime": "107-135",
-            "rekeyTimeout": "3-4",
-            "s1": 45, "s2": 60, "s3": 24, "s4": 16,
-            "subnetCidr": 24,
-            "subnetIp": "10.8.1.0"
+            "contentPaddingAddition": "3-16", "disableCookies": True,
+            "h1": "", "h2": "", "h3": "", "h4": "", "jc": 4, "jmax": 160, "jmin": 50,
+            "keepaliveTimeout": "8-10", "maxHandshakeAttempts": "21-26", "mtu": 1360,
+            "primaryDns": "8.8.8.8", "secondaryDns": "8.8.4.4",
+            "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
+            "randomTrailers": False, "rejectAfterTime": "178-211", "rekeyAfterTime": "107-135",
+            "rekeyTimeout": "3-4", "s1": 45, "s2": 60, "s3": 24, "s4": 16,
+            "subnetCidr": 24, "subnetIp": "10.8.1.0"
         }
     }
-    awg3_stream = {
-        "externalProxy": [{
-            "dest": domain,
-            "port": awg_v3_port,
-            "remark": "AmneziaWG v3.1"
-        }]
-    }
-    upsert_inbound(awg_v3_port, "amneziawg", "in-8443-udp", "AmneziaWG v3.1", awg3_settings, awg3_stream, listen="0.0.0.0")
+    a3_str = {"externalProxy": [{"dest": domain, "port": awg_v3_port, "remark": "AmneziaWG v3.1"}]}
+    smart_reconcile_inbound(awg_v3_port, "amneziawg", "in-8443-udp", "AmneziaWG v3.1", a3_set, a3_str, listen="0.0.0.0")
 
-# F. AmneziaWG v2.0 Legacy (8444)
+# 6. AmneziaWG v2.0 Legacy (8444)
 if enable_awg_v2:
-    awg2_settings = {
+    a2_set = {
         "clients": [{
-            "privateKey": wg_client_priv,
-            "publicKey": wg_client_pub,
-            "allowedIPs": ["10.8.2.2/32"],
-            "email": "Legacy-Router",
-            "enable": True
+            "privateKey": def_wg_c_priv, "publicKey": def_wg_c_pub,
+            "allowedIPs": ["10.8.2.2/32"], "email": "Legacy-Router", "enable": True
         }],
         "server": {
             "h1": "149419586", "h2": "878791997", "h3": "1251051976", "h4": "1657628296",
-            "jc": 4, "jmax": 160, "jmin": 50,
-            "mtu": 1360,
-            "primaryDns": "8.8.8.8",
-            "privateKey": wg_server_priv,
-            "publicKey": wg_server_pub,
-            "s1": 45, "s2": 60, "s3": 24, "s4": 16,
-            "subnetCidr": 24,
-            "subnetIp": "10.8.2.0"
+            "jc": 4, "jmax": 160, "jmin": 50, "mtu": 1360, "primaryDns": "8.8.8.8",
+            "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
+            "s1": 45, "s2": 60, "s3": 24, "s4": 16, "subnetCidr": 24, "subnetIp": "10.8.2.0"
         }
     }
-    awg2_stream = {
-        "externalProxy": [{
-            "dest": domain,
-            "port": awg_v2_port,
-            "remark": "AmneziaWG v2.0"
-        }]
-    }
-    upsert_inbound(awg_v2_port, "amneziawg", "in-awg-v2-legacy", "AmneziaWG v2.0", awg2_settings, awg2_stream, listen="0.0.0.0")
+    a2_str = {"externalProxy": [{"dest": domain, "port": awg_v2_port, "remark": "AmneziaWG v2.0"}]}
+    smart_reconcile_inbound(awg_v2_port, "amneziawg", "in-awg-v2-legacy", "AmneziaWG v2.0", a2_set, a2_str, listen="0.0.0.0")
 
-try:
-    cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-except Exception:
-    pass
+if not dry_run:
+    try:
+        cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:
+        pass
+    conn.commit()
 
-conn.commit()
 conn.close()
 EOF_PYTHON_CONFIG
 
-# Нормализация прав доступа к базе данных
-chmod 644 "$DB_PATH" 2>/dev/null || true
+# Нормализация прав доступа и перезапуск служб
+if [ "$DRY_RUN" -eq 0 ]; then
+    chmod 644 "$DB_PATH" 2>/dev/null || true
 
-# Возобновление/перезапуск службы 3X-UI
-if [ "${WAS_ACTIVE:-0}" -eq 1 ] || (command -v systemctl >/dev/null 2>&1 && systemctl is-enabled --quiet x-ui 2>/dev/null); then
-    log "Запуск службы 3X-UI..."
-    systemctl restart x-ui && ok "Служба 3X-UI успешно запущена." || warn "Не удалось перезапустить службу x-ui."
+    # Возобновление/перезапуск службы 3X-UI
+    if [ "${WAS_ACTIVE:-0}" -eq 1 ] || (command -v systemctl >/dev/null 2>&1 && systemctl is-enabled --quiet x-ui 2>/dev/null); then
+        log "Перезапуск службы 3X-UI..."
+        systemctl restart x-ui && ok "Служба 3X-UI успешно перезапущена." || warn "Не удалось перезапустить службу x-ui."
+    fi
+
+    # Проверка Nginx на наличие мертвого SNI и мягкий reload
+    if command -v nginx >/dev/null 2>&1; then
+        if [ -d /etc/nginx ] && grep -rq "swdist\.microsoft\.com" /etc/nginx/ 2>/dev/null; then
+            log "Обновление устаревшего SNI в конфигурационных файлах Nginx..."
+            find /etc/nginx/ -type f -name "*.conf" -exec sed -i 's/swdist\.microsoft\.com/gateway\.icloud\.com/g' {} + 2>/dev/null || true
+            ok "Nginx: SNI swdist.microsoft.com заменен на gateway.icloud.com."
+        fi
+
+        if nginx -t >/dev/null 2>&1; then
+            systemctl reload nginx 2>/dev/null && ok "Nginx успешно применил конфигурацию (Zero Downtime reload)." || true
+        fi
+    fi
 fi
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "${GREEN}      БАЗА ДАННЫХ 3X-UI УСПЕШНО СКОНФИГУРИРОВАНА!                    ${NC}"
-echo -e "${GREEN}=====================================================================${NC}"
-echo -e "  - ${BOLD}Панель управления:${NC} ${CYAN}https://${PRIMARY_DOMAIN}/${PANEL_PATH}/${NC}"
-echo -e "  - ${BOLD}Ссылка на подписку:${NC} ${CYAN}https://${PRIMARY_DOMAIN}/${SUB_PATH}/${NC}"
-echo -e "  - ${BOLD}Сгенерированный UUID клиента:${NC} ${GREEN}${CLIENT_UUID}${NC}"
-if [ "$ENABLE_STEAL" = "y" ] || [ "$ENABLE_CLASSIC" = "y" ]; then
-echo -e "  - ${BOLD}Reality Public Key:${NC} ${CYAN}${REALITY_PUB}${NC}"
-echo -e "  - ${BOLD}Reality Short ID:${NC} ${CYAN}${REALITY_SHORT_ID}${NC}"
-fi
-if [ "$ENABLE_HY2" = "y" ]; then
-echo -e "  - ${BOLD}Hysteria 2 Пароль:${NC} ${CYAN}${HY2_PASS}${NC}"
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo -e "${YELLOW}               АУДИТ УСПЕШНО ЗАВЕРШЕН (DRY-RUN)                      ${NC}"
+    echo -e "${CYAN}  Для применения изменений выполните:                                ${NC}"
+    echo -e "  ${BOLD}./configure_3xui.sh --config \"${CONFIG_FILE:-./setup_mask.env}\" -y${NC}"
+else
+    echo -e "${GREEN}      БАЗА ДАННЫХ 3X-UI УСПЕШНО СКОНФИГУРИРОВАНА И ИСЦЕЛЕНА!         ${NC}"
+    echo -e "  - ${BOLD}Подключения клиентов:${NC}   ${GREEN}Сохранены без разрыва и сброса ключей${NC}"
+    echo -e "  - ${BOLD}Панель управления:${NC}      ${CYAN}https://${PRIMARY_DOMAIN}/${PANEL_PATH}/${NC}"
+    echo -e "  - ${BOLD}Ссылка на подписку:${NC}     ${CYAN}https://${PRIMARY_DOMAIN}/${SUB_PATH}/${NC}"
 fi
 echo -e "${GREEN}=====================================================================${NC}"
 echo
