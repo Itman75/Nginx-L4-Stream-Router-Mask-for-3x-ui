@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v6.5.2 Universal (Public Edition)
-# Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 3 Decoys
+# Production AutoSetup: Hardened Engine v6.5.3 Universal (Public Edition)
+# Nginx L4 Stream + 3X-UI + AdGuard Home DoH + Unix Sockets + 3 Decoys
 # ==============================================================================
 # Архитектура:
 #   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org)
-#   2) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
-#      и автоматическим failover-открытием маск-сайта для всех доменов
+#   2) Steal-Oneself REALITY с защитой Anti-Loop (Fallback 9443) и сокетным L4 Failover
 #   3) Classic External REALITY (Выделение портов для внешних SNI)
 #   4) VLESS xHTTP (Stream-One/Up) + VLESSENC + XTLS-Vision + XMUX Connection Pool
 #      (СТРОГО по TCP/HTTP/2 без QUIC — полнодуплексное H2C-проксирование Nginx)
@@ -15,17 +14,20 @@
 #   6) Опциональный двухверсионный стек AmneziaWG / WireGuard:
 #      - AmneziaWG v3.1 (WG3, по умолчанию 8443/UDP, Transport Protection)
 #      - AmneziaWG v2.0 / Legacy 1.0 (по умолчанию 8444/UDP, для роутеров)
-#   7) Гибридный SSL-движок с разделением каталогов:
-#      - Certbot (HTTP-01): /etc/letsencrypt/live/ (строгая изоляция --cert-name)
-#      - acme.sh + Cloudflare (DNS-01): /etc/ssl/acme/ (изоляция прав 755/644)
-#   8) 3 автономных локальных режима маскировки (Decoy Front):
+#   7) Опциональный модуль AdGuard Home:
+#      - Приватный DoH (DNS-over-HTTPS) с защитой ClientID для домашних роутеров
+#      - Эталонный пул Upstream DNS: Split-DNS (РФ/СНГ -> Яндекс DoH, YouTube -> Google H3)
+#      - Скоростные апстримы DNS-over-QUIC (DoQ) и HTTP/3 (NextDNS, Quad9, Cloudflare)
+#      - Освобождение 53-го порта от systemd-resolved
+#      - Проксирование веб-панели и /dns-query через Nginx поддомен с TLS 1.3
+#   8) Гибридный SSL-движок с разделением каталогов:
+#      - Certbot (HTTP-01): /etc/letsencrypt/live/ 
+#      - acme.sh + Cloudflare (DNS-01): /etc/ssl/acme/ 
+#   9) 3 автономных локальных режима маскировки (Decoy Front):
 #      - 1: DataSphere Analytics Enterprise (Геометрическая сфера + Live телеметрия ±10%)
 #      - 2: Облако CosmosCloud (с эмуляцией API, ассетами и logo.webp)
 #      - 3: Стандартная заглушка Nginx (Welcome to nginx)
-#   9) Полная доступность маск-сайта со ВСЕХ зарегистрированных доменов
-#  10) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
-#  11) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
-#  12) Автоопределение SSH-порта для безопасной настройки UFW
+#  10) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
 # ==============================================================================
 
 set -euo pipefail
@@ -46,7 +48,7 @@ die()  { echo -e "${RED}[X] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN} Nginx xHTTP + REALITY + Hy2 + AWG Router v6.5.2 (Public Edition)    ${NC}"
+echo -e "${GREEN} Nginx xHTTP + REALITY + Hy2 + AWG + AdGuard DoH v6.5.3 (Public)     ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 # ----------------------- Системные предусловия -----------------------
@@ -77,6 +79,8 @@ declare -A pkg_map=(
     [cron]="cron"
     [ufw]="ufw"
     [ss]="iproute2"
+    [tar]="tar"
+    [htpasswd]="apache2-utils"
 )
 
 apt_updated=0
@@ -148,7 +152,7 @@ fi
 echo
 echo -e "${YELLOW}Шаг 2: Настройка Steal-Oneself REALITY (Кража у самого себя)${NC}"
 echo -e "${CYAN}SSL-сертификаты выпускаются на ваши домены, трафик которых Nginx перенаправляет на порты REALITY.${NC}"
-echo -e "${CYAN}Маск-сайт будет гарантированно открываться на каждом из этих доменов!${NC}"
+echo -e "${CYAN}Маск-сайт гарантированно открывается на всех этих доменах благодаря сокетному L4 Failover!${NC}"
 read -rp "Включить Steal-Oneself REALITY? [Y/n]: " ENABLE_STEAL_INPUT
 ENABLE_STEAL_INPUT="${ENABLE_STEAL_INPUT:-y}"
 
@@ -299,7 +303,7 @@ XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
 XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
 
 # -------------------------------------------------------------
-# ИНТЕРАКТИВНЫЙ ВЫБОР ПРОТОКОЛОВ С ОБЯЗАТЕЛЬНЫМ ВОПРОСОМ (Y/N)
+# ИНТЕРАКТИВНЫЙ ВЫБОР ПРОТОКОЛОВ (HYSTERIA 2 / AWG / ADGUARD)
 # -------------------------------------------------------------
 echo
 echo -e "${YELLOW}Шаг 6: Настройка скоростного протокола Hysteria 2 (UDP)${NC}"
@@ -383,14 +387,53 @@ while true; do
 done
 
 echo
-echo -e "${YELLOW}Шаг 9: Выбор темы для сайта-маскировки (Decoy Fronts Catalog)${NC}"
+echo -e "${YELLOW}Шаг 9: Настройка AdGuard Home (Приватный DoH + Резка рекламы)${NC}"
+while true; do
+    read -rp "Установить и настроить AdGuard Home DoH? [y/n]: " AGH_CHOICE
+    case "${AGH_CHOICE,,}" in
+        y|yes)
+            ENABLE_AGH=1
+            prompt_default "  Поддомен для DoH и панели управления" "dns.$PRIMARY_DOMAIN" AGH_DOMAIN
+            [[ "$AGH_DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]] \
+                || die "Некорректный формат доменного имени: $AGH_DOMAIN"
+
+            if [[ ! " ${ALL_DOMAINS[*]} " == *" ${AGH_DOMAIN} "* ]]; then
+                ALL_DOMAINS+=("$AGH_DOMAIN")
+            fi
+
+            prompt_default "  Логин администратора AdGuard Home" "admin" AGH_USER
+            DEFAULT_AGH_PASS="AgHome_$(openssl rand -hex 4)"
+            prompt_default "  Пароль администратора AdGuard Home" "$DEFAULT_AGH_PASS" AGH_PASS
+            prompt_default "  Секретный ClientID для роутера (токен DoH)" "home-router" AGH_CLIENT_ID
+            validate_path_segment "$AGH_CLIENT_ID" "ClientID"
+
+            ok "AdGuard Home будет развёрнут на https://${AGH_DOMAIN}/ с приватным DoH!"
+            break
+            ;;
+        n|no)
+            ENABLE_AGH=0
+            AGH_DOMAIN=""
+            AGH_USER=""
+            AGH_PASS=""
+            AGH_CLIENT_ID=""
+            log "Модуль AdGuard Home отключен."
+            break
+            ;;
+        *)
+            warn "Пожалуйста, ответьте 'y' или 'n'."
+            ;;
+    esac
+done
+
+echo
+echo -e "${YELLOW}Шаг 10: Выбор темы для сайта-маскировки (Decoy Fronts Catalog)${NC}"
 echo -e " 1) ${GREEN}DataSphere Analytics Enterprise${NC} (Строгий геометрический дизайн + Live телеметрия ±10%)"
 echo -e " 2) ${GREEN}CosmosCloud NextGen${NC} (Облачный диск с оригинальным логотипом и сессионными cookies)"
 echo -e " 3) Стандартная заглушка Nginx (Welcome to nginx)"
 prompt_default "Выберите вариант маскировки (1, 2 или 3)" "1" DECOY_MODE
 
 echo
-echo -e "${YELLOW}Шаг 10: Выбор метода выпуска SSL-сертификатов${NC}"
+echo -e "${YELLOW}Шаг 11: Выбор метода выпуска SSL-сертификатов${NC}"
 echo -e " 1) ${GREEN}Классический Certbot (HTTP-01)${NC} - Каталог: /etc/letsencrypt/live/"
 echo -e " 2) ${GREEN}acme.sh + Cloudflare DNS-01${NC} - Каталог: /etc/ssl/acme/ (изоляция прав 755/644)"
 prompt_default "Выберите метод сертификации (1 или 2)" "1" SSL_ENGINE_CHOICE
@@ -400,7 +443,7 @@ prompt_default "Email для Let's Encrypt уведомлений (Enter - бе�
 CF_AUTH_METHOD="1"
 if [ "$SSL_ENGINE_CHOICE" = "2" ]; then
     echo
-    echo -e "${YELLOW}Шаг 10.1: Аутентификация в Cloudflare API (acme.sh)${NC}"
+    echo -e "${YELLOW}Шаг 11.1: Аутентификация в Cloudflare API (acme.sh)${NC}"
     echo -e " 1) ${GREEN}API Token${NC} (Рекомендуется: Zone.DNS:Edit, Zone.Zone:Read)"
     echo -e " 2) ${GREEN}Global API Key${NC} (Полный доступ: Email + Global Key)"
     prompt_default "Выберите вариант (1 или 2)" "1" CF_AUTH_METHOD
@@ -632,7 +675,7 @@ EOF
 
     for dom in "${ALL_DOMAINS[@]}"; do
         log "Выпуск сертификата Let's Encrypt для домена: $dom..."
-        # Использование --cert-name строго изолирует сертификат каждого домена в /etc/letsencrypt/live/$dom/
+        # Изоляция --cert-name исключает склеивание сертификатов разных поддоменов
         if certbot certonly --webroot -w "$WEBROOT" --cert-name "$dom" --expand --non-interactive --agree-tos -d "$dom"; then
             ok "Сертификат для $dom успешно получен в /etc/letsencrypt/live/$dom/"
         else
@@ -719,6 +762,92 @@ else
             chmod 644 /etc/ssl/acme/"$dom"/* 2>/dev/null || true
         fi
     done
+fi
+
+# =============================================================
+#  МОДУЛЬ: УСТАНОВКА И НАСТРОЙКА ADGUARD HOME (ПРИВАТНЫЙ DOH)
+# =============================================================
+if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
+    log "Развёртывание AdGuard Home (Освобождение порта 53 и настройка DoH)..."
+
+    # 1. Освобождение порта 53 от systemd-resolved
+    mkdir -p /etc/systemd/resolved.conf.d
+    cat << 'EOF' > /etc/systemd/resolved.conf.d/adguard.conf
+[Resolve]
+DNS=1.1.1.1 8.8.8.8
+DNSStubListener=no
+EOF
+    systemctl restart systemd-resolved || true
+    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null || true
+
+    # 2. Скачивание и установка демона AdGuard Home
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64) AGH_ARCH="amd64" ;;
+        aarch64|arm64) AGH_ARCH="arm64" ;;
+        armv7l) AGH_ARCH="armv7" ;;
+        *) AGH_ARCH="amd64" ;;
+    esac
+
+    curl -s -S -L "https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/gh-pages/release/AdGuardHome_linux_${AGH_ARCH}.tar.gz" -o /tmp/AdGuardHome.tar.gz
+    tar -zxvf /tmp/AdGuardHome.tar.gz -C /opt/ >/dev/null
+    rm -f /tmp/AdGuardHome.tar.gz
+
+    # 3. Предварительное формирование конфигурации AdGuardHome.yaml
+    mkdir -p /opt/AdGuardHome
+    systemctl stop AdGuardHome 2>/dev/null || true
+
+    # Генерация нативного BCrypt хеша для пароля AGH
+    AGH_PASS_HASH=$(htpasswd -b -n -B -C 10 "" "$AGH_PASS" | tr -d '\n' | cut -d: -f2)
+
+    cat << EOF > /opt/AdGuardHome/AdGuardHome.yaml
+http:
+  address: 127.0.0.1:3000
+  doh:
+    insecure_enabled: true
+users:
+  - name: ${AGH_USER}
+    password: "${AGH_PASS_HASH}"
+dns:
+  bind_hosts:
+    - 127.0.0.1
+  port: 53
+  trusted_proxies:
+    - 127.0.0.1
+    - ::1
+  upstream_dns:
+    - "quic://dns.alidns.com:853"
+    - "[/ru/kz/by/su/xn--p1ai/]https://77.88.8.8:443/dns-query"
+    - "quic://dns.adguard-dns.com"
+    - "quic://dns.nextdns.io"
+    - "quic://p0.freedns.controld.com"
+    - "quic://dns.quad9.net"
+    - "[/google.com/googlevideo.com/youtube.com/ytimg.com/gstatic.com/googleapis.com/1e100.net/]h3://dns.google/dns-query"
+    - "h3://cloudflare-dns.com/dns-query"
+    - "https://1.1.1.1:443/dns-query"
+clients:
+  runtime_sources:
+    whois: false
+    dhcp: false
+  persistent:
+    - name: Home-Router
+      ids:
+        - ${AGH_CLIENT_ID}
+      use_global_settings: true
+access:
+  allowed_clients:
+    - ${AGH_CLIENT_ID}
+  disallowed_clients: []
+  blocked_hosts: []
+tls:
+  enabled: false
+  allow_unencrypted_doh: true
+schema_version: 28
+EOF
+
+    /opt/AdGuardHome/AdGuardHome -s install >/dev/null 2>&1 || true
+    systemctl restart AdGuardHome || true
+    ok "Служба AdGuard Home запущена с эталонным пулом апстримов (Веб: 127.0.0.1:3000, DNS: 127.0.0.1:53)!"
 fi
 
 # =============================================================
@@ -933,7 +1062,7 @@ if [ "$DECOY_MODE" = "1" ]; then
                 </button>
             </div>
             <div id="errorAlert" class="alert-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg>
                 <span id="errorMsg">Ошибка аутентификации</span>
             </div>
             <form id="authForm" onsubmit="handleDataSphereAuth(event)">
@@ -1252,7 +1381,7 @@ chmod 644 "$WEBROOT"/*.html
 # =============================================================
 log "Сборка конфигурации Nginx Mainline (Stream L4 + HTTP/2 Upstream Engine)..."
 
-# Удаление временного стартового ACME-сервера для исключения конфликтов порта 80
+# Удаление временного стартового ACME-сервера
 rm -f /etc/nginx/conf.d/00-acme.conf
 
 # 1. Глобальный файл конфигурации /etc/nginx/nginx.conf
@@ -1371,6 +1500,7 @@ http {
     map "\$badbot_raw:\$is_scan_attempt:\$request_uri" \$badbot {
         ~^.*:/robots\.txt(\?|\$) 0;
         ~^.*:/.well-known/security\.txt(\?|\$) 0;
+        ~^1:[01]:/dns-query 0;
         ~^1:[01]:${PANEL_PATH} 0;
         ~^1:[01]:${SUB_PATH} 0;
         ~^1:[01]:/sub/ 0;
@@ -1384,7 +1514,7 @@ http {
     limit_req_zone \$binary_remote_addr zone=subs:1m rate=10r/s;
     limit_req_zone \$binary_remote_addr zone=scan:1m rate=1r/s;
     limit_conn_zone \$binary_remote_addr zone=addr:1m;
-    limit_req_zone \$binary_remote_addr zone=assets:1m rate=150r/s;
+    limit_req_zone \$binary_remote_addr zone=assets:1m rate=200r/s;
     limit_req_status 429;
 
     proxy_hide_header X-Proxy-Engine;
@@ -1414,7 +1544,7 @@ STREAM_MAP_RULES=""
 REALITY_UPSTREAMS=""
 
 for dom in "${ALL_DOMAINS[@]}"; do
-    if [ "$dom" = "$PRIMARY_DOMAIN" ] || [ "$dom" = "www.$PRIMARY_DOMAIN" ]; then
+    if [ "$dom" = "$PRIMARY_DOMAIN" ] || [ "$dom" = "www.$PRIMARY_DOMAIN" ] || [ "$dom" = "${AGH_DOMAIN:-}" ]; then
         STREAM_MAP_RULES+="        ${dom}     nginx_http_backend;"$'\n'
     elif [ "$STEAL_ENABLED" -eq 1 ] && [ -n "${DOMAIN_TO_PORT[$dom]:-}" ]; then
         port="${DOMAIN_TO_PORT[$dom]}"
@@ -1748,10 +1878,78 @@ server {
 }
 EOF
 
-# 5. Генерация виртуальных хостов для ВСЕХ дополнительных доменов (Steal-Oneself, WWW, Extra)
+# 5. Виртуальный хост для AdGuard Home (если модуль включен)
+if [ "${ENABLE_AGH:-0}" -eq 1 ] && [ -f "${SSL_BASE_DIR}/$AGH_DOMAIN/fullchain.pem" ]; then
+    cat << EOF > "/etc/nginx/conf.d/03-adguard.conf"
+upstream adguard_backend {
+    server 127.0.0.1:3000;
+    keepalive 32;
+}
+
+server {
+    listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol;
+    listen 127.0.0.1:$REALITY_FALLBACK_PORT ssl proxy_protocol;
+    http2 on;
+    server_name $AGH_DOMAIN;
+
+    ssl_certificate ${SSL_BASE_DIR}/$AGH_DOMAIN/fullchain.pem;
+    ssl_certificate_key ${SSL_BASE_DIR}/$AGH_DOMAIN/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+
+    ssl_buffer_size 4k;
+    ssl_session_tickets on;
+    ssl_session_cache shared:SSL_AGH:5m;
+    ssl_session_timeout 4h;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # Точка входа DoH (DNS-over-HTTPS)
+    location /dns-query {
+        limit_req zone=assets burst=200 nodelay;
+
+        proxy_pass http://adguard_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$ak_real_ip;
+        proxy_set_header X-Forwarded-For \$ak_real_ip;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    # Веб-панель управления AdGuard Home
+    location / {
+        limit_req zone=panel burst=60 delay=30;
+
+        proxy_pass http://adguard_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$ak_real_ip;
+        proxy_set_header X-Forwarded-For \$ak_real_ip;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+}
+EOF
+fi
+
+# 6. Генерация виртуальных хостов для ВСЕХ дополнительных доменов
 for ((i=1; i<${#ALL_DOMAINS[@]}; i++)); do
     ext_dom="${ALL_DOMAINS[$i]}"
-    if [ "$ext_dom" != "$PRIMARY_DOMAIN" ] && [ -f "${SSL_BASE_DIR}/$ext_dom/fullchain.pem" ]; then
+    if [ "$ext_dom" != "$PRIMARY_DOMAIN" ] && [ "$ext_dom" != "${AGH_DOMAIN:-}" ] && [ -f "${SSL_BASE_DIR}/$ext_dom/fullchain.pem" ]; then
         cat << EOF > "/etc/nginx/conf.d/02-${ext_dom}.conf"
 server {
     listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol;
@@ -1867,7 +2065,7 @@ for port in "${ALL_REALITY_PORTS[@]:-}"; do
     fi
 done
 
-# Включение определенного порта SSH в разрешающие правила UFW
+# Включение определённого порта SSH в разрешающие правила UFW
 UFW_ALLOW_LIST="ufw allow ${SSH_DETECTED_PORT}/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 8443/tcp"
 if [ "$ENABLE_HY2" -eq 1 ] && [ -n "$HY2_PORT" ]; then
     UFW_ALLOW_LIST="${UFW_ALLOW_LIST} && ufw allow ${HY2_PORT}/udp"
@@ -1942,19 +2140,24 @@ fi
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.5.2 PUBLIC EDITION)!       "
+echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.5.3 PUBLIC EDITION)!       "
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Главная страница:            ${CYAN}https://${PRIMARY_DOMAIN}/${NC} (${DECOY_NAME})"
 echo -e "  Вход в панель 3X-UI:         ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 echo -e "  Канал подписок:              ${GREEN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
+
+if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
+echo -e "  Панель AdGuard Home:         ${CYAN}https://${AGH_DOMAIN}/${NC} (Логин: ${GREEN}${AGH_USER}${NC} / Пароль: ${GREEN}${AGH_PASS}${NC})"
+echo -e "  Приватный DoH для роутера:   ${GREEN}https://${AGH_DOMAIN}/dns-query/${AGH_CLIENT_ID}${NC}"
+fi
 echo
 
 echo -e "${YELLOW}[SSL] ВЫПУЩЕННЫЕ СЕРТИФИКАТЫ (Базовый путь: ${SSL_BASE_DIR}):${NC}"
 echo -e "$SSL_CERT_REPORT"
 
-echo -e "${YELLOW}ШАГ 1: Настройка файервола UFW (Защита локальных сокетов и открытие VPN):${NC}"
+echo -e "${YELLOW}ШАГ 1: Настройка файервола UFW (Защита сокетов и открытие портов):${NC}"
 echo -e "  ${CYAN}${UFW_ALLOW_LIST}${NC}"
-echo -e "  ${RED}ufw deny $PANEL_PORT/tcp && ufw deny $SUB_PORT/tcp && ufw deny $XHTTP_STREAM_PORT/tcp && ufw deny $REALITY_FALLBACK_PORT/tcp${UFW_DENY_LIST}${NC}"
+echo -e "  ${RED}ufw deny $PANEL_PORT/tcp && ufw deny $SUB_PORT/tcp && ufw deny $XHTTP_STREAM_PORT/tcp && ufw deny $REALITY_FALLBACK_PORT/tcp && ufw deny 3000/tcp${UFW_DENY_LIST}${NC}"
 echo
 
 echo -e "${YELLOW}ШАГ 2: Инбаунды VLESS REALITY (3X-UI):${NC}"
@@ -2038,6 +2241,19 @@ echo -e "    * Subscription URL: ${CYAN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC
 echo -e "  - ${YELLOW}В разделе «Хосты» (Hosts) добавьте 2 правила:${NC}"
 echo -e "    1) ${BOLD}MAIN_SAME_443:${NC} Инбаунды: ${CYAN}REALITY + Hysteria 2${NC} -> Порт: ${GREEN}443${NC} | Безопасность: ${GREEN}same${NC}"
 echo -e "    2) ${BOLD}XHTTP_TLS_443:${NC} Инбаунд: ${CYAN}VLESS_XHTTP${NC} -> Порт: ${GREEN}443${NC} | Безопасность: ${GREEN}tls${NC} (SNI: ${CYAN}$PRIMARY_DOMAIN${NC})"
+
+if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
+echo
+echo -e "${YELLOW}ШАГ 8: Интеграция AdGuard Home с 3X-UI и Домашним Роутером:${NC}"
+echo -e "  1) ${BOLD}Фильтрация рекламы внутри VPN (3X-UI):${NC}"
+echo -e "     - Перейдите в «Настройки Xray» -> блок «DNS» и добавьте локальный адрес: ${GREEN}127.0.0.1${NC}"
+echo -e "     - Весь трафик VLESS, Hysteria 2 и AWG будет автоматически фильтроваться AdGuard Home!"
+echo -e "  2) ${BOLD}Настройка домашнего роутера (Keenetic / OpenWrt / MikroTik):${NC}"
+echo -e "     - Тип протокола: ${GREEN}DNS-over-HTTPS (DoH)${NC}"
+echo -e "     - URL-адрес DoH: ${CYAN}https://${AGH_DOMAIN}/dns-query/${AGH_CLIENT_ID}${NC}"
+echo -e "     - Имя сервера (SNI): ${CYAN}${AGH_DOMAIN}${NC} | Bootstrap IP: ${GREEN}${WAN_IP}${NC}"
+echo -e "     - Включите опцию: ${GREEN}«Игнорировать DNS провайдера»${NC}"
+fi
 echo -e "${GREEN}=====================================================================${NC}"
 
 exit 0
