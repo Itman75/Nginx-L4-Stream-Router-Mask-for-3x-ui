@@ -1,19 +1,19 @@
-# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.5.2 Universal)
+# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.5.3 Universal)
 
-> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, скоростным транспортом Hysteria 2 (UDP 443), многоуровневой маскировкой, отказоустойчивой маршрутизацией доменов, защитой от систем глубокого анализа пакетов (DPI / Active Probing) и полной изоляцией внутренних служб через сокеты в RAM.**  
+> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, скоростным транспортом Hysteria 2 (UDP 443), встроенным приватным DoH-резолвером AdGuard Home с раздельной маршрутизацией (Split-DNS), многоуровневой маскировкой, отказоустойчивой маршрутизацией доменов (L4 Failover), защитой от систем глубокого анализа пакетов (DPI / Active Probing) и полной изоляцией внутренних служб через сокеты в RAM.**  
 > Развёртывается на чистых ОС семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
 
 ---
 
-## 🌟 Ключевые возможности архитектуры v6.5.2 Universal
+## 🌟 Ключевые возможности архитектуры v6.5.3 Universal
 
-Комплекс состоит из скрипта первичной защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.5.2**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x**:
+Комплекс состоит из скрипта первичной защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.5.3**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x**:
 
-### 1. Сценарий 1: Steal-Oneself REALITY (Кража у самого себя с Anti-Loop Port 9443 и Failover)
-* Выпуск легитимных SSL-сертификатов Let's Encrypt на собственные домены с изолированным хранением (`--cert-name "$dom"`).
+### 1. Сценарий 1: Steal-Oneself REALITY (Кража у самого себя с Anti-Loop Port 9443 и L4 Failover)
+* Выпуск легитимных SSL-сертификатов Let's Encrypt на собственные домены со строгой изоляцией (`--cert-name "$dom"`).
 * Входящий TLS-поток маршрутизируется через Nginx Stream на локальный порт Xray REALITY (`127.0.0.1:45443`).
 * **Защита Anti-Loop:** При подключении обычного веб-браузера или сканера активного зондирования Xray перенаправляет (*fallback*) запрос на изолированный слушатель **`127.0.0.1:9443`** (`xver: 1`), минуя внешний L4-роутер 443 и полностью исключая бесконечную петлю пересылки пакетов.
-* **Резервный сокет (L4 Failover):** В Stream-апстримы Reality интегрирован резервный сокет `server unix:/dev/shm/nginx-http.sock backup;`. Если Xray временно остановлен или ещё не настроен, Nginx автоматически перехватывает трафик и отдаёт маск-сайт с валидным SSL-сертификатом конкретного домена без ошибки отказа соединения.
+* **Резервный сокет (L4 Failover Backup):** В Stream-апстримы Reality интегрирован резервный сокет `server unix:/dev/shm/nginx-http.sock backup;`. Если Xray временно остановлен, перезагружается или ещё не настроен, Nginx автоматически перехватывает трафик и отдаёт маск-сайт с валидным SSL-сертификатом конкретного домена без ошибки отказа соединения (`Connection Refused`).
 
 ### 2. Сценарий 2: Classic External REALITY (Внешний камуфляж)
 * Использование доверенных внешних доменов (`swdist.microsoft.com`, `www.samsung.com`, `gateway.icloud.com` и др.) в качестве SNI.
@@ -26,26 +26,35 @@
 * **Стабилизация буферов (`noSSEHeader: true`):** Отключение заголовков Server-Sent Events исключает задержки буферизации в Nginx и внешних CDN.
 * **Сквозное шифрование `vlessenc` (ML-KEM-768 native):** Полезная нагрузка защищается симметричным квантово-устойчивым ключом шифрования на уровне протокола VLESS.
 * **Совместимость с XTLS-Vision (`xtls-rprx-vision`):** В связке с VLESS Encryption алгоритм Vision работает на уровне протокола VLESS, обеспечивая 0-RTT проникновение (*penetration*) без двойного шифрования и динамический паддинг пакетов.
-* **Архитектурный пул соединений XMUX:** Настройка пула `"maxConcurrency": "0"` совместно с явным `"maxConnections": "1-3"` и случайной ротацией `"cMaxReuseTimes": "300-600"` объединяет параллельные сессии в 1–3 TCP-соединения, минимизируя заметность хендшейков для систем DPI.
+* **Архитектурный пул соединений XMUX:** Настройка пула `"maxConcurrency": "0"` совместно с явным `"maxConnections": "1-3"`, ротацией `"cMaxReuseTimes": "300-600"` и тайм-аутами ротации объединяет параллельные сессии в 1–3 TCP-соединения, минимизируя заметность хендшейков для систем DPI.
 * **Паддинг заголовков:** Случайный мусор в HTTP-заголовках (`xPaddingBytes: 100-500`, ключ `X-Amz-Meta-Trace`).
 
-### 4. Скоростные UDP-туннели: Hysteria 2 и AmneziaWG (UDP 443 / 8443 / 8444)
+### 4. Опциональный модуль AdGuard Home: Приватный DoH (DNS-over-HTTPS) + Split-DNS
+* **Защита от блокировок провайдеров:** Домашний роутер (Keenetic, OpenWrt, MikroTik) или мобильные устройства обращаются к серверу по защищённому протоколу DoH (порт 443, TLS 1.3), обходя блокировки 53-го UDP-порта и публичных DNS (8.8.8.8, 1.1.1.1).
+* **Защита от Open Resolver (ClientID):** Поддержка уникального токена в URL (`https://dns.domain.com/dns-query/SECRET_KEY`). Запросы от посторонних сканеров и ботов без токена сбрасываются со статусом `REFUSED`.
+* **Эталонный пул апстримов (Split-DNS):**
+  * Национальные домены (`.ru`, `.рф`, `.kz`, `.by`, `.su`) резолвятся через Яндекс DoH (`77.88.8.8:443`) для исключения проблем с гео-IP банков и госсервисов;
+  * Видеосерверы YouTube и сервисы Google (`googlevideo.com`, `youtube.com`, `1e100.net` и др.) направляются на официальный HTTP/3-резолвер Google (`h3://dns.google/dns-query`) для устранения 4K-буферизации;
+  * Все остальные мировые запросы обслуживаются сверхскоростными протоколами DNS-over-QUIC (DoQ) и HTTP/3 (Quad9, NextDNS, ControlD, AdGuard, Cloudflare).
+* **Интеграция с VPN (3X-UI):** Весь трафик подключений VLESS, Hysteria 2 и AmneziaWG автоматически фильтруется AdGuard Home прямо на сервере при указании `127.0.0.1` в DNS панели.
+
+### 5. Скоростные UDP-туннели: Hysteria 2 и AmneziaWG (UDP 443 / 8443 / 8444)
 * **Hysteria 2 на `443/UDP`:** Сверхскоростной транспорт на базе протокола QUIC (HTTP/3) с маскировкой под веб-сервер и контроллером перегрузок BBR.
 * **AmneziaWG v3.1 / v2.0:** Установка защиты Transport Protection для мобильных устройств, ПК и роутеров Keenetic / OpenWrt (порты `8443/UDP` и `8444/UDP`).
 * Nginx Stream слушает только TCP, оставляя UDP-порты полностью свободными для прямого приёма пакетов серверами VPN.
 
-### 5. Межпроцессная связь через Unix Sockets в RAM и Nginx Mainline
+### 6. Межпроцессная связь через Unix Sockets в RAM и Nginx Mainline
 * Подключение официального репозитория `nginx.org` (ветка **Mainline**).
 * Внутренний обмен между L4 Stream и L7 HTTP Core осуществляется через сокет в оперативной памяти (**`unix:/dev/shm/nginx-http.sock`**), исключая задержки виртуального loopback.
 * Использование `ssl_reject_handshake on` на дефолтном сервере для мгновенного сброса сканеров по прямому IP без раскрытия SSL-сертификата.
 
-### 6. Три автономных локальных режима маскировки (Decoy Fronts)
+### 7. Три автономных локальных режима маскировки (Decoy Fronts)
 * **Режим 1 (Рекомендуемый):** Корпоративный IT SaaS *DataSphere Analytics* — интерактивный SPA-интерфейс в строгом стиле с геометрической координатной сферой, эмуляцией бекенд-API и Live телеметрией ±10%.
 * **Режим 2:** Облачный портал *CosmosCloud* с эмуляцией API авторизации, верификацией графики и сессионными cookies.
 * **Режим 3:** Стандартная заглушка веб-сервера (*Welcome to nginx!*).
 * **Сквозная доступность:** Маск-сайт открывается по HTTPS на **всех** зарегистрированных на сервере доменах (основной, WWW, домены Steal-Oneself и дополнительные Direct-домены).
 
-### 7. Двухрежимный гибридный SSL-движок
+### 8. Двухрежимный гибридный SSL-движок
 * **Certbot (HTTP-01):** Автоматический выпуск через Snapd с индивидуальной изоляцией сертификатов (`--cert-name "$dom"`) и деплой-хуками прав (`chmod 755 / 644`).
 * **acme.sh (Cloudflare DNS-01):** Выпуск сертификатов через Cloudflare API (Token или Global Key) с выносом в `/etc/ssl/acme/`.
 
@@ -53,7 +62,7 @@
 
 > [!CAUTION]
 > ### ⚠️ Критическое требование к DNS в Cloudflare (Только «Серое облако» / DNS-Only)
-> Все A/AAAA-записи для ваших доменов в панели управления Cloudflare **обязаны** быть переведены в режим **DNS Only (Серое облако)**:
+> Все A/AAAA-записи для ваших доменов и поддоменов (включая поддомен DoH) в панели управления Cloudflare **обязаны** быть переведены в режим **DNS Only (Серое облако)**:
 > * ❌ **Proxied (Оранжевое облако):** Запрещено! CDN Cloudflare терминирует TLS на собственных узлах, что делает невозможным работу L4 SNI Preread, Steal-Oneself REALITY и прямого HTTP/2 xHTTP стриминга.
 > * ✔️ **DNS Only (Серое облако):** Трафик поступает напрямую на IP-адрес вашего сервера без вмешательства промежуточных прокси.
 
@@ -67,6 +76,7 @@ graph TD
     Client443UDP[Клиент: 443/UDP / 8443/UDP / 8444/UDP] -->|Напрямую в обход Nginx| XrayHysteria[Xray: Hysteria 2 / AWG]
 
     NginxStream -->|SNI: Главный / WWW / Доп. домены / Пустой SNI| NginxSock[Unix Socket: /dev/shm/nginx-http.sock]
+    NginxStream -->|SNI: DoH dns.yourdomain.online| NginxSock
     NginxStream -->|SNI: Steal-Oneself cdn.yourdomain.online| XrayStealREALITY[Xray REALITY :45443]
     NginxStream -.->|Failover: Xray выключен / backup| NginxSock
     NginxStream -->|SNI: Внешний SNI swdist.microsoft.com| XrayClassicREALITY[Xray REALITY :46443]
@@ -77,25 +87,24 @@ graph TD
     NginxSock --> NginxHTTPCore[Nginx HTTP L7 Engine]
     NginxFallbackHTTP --> NginxHTTPCore
 
-    NginxHTTPCore -->|Корень / на любом домене| DecoySite[Decoy Маскировка 1-3]
+    NginxHTTPCore -->|Корень / на основном домене| DecoySite[Decoy Маскировка 1-3]
     NginxHTTPCore -->|Секретный путь /my-3x-panel/| Panel3X[3X-UI Панель управления :10443]
     NginxHTTPCore -->|Путь подписок /my-post-key/| PanelSub[3X-UI Сервер подписок :55443]
     NginxHTTPCore -->|Путь xHTTP /Stream-One-Path/ via H2C| XrayXHTTP[Xray VLESS xHTTP :50443]
+    NginxHTTPCore -->|Поддомен dns.yourdomain.online| AdGuardHome[AdGuard Home Web & DoH :3000]
 ```
 
 ---
 
 ## 📱 Совместимость клиентских приложений
 
-Для полноценной работы стека протоколов клиентское ПО должно поддерживать соответствующие транспорты, шифрование и обфускацию:
-
 | Платформа | Приложение | Поддерживаемые протоколы | Особенности |
 | :--- | :--- | :--- | :--- |
-| **Windows** | **v2rayN** / **Sing-box** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG | v2rayN v6.40+ (Xray-core v24.11+ / v25+) |
-| **Android** | **v2rayNG** / **NekoBox** / **Sing-box** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG | v2rayNG v1.9.15+, NekoBox v1.3.1+ |
-| **iOS / iPadOS** | **Happ Proxy** / **FoXray** / **Streisand** / **Karing** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG | Актуальные версии из App Store |
-| **macOS** | **V2RayXS** / **FoXray** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG | Нативная поддержка Xray-core |
-| **Роутеры** | **Keenetic** / **OpenWrt** | VLESS REALITY, VLESS xHTTP, AWG v2.0 | Пакеты Xray-core / Sing-box |
+| **Windows** | **v2rayN** / **Sing-box** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG, DoH | v2rayN v6.40+ (Xray-core v24.11+ / v25+) |
+| **Android** | **v2rayNG** / **NekoBox** / **Sing-box** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG, DoH | v2rayNG v1.9.15+, поддержка Частного DNS |
+| **iOS / iPadOS** | **Happ Proxy** / **FoXray** / **Streisand** / **Karing** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG, DoH | Актуальные версии из App Store |
+| **macOS** | **V2RayXS** / **FoXray** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG, DoH | Нативная поддержка Xray-core |
+| **Роутеры** | **Keenetic** / **OpenWrt** / **MikroTik** | VLESS REALITY, VLESS xHTTP, AWG v2.0, DoH | Нативная поддержка DoH с ClientID |
 
 ---
 
@@ -128,9 +137,9 @@ chmod +x secure-vps.sh
 
 ---
 
-## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.5.2)
+## 🚀 Этап 2: Развёртывание L4 Router, DoH и Маскировки (`setup_mask.sh` v6.5.3)
 
-На втором шаге подключается официальный репозиторий Nginx Mainline, выпускаются изолированные SSL-сертификаты для всех доменов, разворачивается выбранная веб-маска и конфигурируется L4/L7 маршрутизация.
+На втором шаге подключается официальный репозиторий Nginx Mainline, выпускаются изолированные SSL-сертификаты для всех доменов, разворачивается выбранная веб-маска, опционально настраивается AdGuard Home и конфигурируется L4/L7 маршрутизация.
 
 Запустите скрипт автоматической настройки:
 
@@ -140,7 +149,7 @@ chmod +x setup_mask.sh
 ./setup_mask.sh
 ```
 
-### Пример интерактивного ввода параметров (со значениями по умолчанию):
+### Пример интерактивного ввода параметров:
 * **PRIMARY_DOMAIN (Главный домен):** `yourdomain.online`
 * **Добавить алиас 'www.yourdomain.online'?** `y`
 * **Steal-Oneself REALITY:** `y`
@@ -159,6 +168,11 @@ chmod +x setup_mask.sh
 * **Внутренний порт VLESS xHTTP:** `50443`
 * **URI-путь для xHTTP:** `Stream-One-Path`
 * **Настройка Hysteria 2 / AmneziaWG:** `y` (выбор желаемых портов, например 443, 8443, 8444)
+* **Настройка AdGuard Home DoH:** `y`
+  * Поддомен для DoH и панели: `dns.yourdomain.online`
+  * Логин администратора: `admin`
+  * Пароль администратора: *(введите свой или используйте автосгенерированный)*
+  * Секретный ClientID для роутера: `home-router`
 * **Вариант маскировки (DECOY_MODE):** `1` *(DataSphere Analytics Enterprise)*, `2` *(CosmosCloud)* или `3` *(Nginx Stub)*
 * **Метод сертификации:** `1` *(Certbot HTTP-01)* или `2` *(acme.sh + Cloudflare DNS-01)*
 
@@ -167,7 +181,7 @@ chmod +x setup_mask.sh
 ### Настройка брандмауэра UFW (Выполнить после setup_mask.sh и преднастройки панели 3X-UI)
 
 > [!IMPORTANT]
-> Скрипт `setup_mask.sh v6.5.2` автоматически считывает активный порт демона SSH (`SSH_DETECTED_PORT`) и включает его в список разрешённых правил, исключая потерю доступа к серверу при включении брандмауэра.
+> Скрипт `setup_mask.sh v6.5.3` автоматически считывает активный порт демона SSH (`SSH_DETECTED_PORT`) и включает его в список разрешённых правил, исключая потерю доступа к серверу при включении брандмауэра.
 
 ```bash
 # 1. Разрешаем SSH (замените 60022 на ваш порт, если отличается), Веб, Hysteria 2 и AWG UDP
@@ -175,7 +189,7 @@ ufw allow 60022/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 8443/t
 ufw allow 443/udp && ufw allow 8443/udp && ufw allow 8444/udp
 
 # 2. Блокируем технические внутренние порты от внешнего сканирования
-ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/tcp && ufw deny 45443/tcp && ufw deny 46443/tcp
+ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/tcp && ufw deny 45443/tcp && ufw deny 46443/tcp && ufw deny 3000/tcp
 ```
 
 ---
@@ -184,7 +198,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ### 1. Синхронизация путей панели и подписок
 
-1. Откройте панель по временному адресу: `http://IP_СЕРВЕРА:10443/my-3x-panel/`
+1. Откройте панель по адресу: `https://yourdomain.online/my-3x-panel/` (или по временному IP: `http://IP:10443/my-3x-panel/`)
 2. Перейдите в **Настройки панели** -> **Панель**:
    * **URI-путь корневой папки панели:** `/my-3x-panel/`
    * Нажмите **Сохранить**.
@@ -194,10 +208,6 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
    * **URI-путь подписки:** `/my-post-key/`
    * **URI обратного прокси:** `https://yourdomain.online/my-post-key/`
    * Нажмите **Сохранить** и выберите **Перезапустить панель**.
-
-> [!SUCCESS]
-> Вход в панель теперь защищён и доступен исключительно по HTTPS-адресу:  
-> `https://yourdomain.online/my-3x-panel/`
 
 ---
 
@@ -310,9 +320,34 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ---
 
-## 🩺 Экспресс-диагностика и проверка узлов (Health Check)
+## 🛡️ Настройка и эксплуатация модуля AdGuard Home DoH
 
-После завершения настройки выполните комплексную проверку ключевых служб:
+### 1. Доступ к панели управления
+Панель AdGuard Home доступна исключительно по защищённому протоколу HTTPS:  
+👉 **`https://dns.yourdomain.online/`** (Логин и пароль задаются на Шаге 9 скрипта).
+
+### 2. Подключение домашнего роутера (на примере Keenetic)
+1. Откройте панель управления Keenetic (`192.168.1.1`).
+2. Перейдите в **«Сетевые правила» -> «Интернет-фильтр»** (или свойства подключения -> **«Серверы DNS»**).
+3. Нажмите **«Добавить сервер DNS»**:
+   * **Адрес сервера DNS (Bootstrap):** `IP_ВАШЕГО_VPS` *(нужен для первичного поиска домена)*
+   * **Протокол:** `DNS-over-HTTPS (DoH)`
+   * **URL-адрес DoH:** `https://dns.yourdomain.online/dns-query/home-router` *(где `home-router` — секретный ClientID)*
+   * **Доменное имя (SNI):** `dns.yourdomain.online`
+4. Поставьте галочку **«Игнорировать DNS провайдера»** и сохраните.
+
+> [!TIP]
+> **Как работает защита ClientID:**  
+> Если посторонний бот или сканер отправит запрос на общий адрес `https://dns.yourdomain.online/dns-query`, сервер вернёт отказ `REFUSED`. Запросы обрабатываются **только** при наличии секретного токена `home-router`.
+
+### 3. Фильтрация рекламы внутри VPN (3X-UI)
+1. В панели 3X-UI перейдите в **«Настройки панели» -> «Настройки Xray»**.
+2. В конфигурации блока **DNS** пропишите первым сервером: `127.0.0.1`.
+3. Перезапустите Xray. Весь трафик подключений VLESS, Hysteria 2 и AmneziaWG начнёт автоматически очищаться от рекламы и трекеров прямо на сервере!
+
+---
+
+## 🩺 Экспресс-диагностика и проверка узлов (Health Check)
 
 ```bash
 # 1. Проверка синтаксиса и статуса Nginx
@@ -330,12 +365,15 @@ curl -Iv --http2 https://cdn.yourdomain.online
 # 5. Тест шлюза xHTTP (должен возвращать 404 Not Found, подтверждая активность защищённой локации)
 curl -Iv --http2 https://yourdomain.online/Stream-One-Path/
 
-# 6. Проверка доступности портов UDP (Hysteria / AWG)
+# 6. Тест приватного DoH (должен вернуть HTTP 200 и бинарный DNS-ответ)
+curl -Iv "https://dns.yourdomain.online/dns-query/home-router?dns=AAABAAABAAAAAAAAA3d3dwdleGFtcGxlA2NvbQAAAQAB"
+
+# 7. Проверка доступности портов UDP (Hysteria / AWG)
 nc -zvu 127.0.0.1 443
 nc -zvu 127.0.0.1 8443
 nc -zvu 127.0.0.1 8444
 
-# 7. Мониторинг логов Nginx в реальном времени
+# 8. Мониторинг логов Nginx в реальном времени
 tail -f /var/log/nginx/access.log
 tail -f /var/log/nginx/error.log
 ```
@@ -364,11 +402,12 @@ certbot renew --dry-run
 Для сохранения полной конфигурации шлюза выполните команду создания архива:
 
 ```bash
-# Создание резервной копии конфигурации Nginx, сертификатов и базы данных 3X-UI
+# Создание резервной копии конфигурации Nginx, AdGuard Home, сертификатов и базы 3X-UI
 tar -czvf backup_proxy_$(date +%F).tar.gz \
   /etc/nginx \
   /etc/letsencrypt \
   /etc/ssl/acme \
+  /opt/AdGuardHome \
   /etc/x-ui/x-ui.db \
   /var/www/html
 ```
@@ -376,7 +415,7 @@ tar -czvf backup_proxy_$(date +%F).tar.gz \
 Для восстановления из архива:
 ```bash
 tar -xzvf backup_proxy_YYYY-MM-DD.tar.gz -C /
-nginx -t && systemctl restart nginx && systemctl restart x-ui
+nginx -t && systemctl restart nginx && systemctl restart x-ui && systemctl restart AdGuardHome
 ```
 
 ---
