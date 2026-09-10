@@ -1,30 +1,32 @@
-# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.5.1 Universal)
+# 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.5.2 Universal)
 
-> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, скоростным транспортом Hysteria 2 (UDP 443), многоуровневой маскировкой, защитой от систем глубокого анализа пакетов (DPI / Active Probing) и полной изоляцией внутренних служб через сокеты в RAM.**  
+> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, скоростным транспортом Hysteria 2 (UDP 443), многоуровневой маскировкой, отказоустойчивой маршрутизацией доменов, защитой от систем глубокого анализа пакетов (DPI / Active Probing) и полной изоляцией внутренних служб через сокеты в RAM.**  
 > Развёртывается на чистых ОС семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
 
 ---
 
-## 🌟 Ключевые возможности архитектуры v6.5.1 Universal
+## 🌟 Ключевые возможности архитектуры v6.5.2 Universal
 
-Комплекс состоит из скрипта первичной защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.5.1**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x**:
+Комплекс состоит из скрипта первичной защиты операционной системы (**`secure-vps.sh`**) и интеллектуального L4/L7 маршрутизатора Nginx Mainline (**`setup_mask.sh` v6.5.2**), обеспечивая полную совместимость с ядром **Xray-core 24.9.27+ / 25.x / 26.x**:
 
-### 1. Сценарий 1: Steal-Oneself REALITY (Кража у самого себя с Anti-Loop Port 9443)
-* Выпуск легитимных SSL-сертификатов Let's Encrypt на собственные домены.
+### 1. Сценарий 1: Steal-Oneself REALITY (Кража у самого себя с Anti-Loop Port 9443 и Failover)
+* Выпуск легитимных SSL-сертификатов Let's Encrypt на собственные домены с изолированным хранением (`--cert-name "$dom"`).
 * Входящий TLS-поток маршрутизируется через Nginx Stream на локальный порт Xray REALITY (`127.0.0.1:45443`).
 * **Защита Anti-Loop:** При подключении обычного веб-браузера или сканера активного зондирования Xray перенаправляет (*fallback*) запрос на изолированный слушатель **`127.0.0.1:9443`** (`xver: 1`), минуя внешний L4-роутер 443 и полностью исключая бесконечную петлю пересылки пакетов.
+* **Резервный сокет (L4 Failover):** В Stream-апстримы Reality интегрирован резервный сокет `server unix:/dev/shm/nginx-http.sock backup;`. Если Xray временно остановлен или ещё не настроен, Nginx автоматически перехватывает трафик и отдаёт маск-сайт с валидным SSL-сертификатом конкретного домена без ошибки отказа соединения.
 
 ### 2. Сценарий 2: Classic External REALITY (Внешний камуфляж)
 * Использование доверенных внешних доменов (`swdist.microsoft.com`, `www.samsung.com`, `gateway.icloud.com` и др.) в качестве SNI.
 * Каждому внешнему пулу назначается независимый локальный порт (`46443`, `47443` и т.д.), исключая коллизии и балансировочные таймауты.
 
-### 3. Шлюз VLESS xHTTP (Stream-One) + VLESSENC via Native HTTP/2 (Zero-Drop Engine)
-* **Нативное H2C-проксирование (`proxy_http_version 2`):** В Nginx Mainline (1.31.4+) проксирование к Xray xHTTP выполняется через честный протокол HTTP/2 без промежуточного преобразования в gRPC или деградации до HTTP/1.1.
-* **Тюнинг буфера приёма (`http2_recv_buffer_size 16m`):** Расширенный буфер воркеров Nginx и сокетные Keepalive (`proxy_socket_keepalive on; tcp_nodelay on;`) исключают зависания и деградацию скорости при передаче тяжёлых файлов (видео, спидтесты, 50+ МБ).
-* **Полнодуплексный стриминг без задержек:** Отключение буферизации тела (`proxy_request_buffering off; proxy_buffering off;`) обеспечивает сквозной двунаправленный обмен фреймами.
-* **Сквозное шифрование `vlessenc` (ML-KEM-768):** Полезная нагрузка защищается постквантовым симметричным ключом шифрования на уровне протокола VLESS, исключая сигнатуры в потоке.
-* **Чистый HTTP/2 без конфликта Vision:** В режиме xHTTP параметр `Flow` остаётся строго **`none` (пусто)**, так как Vision предназначен только для сырого TCP и ломает структуру HTTP/2-фреймов.
-* **Отключение очередей XMUX (`maxConcurrency: 0`):** Устраняет блокировку Head-of-Line и переполнение буферов, полностью предотвращая вылеты процессов по памяти на устройствах iOS (Apple Jetsam kill limit 50 MB) и зависание окна H2 на Android и ПК.
+### 3. Шлюз VLESS xHTTP (Stream-One/Up) + VLESSENC + XTLS-Vision (Zero-Drop Engine)
+* **Нативное H2C-проксирование (`proxy_http_version 2`):** В Nginx Mainline проксирование к Xray xHTTP выполняется через честный протокол HTTP/2 без промежуточного преобразования в gRPC или деградации до HTTP/1.1.
+* **Тюнинг буфера приёма (`http2_recv_buffer_size 16m`):** Расширенный буфер воркеров Nginx и сокетные Keepalive (`proxy_socket_keepalive on; tcp_nodelay on;`) исключают зависания и деградацию скорости при передаче тяжёлых файлов.
+* **Поддержка режимов Stream-One и Stream-Up:** Nginx валидирует методы `GET` и `POST` (`if ($request_method !~ ^(GET|POST)$) { return 404; }`). Это обеспечивает как работу полнодуплексного `stream-one`, так и двухпоточного `stream-up` (где входящий поток Downlink использует метод `GET`).
+* **Стабилизация буферов (`noSSEHeader: true`):** Отключение заголовков Server-Sent Events исключает задержки буферизации в Nginx и внешних CDN.
+* **Сквозное шифрование `vlessenc` (ML-KEM-768 native):** Полезная нагрузка защищается симметричным квантово-устойчивым ключом шифрования на уровне протокола VLESS.
+* **Совместимость с XTLS-Vision (`xtls-rprx-vision`):** В связке с VLESS Encryption алгоритм Vision работает на уровне протокола VLESS, обеспечивая 0-RTT проникновение (*penetration*) без двойного шифрования и динамический паддинг пакетов.
+* **Архитектурный пул соединений XMUX:** Настройка пула `"maxConcurrency": "0"` совместно с явным `"maxConnections": "1-3"` и случайной ротацией `"cMaxReuseTimes": "300-600"` объединяет параллельные сессии в 1–3 TCP-соединения, минимизируя заметность хендшейков для систем DPI.
 * **Паддинг заголовков:** Случайный мусор в HTTP-заголовках (`xPaddingBytes: 100-500`, ключ `X-Amz-Meta-Trace`).
 
 ### 4. Скоростные UDP-туннели: Hysteria 2 и AmneziaWG (UDP 443 / 8443 / 8444)
@@ -38,13 +40,14 @@
 * Использование `ssl_reject_handshake on` на дефолтном сервере для мгновенного сброса сканеров по прямому IP без раскрытия SSL-сертификата.
 
 ### 6. Три автономных локальных режима маскировки (Decoy Fronts)
-* **Режим 1 (Рекомендуемый):** Корпоративный IT SaaS *DataSphere Analytics* — интерактивный SPA-интерфейс в строгом стиле с геометрическим логотипом, эмуляцией бекенд-API и Live телеметрией ±10%.
+* **Режим 1 (Рекомендуемый):** Корпоративный IT SaaS *DataSphere Analytics* — интерактивный SPA-интерфейс в строгом стиле с геометрической координатной сферой, эмуляцией бекенд-API и Live телеметрией ±10%.
 * **Режим 2:** Облачный портал *CosmosCloud* с эмуляцией API авторизации, верификацией графики и сессионными cookies.
 * **Режим 3:** Стандартная заглушка веб-сервера (*Welcome to nginx!*).
+* **Сквозная доступность:** Маск-сайт открывается по HTTPS на **всех** зарегистрированных на сервере доменах (основной, WWW, домены Steal-Oneself и дополнительные Direct-домены).
 
 ### 7. Двухрежимный гибридный SSL-движок
-* **Certbot (HTTP-01):** Автоматический выпуск через Snapd с деплой-хуками нормализации прав (`chmod 755 / 644`).
-* **acme.sh (Cloudflare DNS-01):** Выпуск сертификатов через Cloudflare API (Token или Global Key), включая Wildcard-сертификаты.
+* **Certbot (HTTP-01):** Автоматический выпуск через Snapd с индивидуальной изоляцией сертификатов (`--cert-name "$dom"`) и деплой-хуками прав (`chmod 755 / 644`).
+* **acme.sh (Cloudflare DNS-01):** Выпуск сертификатов через Cloudflare API (Token или Global Key) с выносом в `/etc/ssl/acme/`.
 
 ---
 
@@ -63,20 +66,21 @@ graph TD
     Client443TCP[Клиент: 443/TCP или 8443/TCP] --> NginxStream(Nginx Stream L4 Router)
     Client443UDP[Клиент: 443/UDP / 8443/UDP / 8444/UDP] -->|Напрямую в обход Nginx| XrayHysteria[Xray: Hysteria 2 / AWG]
 
-    NginxStream -->|SNI: Главный домен / Пустой SNI| NginxSock[Unix Socket: /dev/shm/nginx-http.sock]
+    NginxStream -->|SNI: Главный / WWW / Доп. домены / Пустой SNI| NginxSock[Unix Socket: /dev/shm/nginx-http.sock]
     NginxStream -->|SNI: Steal-Oneself cdn.yourdomain.online| XrayStealREALITY[Xray REALITY :45443]
+    NginxStream -.->|Failover: Xray выключен / backup| NginxSock
     NginxStream -->|SNI: Внешний SNI swdist.microsoft.com| XrayClassicREALITY[Xray REALITY :46443]
 
-    XrayStealREALITY -->|Fallback не-REALITY / xver=1| NginxFallbackHTTP[Nginx HTTP :9443 Anti-Loop]
+    XrayStealREALITY -->|Fallback не-REALITY браузер / xver=1| NginxFallbackHTTP[Nginx HTTP :9443 Anti-Loop]
     XrayClassicREALITY -->|Fallback не-REALITY / Direct xver=0| ExternalSite[Внешний ресурс swdist.microsoft.com:443]
 
     NginxSock --> NginxHTTPCore[Nginx HTTP L7 Engine]
     NginxFallbackHTTP --> NginxHTTPCore
 
-    NginxHTTPCore -->|Корень /| DecoySite[Decoy Маскировка 1-3]
+    NginxHTTPCore -->|Корень / на любом домене| DecoySite[Decoy Маскировка 1-3]
     NginxHTTPCore -->|Секретный путь /my-3x-panel/| Panel3X[3X-UI Панель управления :10443]
     NginxHTTPCore -->|Путь подписок /my-post-key/| PanelSub[3X-UI Сервер подписок :55443]
-    NginxHTTPCore -->|Путь xHTTP /Stream-One-Path/ via proxy_http_version 2| XrayXHTTP[Xray VLESS xHTTP :50443]
+    NginxHTTPCore -->|Путь xHTTP /Stream-One-Path/ via H2C| XrayXHTTP[Xray VLESS xHTTP :50443]
 ```
 
 ---
@@ -87,7 +91,7 @@ graph TD
 
 | Платформа | Приложение | Поддерживаемые протоколы | Особенности |
 | :--- | :--- | :--- | :--- |
-| **Windows** | **v2rayN** / **Sing-box** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG | v2rayN v6.40+ (Xray-core v24.11+) |
+| **Windows** | **v2rayN** / **Sing-box** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG | v2rayN v6.40+ (Xray-core v24.11+ / v25+) |
 | **Android** | **v2rayNG** / **NekoBox** / **Sing-box** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG | v2rayNG v1.9.15+, NekoBox v1.3.1+ |
 | **iOS / iPadOS** | **Happ Proxy** / **FoXray** / **Streisand** / **Karing** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG | Актуальные версии из App Store |
 | **macOS** | **V2RayXS** / **FoXray** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG | Нативная поддержка Xray-core |
@@ -114,7 +118,7 @@ chmod +x secure-vps.sh
 * Сменить пароль root: `y` (или `n`)
 * Создать непривилегированного пользователя: `n`
 * Настроить SSH ключи для ROOT: `y` -> Выбор `1` (Сгенерировать пару Ed25519) или `2` (Вставить свой Public Key). *При выборе 1 обязательно сохраните приватный ключ!*
-* Изменить стандартный порт SSH: `y` -> Порт `60022`
+* Изменить стандартный порт SSH: `y` -> Порт `60022` (или ваш выбор)
 * Отключить вход по паролю: `y`
 * Блокировать ICMP (Ping): `n`
 * Установить 3x-ui: `y` -> Выбор `1` (Latest)
@@ -124,9 +128,9 @@ chmod +x secure-vps.sh
 
 ---
 
-## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.5.1)
+## 🚀 Этап 2: Развёртывание L4 Router и Маскировки (`setup_mask.sh` v6.5.2)
 
-На втором шаге подключается официальный репозиторий Nginx Mainline, генерируются SSL-сертификаты, разворачивается выбранная веб-маска и применяется комплексная матрица безопасности.
+На втором шаге подключается официальный репозиторий Nginx Mainline, выпускаются изолированные SSL-сертификаты для всех доменов, разворачивается выбранная веб-маска и конфигурируется L4/L7 маршрутизация.
 
 Запустите скрипт автоматической настройки:
 
@@ -142,12 +146,12 @@ chmod +x setup_mask.sh
 * **Steal-Oneself REALITY:** `y`
   * Локальный порт Xray: `45443`
   * Домены для порта 45443: `cdn.yourdomain.online`
-  * Добавить ещё порт Steal-Oneself? `n` (или `y` для настройки доп. портов)
+  * Добавить ещё порт Steal-Oneself? `n`
 * **Classic External REALITY:** `y`
   * Локальный порт Xray: `46443`
   * Внешний SNI: `swdist.microsoft.com`
   * Добавить ещё порт Classic? `n`
-* **Дополнительные SSL-домены:** *(Enter для завершения)*
+* **Дополнительные SSL-домены:** *(Enter для завершения или ввод дополнительных Direct-доменов)*
 * **Внутренний порт панели 3X-UI:** `10443`
 * **Секретный URI-путь к веб-панели:** `my-3x-panel`
 * **Внутренний порт сервера подписок:** `55443`
@@ -155,21 +159,22 @@ chmod +x setup_mask.sh
 * **Внутренний порт VLESS xHTTP:** `50443`
 * **URI-путь для xHTTP:** `Stream-One-Path`
 * **Настройка Hysteria 2 / AmneziaWG:** `y` (выбор желаемых портов, например 443, 8443, 8444)
-* **Вариант маскировки (DECOY_MODE):** `1` *(DataSphere Analytics)*, `2` *(CosmosCloud)* или `3` *(Nginx Stub)*
+* **Вариант маскировки (DECOY_MODE):** `1` *(DataSphere Analytics Enterprise)*, `2` *(CosmosCloud)* или `3` *(Nginx Stub)*
 * **Метод сертификации:** `1` *(Certbot HTTP-01)* или `2` *(acme.sh + Cloudflare DNS-01)*
 
 ---
 
 ### Настройка брандмауэра UFW (Выполнить после setup_mask.sh и преднастройки панели 3X-UI)
 
-Заблокируйте прямой доступ к внутренним техническим портам снаружи и откройте внешние точки входа VPN:
+> [!IMPORTANT]
+> Скрипт `setup_mask.sh v6.5.2` автоматически считывает активный порт демона SSH (`SSH_DETECTED_PORT`) и включает его в список разрешённых правил, исключая потерю доступа к серверу при включении брандмауэра.
 
 ```bash
-# Разрешаем внешние сетевые точки входа (Веб, REALITY, Hysteria 2 / AWG UDP и резервный 8443/TCP)
-ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 8443/tcp
+# 1. Разрешаем SSH (замените 60022 на ваш порт, если отличается), Веб, Hysteria 2 и AWG UDP
+ufw allow 60022/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 8443/tcp
 ufw allow 443/udp && ufw allow 8443/udp && ufw allow 8444/udp
 
-# Блокируем технические внутренние сокеты и порт Anti-Loop Fallback
+# 2. Блокируем технические внутренние порты от внешнего сканирования
 ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/tcp && ufw deny 45443/tcp && ufw deny 46443/tcp
 ```
 
@@ -198,7 +203,7 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ### 2. Конфигурирование Инбаундов в 3X-UI
 
-В разделе **Входящие (Inbounds)** создайте входящие подключения:
+В разделе **Входящие (Inbounds)** создайте подключения:
 
 ---
 
@@ -224,17 +229,24 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ---
 
-#### C. Инбаунд `VLESS_XHTTP` (Stream-One + VLESSENC + Zero-Drop Engine) 🚀
+#### C. Инбаунд `VLESS_XHTTP` (Stream-One/Up + VLESSENC + XMUX + Vision) 🚀
 * **Основное:** Порт `50443` | Listen IP `127.0.0.1` | Протокол `vless`
+* **Протокол (Decryption):** Выберите **ML-KEM-768 (native)** и нажмите **Сгенерировать** *(активирует квантово-устойчивое шифрование `vlessenc`)*.
 * **Поток (Stream Settings):**
-  * **Транспорт:** `xhttp` | **Режим:** `stream-one`
+  * **Транспорт:** `xhttp` | **Режим:** `stream-one` *(при частых обрывах на длинных аплоадах смените на `stream-up`)*
   * **Путь:** `/Stream-One-Path/` | **Хост:** `yourdomain.online`
   * **Паддинг:** `100-500` | **xPaddingObfsMode:** `true` | **Ключ:** `X-Amz-Meta-Trace`
-  * **XMUX:** `maxConcurrency: 0` *(Выключить очереди для стабильности на iOS и ПК)*
+  * **Стабилизация:** `noSSEHeader: true` *(устраняет задержки буферизации в Nginx)*
+  * **Архитектурный блок XMUX (Connection Pool):**
+    * `maxConcurrency: 0` *(отключение чрезмерного мультиплексирования в пользу пула соединений)*
+    * `maxConnections: 1-3` *(пул из 1–3 одновременных TCP-сессий)*
+    * `cMaxReuseTimes: 300-600` *(случайный разброс переиспользования)*
+    * `hKeepAlivePeriod: 600` *(редкие пинги стрима; или 0 для стандартного H2 ~45c)*
+    * `hMaxRequestTimes: 1000-2000`
+    * `hMaxReusableSecs: 1200-2400`
   * **QUIC / UDP:** `0` *(Строго выключено, трафик идёт через Nginx H2)*
 * **Безопасность:** `none` *(TLS снимает Nginx)* | Accept Proxy Protocol: `0` (Выключить)
-* **Протокол:** В поле **Decryption** выберите **ML-KEM-768 (native)** и сгенерируйте ключ `vlessenc`.
-* **Клиент (Client Settings):** Flow: **строго `none` (пусто)** ⚠️, Decryption: сгенерированный ключ `vlessenc`.
+* **Клиент (Client Settings):** Flow: **`xtls-rprx-vision`** ⚠️ *(в связке с VLESSENC обеспечивает 0-RTT проникновение и динамический паддинг)*, Decryption: сгенерированный ключ `vlessenc`.
 
 ---
 
@@ -250,43 +262,22 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 #### E. Инбаунд `AmneziaWG v3.1` (WG3 — UDP 8443)
 * **Вкладка «Основное»:**
-  * **Включить:** `Включено`
-  * **Примечание:** `WG3`
-  * **Протокол:** `amneziawg`
-  * **Адрес:** `0.0.0.0`
-  * **Стратегия адреса для ссылок:** `Адрес прослушивания inbound`
-  * **Порядок в подписке:** `1`
-  * **Порт:** `8443`
-  * **Общий расход:** `0`
-  * **Сброс трафика:** `Никогда`
+  * **Включить:** `Включено` | **Примечание:** `WG3` | **Протокол:** `amneziawg`
+  * **Адрес:** `0.0.0.0` | **Порт:** `8443` | **Сброс трафика:** `Никогда`
 * **Вкладка «Протокол»:**
-  * **Приватный / Публичный ключ:** Сгенерировать новую пару ключей (кнопка обновления рядом с полем приватного ключа)
-  * **Подсеть:** `10.8.1.0`
-  * **Маска подсети (CIDR):** `24`
-  * **MTU:** `1360`
-  * **Основной DNS:** `8.8.8.8`
-  * **Резервный DNS:** `8.8.4.4`
-  * **Внешний интерфейс:** `eth0` *(или оставить пустым для автоматического определения)*
-  * **Включить IPv6:** `Выключено`
+  * **Ключи:** Сгенерировать новую пару ключей кнопкой обновления
+  * **Подсеть:** `10.8.1.0` | **Маска (CIDR):** `24` | **MTU:** `1360`
+  * **DNS:** `8.8.8.8` / `8.8.4.4` | **IPv6:** `Выключено`
 * **Параметры обфускации:**
-  * **Jc (кол-во мусорных пакетов):** `4`
-  * **Jmin (мин. размер мусорного пакета):** `50`
-  * **Jmax (макс. размер мусорного пакета):** `160`
-  * **S1 (мусор init-пакета):** `45`
-  * **S2 (мусор response-пакета):** `60`
-  * **S3 (паддинг cookie reply):** `24`
-  * **S4 (паддинг transport-пакета):** `16`
-  * **H1 – H4 (магические заголовки):** **Оставить ПУСТЫМИ** *(для значений 1/2/3/4 по умолчанию)*
-  * **I1 – I5 (сигнатурные пакеты):** **Оставить ПУСТЫМИ**
-  * **HeaderProtectionKey (защита заголовков):** **Ключ Base64 длиной 32 байта; должен совпадать в конфигурации каждого клиента. Или оставьте пустым, чтобы отключить защиту заголовков.** 
-  * **ContentPaddingAddition (паддинг содержимого):** `3-16`
-  * **RekeyAfterTime (секунды):** `107-135`
-  * **RekeyTimeout (секунды):** `3-4`
-  * **RejectAfterTime (секунды):** `178-211`
-  * **KeepaliveTimeout (секунды):** `8-10`
-  * **MaxHandshakeAttempts:** `21-26`
-  * **RandomTrailers:** `Выключено (OFF)`
-  * **DisableCookies:** `Включено (ON)`
+  * `Jc = 4`, `Jmin = 50`, `Jmax = 160`
+  * `S1 = 45`, `S2 = 60`, `S3 = 24`, `S4 = 16`
+  * `H1 – H4`: **Оставить ПУСТЫМИ** *(дефолты 1/2/3/4)*
+  * `I1 – I5`: **Оставить ПУСТЫМИ**
+  * `HeaderProtectionKey`: **Оставить ПУСТЫМ**
+  * `ContentPaddingAddition`: `3-16`
+  * `RekeyAfterTime`: `107-135` | `RekeyTimeout`: `3-4` | `RejectAfterTime`: `178-211`
+  * `KeepaliveTimeout`: `8-10` | `MaxHandshakeAttempts`: `21-26`
+  * `RandomTrailers`: `Выключено (OFF)` | `DisableCookies`: `Включено (ON)`
 
 ---
 
@@ -302,18 +293,18 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 
 ### 3. Автоматизация ссылок подписок (Раздел «Хосты» / Hosts) 💡
 
-Для того чтобы клиенты автоматически подключались к VLESS xHTTP по порту 443 с корректным TLS, в разделе **Хосты** (`🌐`) панели 3X-UI создаются два правила:
+Для того чтобы клиенты автоматически подключались к VLESS xHTTP по внешнему порту 443 с корректным TLS-сертификатом, в разделе **Хосты** (`🌐`) панели 3X-UI создаются два правила:
 
 #### Правило 1: Для REALITY и Hysteria 2 (`MAIN_SAME_443`)
 * **Примечание:** `MAIN_SAME_443`
 * **Входящие:** Отметьте: `VLESS_STEAL`, `VLESS_CLASSIC`, `Hysteria 2`.
-* **Адрес (Target Address):** `yourdomain.online:443` | **Порт:** `443`
+* **Адрес (Target Address):** `yourdomain.online` | **Порт:** `443`
 * **Безопасность:** `same` *(Сохраняет тип: REALITY остаётся reality, Hysteria — tls)*
 
 #### Правило 2: Для VLESS xHTTP (`XHTTP_TLS_443`)
 * **Примечание:** `XHTTP_TLS_443`
 * **Входящие:** Отметьте только: `VLESS_XHTTP`.
-* **Адрес (Target Address):** `yourdomain.online:443` | **Порт:** `443`
+* **Адрес (Target Address):** `yourdomain.online` | **Порт:** `443`
 * **Безопасность:** `tls` ⚠️ *(Принудительно подставляет TLS для внешнего порта 443 Nginx)*
 * **SNI:** `yourdomain.online` | **ALPN:** `h2` | **Fingerprint:** `chrome`
 
@@ -330,14 +321,14 @@ nginx -t && systemctl status nginx --no-pager
 # 2. Проверка активности сокета в оперативной памяти
 ls -la /dev/shm/nginx-http.sock
 
-# 3. Тест доступности маскировочного сайта через HTTP/2
+# 3. Тест доступности маскировочного сайта через HTTP/2 на главном домене
 curl -Iv --http2 https://yourdomain.online
 
-# 4. Тест шлюза xHTTP (должен возвращать 404 Not Found на пустой GET, подтверждая активность локации)
-curl -Iv --http2 https://yourdomain.online/Stream-One-Path/
+# 4. Проверка доступности маск-сайта на Steal-Oneself домене (должен отдавать маску без ошибок)
+curl -Iv --http2 https://cdn.yourdomain.online
 
-# 5. Проверка Fallback Steal-Oneself (должен отдавать маску без зацикливания)
-curl -Iv --resolve cdn.yourdomain.online:443:127.0.0.1 https://cdn.yourdomain.online
+# 5. Тест шлюза xHTTP (должен возвращать 404 Not Found, подтверждая активность защищённой локации)
+curl -Iv --http2 https://yourdomain.online/Stream-One-Path/
 
 # 6. Проверка доступности портов UDP (Hysteria / AWG)
 nc -zvu 127.0.0.1 443
@@ -353,8 +344,8 @@ tail -f /var/log/nginx/error.log
 
 ## 🔄 Автоматическое продление SSL-сертификатов
 
-Сертификаты Let's Encrypt обновляются в полностью автоматическом режиме:
-* **Certbot:** Системный таймер `snap.certbot.renew.timer` запускается дважды в сутки. При успешном продлении срабатывает скрипт-хук `/etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh`, который нормализует права доступа (`chmod 755 / 644`) для чтения демонами `nginx` и `nobody (Xray)` и выполняет мягкую перезагрузку `systemctl reload nginx`.
+Сертификаты обновляются в полностью автоматическом режиме:
+* **Certbot:** Системный таймер `snap.certbot.renew.timer` запускается дважды в сутки. При успешном продлении срабатывает скрипт-хук `/etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh`, который нормализует права доступа (`chmod 755 / 644`) для чтения демонами `nginx` и `nobody (Xray)` и выполняет перезагрузку `systemctl reload nginx`.
 * **acme.sh:** Обновление контролируется заданием Cron (`cron`), вызывающим установку обновлённых сертификатов в `/etc/ssl/acme/` с перезагрузкой веб-сервера.
 
 Для принудительной проверки продления вручную:
@@ -377,6 +368,7 @@ certbot renew --dry-run
 tar -czvf backup_proxy_$(date +%F).tar.gz \
   /etc/nginx \
   /etc/letsencrypt \
+  /etc/ssl/acme \
   /etc/x-ui/x-ui.db \
   /var/www/html
 ```
@@ -482,7 +474,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
 </details>
 
 <details>
-<summary><b>3. JSON: VLESS xHTTP Stream-One + VLESSENC (Порт 50443)</b></summary>
+<summary><b>3. JSON: VLESS xHTTP Stream-One/Up + VLESSENC + XMUX Pool + Vision (Порт 50443)</b></summary>
 
 ```json
 {
@@ -494,7 +486,7 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
     "clients": [
       {
         "id": "ВАШ_UUID",
-        "flow": ""
+        "flow": "xtls-rprx-vision"
       }
     ],
     "decryption": "ВАШ_VLESSENC_KEY"
@@ -509,11 +501,17 @@ nginx -t && systemctl restart nginx && systemctl restart x-ui
       "path": "/Stream-One-Path/",
       "host": "yourdomain.online",
       "mode": "stream-one",
+      "noSSEHeader": true,
       "xPaddingBytes": "100-500",
       "xPaddingObfsMode": true,
       "xPaddingKey": "X-Amz-Meta-Trace",
       "xmux": {
-        "maxConcurrency": 0
+        "maxConcurrency": "0",
+        "maxConnections": "1-3",
+        "cMaxReuseTimes": "300-600",
+        "hKeepAlivePeriod": 600,
+        "hMaxRequestTimes": "1000-2000",
+        "hMaxReusableSecs": "1200-2400"
       }
     },
     "security": "none"
