@@ -78,7 +78,6 @@ graph TD
     NginxStream -->|SNI: Главный / WWW / Доп. домены / Пустой SNI| NginxSock[Unix Socket: /dev/shm/nginx-http.sock]
     NginxStream -->|SNI: DoH dns.yourdomain.online| NginxSock
     NginxStream -->|SNI: Steal-Oneself cdn.yourdomain.online| XrayStealREALITY[Xray REALITY :45443]
-    NginxStream -.->|Failover: Xray выключен / backup| NginxSock
     NginxStream -->|SNI: Внешний SNI swdist.microsoft.com| XrayClassicREALITY[Xray REALITY :46443]
 
     XrayStealREALITY -->|Fallback не-REALITY браузер / xver=1| NginxFallbackHTTP[Nginx HTTP :9443 Anti-Loop]
