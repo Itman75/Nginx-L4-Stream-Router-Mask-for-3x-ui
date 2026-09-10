@@ -1,29 +1,32 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup: Hardened Engine v6.5.1 Universal (Public Edition)
+# Production AutoSetup: Hardened Engine v6.5.2 Universal (Public Edition)
 # Nginx L4 Stream + 3X-UI + Unix Sockets + Native proxy_http_version 2 + 3 Decoys
 # ==============================================================================
 # Архитектура:
 #   1) Nginx Mainline Branch v.1.31.4+ (Официальный репозиторий nginx.org)
 #   2) Steal-Oneself REALITY с защитой от зацикливания (Anti-Loop Fallback 9443)
+#      и автоматическим failover-открытием маск-сайта для всех доменов
 #   3) Classic External REALITY (Выделение портов для внешних SNI)
-#   4) VLESS xHTTP (Stream-One) + VLESSENC + Native H2 Streaming (без XMUX-блокировок)
+#   4) VLESS xHTTP (Stream-One/Up) + VLESSENC + XTLS-Vision + XMUX Connection Pool
 #      (СТРОГО по TCP/HTTP/2 без QUIC — полнодуплексное H2C-проксирование Nginx)
 #   5) Опциональный скоростной UDP VPN: Hysteria 2 (по умолчанию 443/UDP)
 #   6) Опциональный двухверсионный стек AmneziaWG / WireGuard:
 #      - AmneziaWG v3.1 (WG3, по умолчанию 8443/UDP, Transport Protection)
 #      - AmneziaWG v2.0 / Legacy 1.0 (по умолчанию 8444/UDP, для роутеров)
 #   7) Гибридный SSL-движок с разделением каталогов:
-#      - Certbot (HTTP-01): /etc/letsencrypt/live/
-#      - acme.sh + Cloudflare (DNS-01): /etc/ssl/acme/ (изоляция от /root/ и 755/644)
+#      - Certbot (HTTP-01): /etc/letsencrypt/live/ (строгая изоляция --cert-name)
+#      - acme.sh + Cloudflare (DNS-01): /etc/ssl/acme/ (изоляция прав 755/644)
 #   8) 3 автономных локальных режима маскировки (Decoy Front):
-#      - 1: DataSphere Analytics Enterprise 
-#      - 2: Облако CosmosCloud 
+#      - 1: DataSphere Analytics Enterprise (Геометрическая сфера + Live телеметрия ±10%)
+#      - 2: Облако CosmosCloud (с эмуляцией API, ассетами и logo.webp)
 #      - 3: Стандартная заглушка Nginx (Welcome to nginx)
-#   9) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
-#  10) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
-#  ==============================================================================
+#   9) Полная доступность маск-сайта со ВСЕХ зарегистрированных доменов
+#  10) Комплексная защита от ботов, сканеров уязвимостей, AI-парсеров (444/404)
+#  11) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
+#  12) Автоопределение SSH-порта для безопасной настройки UFW
+# ==============================================================================
 
 set -euo pipefail
 
@@ -43,7 +46,7 @@ die()  { echo -e "${RED}[X] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN} Nginx xHTTP + REALITY + Hy2 + AWG Router v6.5.1 (Public Edition)    ${NC}"
+echo -e "${GREEN} Nginx xHTTP + REALITY + Hy2 + AWG Router v6.5.2 (Public Edition)    ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 # ----------------------- Системные предусловия -----------------------
@@ -73,6 +76,7 @@ declare -A pkg_map=(
     [socat]="socat"
     [cron]="cron"
     [ufw]="ufw"
+    [ss]="iproute2"
 )
 
 apt_updated=0
@@ -104,6 +108,10 @@ validate_path_segment() {
         die "Параметр $name ('$val') содержит недопустимые символы. Используйте только латиницу, цифры, дефис, подчеркивание и слэши."
     fi
 }
+
+# Определение активного SSH-порта для защиты от самоблокировки в UFW
+SSH_DETECTED_PORT=$(ss -tlnp 2>/dev/null | grep -E 'sshd|ssh' | awk '{print $4}' | awk -F: '{print $NF}' | sort -u | head -n1 || echo "")
+SSH_DETECTED_PORT="${SSH_DETECTED_PORT:-22}"
 
 # =============================================================
 #  ИНТЕРАКТИВНАЯ КОНФИГУРАЦИЯ И СЦЕНАРИИ МАРШРУТИЗАЦИИ
@@ -140,6 +148,7 @@ fi
 echo
 echo -e "${YELLOW}Шаг 2: Настройка Steal-Oneself REALITY (Кража у самого себя)${NC}"
 echo -e "${CYAN}SSL-сертификаты выпускаются на ваши домены, трафик которых Nginx перенаправляет на порты REALITY.${NC}"
+echo -e "${CYAN}Маск-сайт будет гарантированно открываться на каждом из этих доменов!${NC}"
 read -rp "Включить Steal-Oneself REALITY? [Y/n]: " ENABLE_STEAL_INPUT
 ENABLE_STEAL_INPUT="${ENABLE_STEAL_INPUT:-y}"
 
@@ -283,7 +292,7 @@ validate_path_segment "$RAW_SUB_PATH" "URI подписок"
 SUB_PATH="/${RAW_SUB_PATH#/}"
 SUB_PATH="${SUB_PATH%/}/"
 
-prompt_default "Внутренний порт инбаунда VLESS xHTTP (HTTP/2 Stream-One)" "50443" XHTTP_STREAM_PORT
+prompt_default "Внутренний порт инбаунда VLESS xHTTP (HTTP/2 Stream-One/Up)" "50443" XHTTP_STREAM_PORT
 prompt_default "URI-путь для xHTTP Stream-One" "Stream-One-Path" RAW_XHTTP_STREAM_PATH
 validate_path_segment "$RAW_XHTTP_STREAM_PATH" "URI xHTTP"
 XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
@@ -623,8 +632,9 @@ EOF
 
     for dom in "${ALL_DOMAINS[@]}"; do
         log "Выпуск сертификата Let's Encrypt для домена: $dom..."
-        if certbot certonly --webroot -w "$WEBROOT" --expand -d "$dom"; then
-            ok "Сертификат для $dom успешно получен."
+        # Использование --cert-name строго изолирует сертификат каждого домена в /etc/letsencrypt/live/$dom/
+        if certbot certonly --webroot -w "$WEBROOT" --cert-name "$dom" --expand --non-interactive --agree-tos -d "$dom"; then
+            ok "Сертификат для $dom успешно получен в /etc/letsencrypt/live/$dom/"
         else
             warn "Не удалось выпустить сертификат для $dom."
             if [ "$dom" = "$PRIMARY_DOMAIN" ]; then
@@ -717,7 +727,7 @@ fi
 log "Формирование выбранного маскировочного портала..."
 
 if [ "$DECOY_MODE" = "1" ]; then
-    # 1. DataSphere Analytics Enterprise (Геометрический логотип + Dynamic Stats ±10%)
+    # 1. DataSphere Analytics Enterprise (Строгий геометрический логотип + Dynamic Stats ±10%)
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
@@ -1242,6 +1252,9 @@ chmod 644 "$WEBROOT"/*.html
 # =============================================================
 log "Сборка конфигурации Nginx Mainline (Stream L4 + HTTP/2 Upstream Engine)..."
 
+# Удаление временного стартового ACME-сервера для исключения конфликтов порта 80
+rm -f /etc/nginx/conf.d/00-acme.conf
+
 # 1. Глобальный файл конфигурации /etc/nginx/nginx.conf
 cat << EOF > /etc/nginx/nginx.conf
 user $NGINX_USER;
@@ -1396,7 +1409,7 @@ stream {
 }
 EOF
 
-# 2. Карта SNI для Stream L4
+# 2. Карта SNI для Stream L4 (с защитой отказоустойчивости backup для Steal-Oneself)
 STREAM_MAP_RULES=""
 REALITY_UPSTREAMS=""
 
@@ -1422,7 +1435,8 @@ for port in "${ALL_REALITY_PORTS[@]:-}"; do
     if [ -n "$port" ]; then
         REALITY_UPSTREAMS+="
     upstream reality_backend_${port} {
-        server 127.0.0.1:${port};
+        server 127.0.0.1:${port} max_fails=1 fail_timeout=5s;
+        server unix:/dev/shm/nginx-http.sock backup;
     }
 "
     fi
@@ -1560,7 +1574,7 @@ fi
 
 # 4. Основной виртуальный хост в /etc/nginx/conf.d/01-main.conf
 cat << EOF > "/etc/nginx/conf.d/01-main.conf"
-# HTTP Порт 80 (Проверка ACME и редирект на HTTPS)
+# HTTP Порт 80 (Единый сервер: верификация ACME и безусловный редирект всех доменов на HTTPS)
 server {
     listen 80 default_server;
     server_name _;
@@ -1671,9 +1685,10 @@ server {
         proxy_set_header Connection \$connection_upgrade;
     }
 
-    # --- ЛОКАЦИЯ 3: VLESS xHTTP (Native HTTP/2 Stream-One + VLESSENC + Безотказный сокет) ---
+    # --- ЛОКАЦИЯ 3: VLESS xHTTP (Native HTTP/2 Stream-One/Up + VLESSENC + Безотказный сокет) ---
     location ^~ ${XHTTP_STREAM_PATH} {
-        if (\$request_method != POST) {
+        # Поддержка POST (stream-one / stream-up uplink) и GET (stream-up downlink)
+        if (\$request_method !~ ^(GET|POST)\$) {
             return 404;
         }
 
@@ -1733,7 +1748,7 @@ server {
 }
 EOF
 
-# 5. Генерация виртуальных хостов для дополнительных доменов
+# 5. Генерация виртуальных хостов для ВСЕХ дополнительных доменов (Steal-Oneself, WWW, Extra)
 for ((i=1; i<${#ALL_DOMAINS[@]}; i++)); do
     ext_dom="${ALL_DOMAINS[$i]}"
     if [ "$ext_dom" != "$PRIMARY_DOMAIN" ] && [ -f "${SSL_BASE_DIR}/$ext_dom/fullchain.pem" ]; then
@@ -1768,6 +1783,7 @@ server {
 
     error_page 400 403 404 405 @notfound;
 
+    # Маск-сайт открывается безусловно для любого зарегистрированного домена
     $DECOY_LOCATION_BLOCKS
 
     location ^~ ${PANEL_PATH} {
@@ -1851,7 +1867,8 @@ for port in "${ALL_REALITY_PORTS[@]:-}"; do
     fi
 done
 
-UFW_ALLOW_LIST="ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 8443/tcp"
+# Включение определенного порта SSH в разрешающие правила UFW
+UFW_ALLOW_LIST="ufw allow ${SSH_DETECTED_PORT}/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 8443/tcp"
 if [ "$ENABLE_HY2" -eq 1 ] && [ -n "$HY2_PORT" ]; then
     UFW_ALLOW_LIST="${UFW_ALLOW_LIST} && ufw allow ${HY2_PORT}/udp"
 fi
@@ -1918,14 +1935,14 @@ if [ "$CLASSIC_ENABLED" -eq 1 ]; then
 fi
 
 DECOY_NAME="Локальный Front"
-if [ "$DECOY_MODE" = "1" ]; then DECOY_NAME="DataSphere Analytics Enterprise (Геометрическая маска)";
+if [ "$DECOY_MODE" = "1" ]; then DECOY_NAME="DataSphere Analytics Enterprise (Геометрическая сфера)";
 elif [ "$DECOY_MODE" = "2" ]; then DECOY_NAME="CosmosCloud NextGen";
 elif [ "$DECOY_MODE" = "3" ]; then DECOY_NAME="Default Nginx Stub";
 fi
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.5.1 PUBLIC EDITION)!       "
+echo -e "   ИНФРАСТРУКТУРА УСПЕШНО РАЗВЕРНУТА (v6.5.2 PUBLIC EDITION)!       "
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Главная страница:            ${CYAN}https://${PRIMARY_DOMAIN}/${NC} (${DECOY_NAME})"
 echo -e "  Вход в панель 3X-UI:         ${GREEN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
@@ -1943,14 +1960,23 @@ echo
 echo -e "${YELLOW}ШАГ 2: Инбаунды VLESS REALITY (3X-UI):${NC}"
 echo -e "$REALITY_INBOUNDS_REPORT"
 
-echo -e "${YELLOW}ШАГ 3: Инбаунд VLESS xHTTP (Native H2 Stream-One + VLESSENC + Анти-Дроп):${NC}"
+echo -e "${YELLOW}ШАГ 3: Инбаунд VLESS xHTTP (Native H2 Stream-One/Up + VLESSENC + XMUX Pool):${NC}"
 echo -e "  - ${YELLOW}Вкладка «Основное»:${NC} Протокол: ${GREEN}vless${NC} | Адрес: ${GREEN}127.0.0.1${NC} | Порт: ${GREEN}$XHTTP_STREAM_PORT${NC}"
 echo -e "  - ${YELLOW}Вкладка «Протокол»:${NC} Генерация ключей: выбрать ${GREEN}ML-KEM-768 (native)${NC} и нажать ${CYAN}«Сгенерировать»${NC}"
 echo -e "  - ${YELLOW}Вкладка «Поток»:${NC}"
-echo -e "    * Транспорт: ${GREEN}xHTTP${NC} | Режим: ${GREEN}stream-one${NC}"
+echo -e "    * Транспорт: ${GREEN}xHTTP${NC} | Режим: ${GREEN}stream-one${NC} (при разрывах на длинных аплоадах смените на ${CYAN}stream-up${NC})"
 echo -e "    * Хост: ${CYAN}$PRIMARY_DOMAIN${NC} | Путь: ${CYAN}$XHTTP_STREAM_PATH${NC}"
 echo -e "    * Padding Bytes: ${GREEN}100-500${NC} | Padding Obfs Mode: ${GREEN}Включить${NC} | Key: ${GREEN}X-Amz-Meta-Trace${NC}"
-echo -e "    * XMUX: ${GREEN}maxConcurrency: 0 (Выключено)${NC} — исключает раздувание буферов и вылеты на iOS/ПК"
+echo -e "    * Стабилизация буферов: включите ${GREEN}noSSEHeader: true${NC} (устраняет задержки SSE в Nginx)"
+echo -e "    * ${BOLD}Архитектурный блок XMUX (Connection Pool & Anti-DPI Rotation):${NC}"
+echo -e "      ${CYAN}\"xmux\": {${NC}"
+echo -e "        ${CYAN}\"maxConcurrency\": \"0\",${NC}        ${YELLOW}# Отключение мультиплексирования в пользу пула соединений${NC}"
+echo -e "        ${CYAN}\"maxConnections\": \"1-3\",${NC}      ${YELLOW}# Пул из 1–3 TCP-сессий (минимум хендшейков в трафике)${NC}"
+echo -e "        ${CYAN}\"cMaxReuseTimes\": \"300-600\",${NC}  ${YELLOW}# Случайный разброс переиспользования до смены сокета${NC}"
+echo -e "        ${CYAN}\"hKeepAlivePeriod\": 600,${NC}       ${YELLOW}# Редкие пинги стрима (или 0 для нативного браузерного H2 ~45c)${NC}"
+echo -e "        ${CYAN}\"hMaxRequestTimes\": \"1000-2000\",${NC} ${YELLOW}# Лимит запросов на соединение${NC}"
+echo -e "        ${CYAN}\"hMaxReusableSecs\": \"1200-2400\"${NC} ${YELLOW}# Время жизни сессии до гарантированной ротации${NC}"
+echo -e "      ${CYAN}}${NC}"
 echo -e "    * ${RED}ВНИМАНИЕ:${NC} ${YELLOW}QUIC / UDP ПАРАМЕТРЫ СТРОГО ВЫКЛЮЧИТЬ (0)${NC} — поток идёт строго по HTTP/2 TCP через Nginx!"
 echo -e "  - ${YELLOW}Вкладка «Безопасность»:${NC} ${RED}Нет (None)${NC} | Accept Proxy Protocol: ${RED}Выключить (0)${NC}"
 echo -e "  - ${YELLOW}Вкладка «Сниффинг»:${NC} Включить (${GREEN}HTTP, TLS, QUIC, FAKEDNS${NC})"
@@ -2005,7 +2031,7 @@ fi
 echo -e "${YELLOW}ШАГ 7: Настройки Клиента и Подписок в 3X-UI:${NC}"
 echo -e "  - ${YELLOW}В карточке Клиента (Клиенты -> Учетные данные):${NC}"
 echo -e "    * Для инбаунда REALITY: Flow: выбрать ${GREEN}xtls-rprx-vision${NC}"
-echo -e "    * Для инбаунда xHTTP: Flow: строго ${RED}пусто (none)${NC} | Decryption: ключ ${GREEN}vlessenc${NC}"
+echo -e "    * Для инбаунда xHTTP: Flow: выбрать ${GREEN}xtls-rprx-vision${NC} (0-RTT через VLESSENC penetration) | Decryption: ключ ${GREEN}vlessenc${NC}"
 echo -e "  - ${YELLOW}Настройки подписок (Панель -> Подписка):${NC}"
 echo -e "    * Subscription Port: ${GREEN}$SUB_PORT${NC} | Subscription Path: ${GREEN}$SUB_PATH${NC}"
 echo -e "    * Subscription URL: ${CYAN}https://${PRIMARY_DOMAIN}${SUB_PATH}${NC}"
