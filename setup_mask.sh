@@ -16,18 +16,21 @@
 #      - AmneziaWG v2.0 / Legacy 1.0 (по умолчанию 8444/UDP, для роутеров)
 #   7) Опциональный модуль AdGuard Home:
 #      - Приватный DoH (DNS-over-HTTPS) с защитой ClientID для домашних роутеров
+#      - Загрузка с официального статического CDN static.adguard.com
 #      - Эталонный пул Upstream DNS: Split-DNS (РФ/СНГ -> Яндекс DoH, YouTube -> Google H3)
 #      - Скоростные апстримы DNS-over-QUIC (DoQ) и HTTP/3 (NextDNS, Quad9, Cloudflare)
 #      - Освобождение 53-го порта от systemd-resolved
 #      - Проксирование веб-панели и /dns-query через Nginx поддомен с TLS 1.3
-#   8) Гибридный SSL-движок с разделением каталогов:
-#      - Certbot (HTTP-01): /etc/letsencrypt/live/ 
-#      - acme.sh + Cloudflare (DNS-01): /etc/ssl/acme/ 
+#   8) Гибридный SSL-движок с защитой от дублирования аккаунтов Certbot:
+#      - Certbot (HTTP-01): /etc/letsencrypt/live/ (--cert-name строгая изоляция)
+#      - acme.sh + Cloudflare (DNS-01): /etc/ssl/acme/ (права 755/644)
 #   9) 3 автономных локальных режима маскировки (Decoy Front):
 #      - 1: DataSphere Analytics Enterprise (Геометрическая сфера + Live телеметрия ±10%)
 #      - 2: Облако CosmosCloud (с эмуляцией API, ассетами и logo.webp)
 #      - 3: Стандартная заглушка Nginx (Welcome to nginx)
-#  10) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
+#  10) Полная доступность маск-сайта со ВСЕХ зарегистрированных доменов
+#  11) Полный тюнинг ядра Linux (TCP BBR, fq, somaxconn, lowat, IPC /dev/shm, UDP buffers)
+#  12) Автоопределение активного порта SSH для безопасной настройки UFW
 # ==============================================================================
 
 set -euo pipefail
@@ -658,6 +661,15 @@ if [ "$SSL_ENGINE_CHOICE" = "1" ]; then
     snap install --classic certbot
     ln -sf /snap/bin/certbot /usr/bin/certbot
 
+    # Защита от ошибки выбора аккаунта (Please choose an account) при наличии нескольких старых регистраций
+    if [ -d /etc/letsencrypt/accounts ]; then
+        acc_count=$(find /etc/letsencrypt/accounts -mindepth 3 -maxdepth 3 -type d 2>/dev/null | wc -l)
+        if [ "$acc_count" -gt 1 ]; then
+            warn "Обнаружено несколько старых аккаунтов Certbot ($acc_count). Очищаем дубликаты..."
+            rm -rf /etc/letsencrypt/accounts/*/*
+        fi
+    fi
+
     mkdir -p /etc/letsencrypt
     if [ -n "$LE_EMAIL" ]; then
         cat << EOF > /etc/letsencrypt/cli.ini
@@ -780,7 +792,7 @@ EOF
     systemctl restart systemd-resolved || true
     ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null || true
 
-    # 2. Скачивание и установка демона AdGuard Home
+    # 2. Скачивание с официального статического CDN AdGuard
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64) AGH_ARCH="amd64" ;;
@@ -789,7 +801,11 @@ EOF
         *) AGH_ARCH="amd64" ;;
     esac
 
-    curl -s -S -L "https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/gh-pages/release/AdGuardHome_linux_${AGH_ARCH}.tar.gz" -o /tmp/AdGuardHome.tar.gz
+    log "Загрузка бинарного архива AdGuard Home..."
+    if ! curl -fsSL "https://static.adguard.com/adguardhome/release/AdGuardHome_linux_${AGH_ARCH}.tar.gz" -o /tmp/AdGuardHome.tar.gz; then
+        warn "Не удалось загрузить со static.adguard.com, пробуем официальный GitHub релиз..."
+        curl -fsSL "https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${AGH_ARCH}.tar.gz" -o /tmp/AdGuardHome.tar.gz
+    fi
     tar -zxvf /tmp/AdGuardHome.tar.gz -C /opt/ >/dev/null
     rm -f /tmp/AdGuardHome.tar.gz
 
@@ -2065,7 +2081,7 @@ for port in "${ALL_REALITY_PORTS[@]:-}"; do
     fi
 done
 
-# Включение определённого порта SSH в разрешающие правила UFW
+# Разрешающие правила: SSH (автоопределённый), Веб, Hysteria 2 / AWG UDP
 UFW_ALLOW_LIST="ufw allow ${SSH_DETECTED_PORT}/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 8443/tcp"
 if [ "$ENABLE_HY2" -eq 1 ] && [ -n "$HY2_PORT" ]; then
     UFW_ALLOW_LIST="${UFW_ALLOW_LIST} && ufw allow ${HY2_PORT}/udp"
