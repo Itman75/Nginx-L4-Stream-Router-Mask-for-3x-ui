@@ -399,25 +399,46 @@ certbot renew --dry-run
 
 ## 💾 Резервное копирование и восстановление
 
-Для сохранения полной конфигурации шлюза выполните команду создания архива:
+Для предотвращения повреждения базы данных SQLite (`x-ui.db`) и журналов WAL резервное копирование и восстановление выполняются с кратковременной остановкой служб (на 1–2 секунды). Также архивируется весь каталог `/etc/x-ui/`, а не только один файл базы.
 
+### Создание резервной копии:
 ```bash
-# Создание резервной копии конфигурации Nginx, AdGuard Home, сертификатов и базы 3X-UI
+# Кратковременно останавливаем службы для консистентного слепка БД без блокировок
+systemctl stop x-ui AdGuardHome 2>/dev/null || true
+
+# Создание архива (каталог /etc/x-ui архивируется целиком со всеми журналами)
 tar -czvf backup_proxy_$(date +%F).tar.gz \
   /etc/nginx \
   /etc/letsencrypt \
   /etc/ssl/acme \
-  /opt/AdGuardHome \
-  /etc/x-ui/x-ui.db \
+  /opt/AdGuardHome/AdGuardHome.yaml \
+  /etc/x-ui \
   /var/www/html
+
+# Запускаем службы обратно
+systemctl start x-ui AdGuardHome 2>/dev/null || true
 ```
 
-Для восстановления из архива:
+### Восстановление из резервной копии:
 ```bash
-tar -xzvf backup_proxy_YYYY-MM-DD.tar.gz -C /
-nginx -t && systemctl restart nginx && systemctl restart x-ui && systemctl restart AdGuardHome
-```
+# 1. ОБЯЗАТЕЛЬНО останавливаем службы перед заменой файлов
+systemctl stop x-ui nginx AdGuardHome 2>/dev/null || true
 
+# 2. Удаляем остаточные файлы блокировок и журналов WAL текущей сессии
+rm -f /etc/x-ui/x-ui.db-wal /etc/x-ui/x-ui.db-shm
+
+# 3. Распаковываем архив в корень системы
+tar -xzvf backup_proxy_YYYY-MM-DD.tar.gz -C /
+
+# 4. Проверяем синтаксис Nginx и безопасно запускаем службы
+nginx -t && systemctl start nginx x-ui AdGuardHome
+
+---
+
+### Что изменилось:
+* `/etc/x-ui` теперь архивируется **целиком** как каталог (включая саму базу и возможные журналы транзакций).
+* В AdGuard Home архивируется его файл настроек `/opt/AdGuardHome/AdGuardHome.yaml` вместо попытки заархивировать огромный бинарный лог запросов.
+* Перед распаковкой удаляются `x-ui.db-wal` и `x-ui.db-shm`, благодаря чему SQLite запускается с чистой гарантированно рабочей базы.
 ---
 
 ## 📄 Примеры конфигов (JSON-шаблоны) инбаундов Xray:
