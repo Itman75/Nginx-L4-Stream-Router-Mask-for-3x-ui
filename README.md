@@ -1,6 +1,6 @@
 # 🛡️ Hardened VPS & Nginx L4 Stream Router Mask for 3X-UI (v6.5.3 Universal)
 
-> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, скоростным транспортом Hysteria 2 (UDP 443), встроенным приватным DoH-резолвером AdGuard Home с раздельной маршрутизацией (Split-DNS), многоуровневой маскировкой, отказоустойчивой маршрутизацией доменов (L4 Failover), защитой от систем глубокого анализа пакетов (DPI / Active Probing) и полной изоляцией внутренних служб через сокеты в RAM.**  
+> **Высокопроизводительная серверная инфраструктура с нативным HTTP/2 Upstream шлюзом, скоростным транспортом Hysteria 2 (UDP 443), встроенным приватным DoH-резолвером AdGuard Home со сбалансированным Split-DNS (Турбо-пул EU / спецпул RU), многоуровневой маскировкой, отказоустойчивой L4-маршрутизацией (Failover Backup), защитой от систем глубокого анализа пакетов (DPI / Active Probing) и полной изоляцией внутренних служб через сокеты в RAM.**  
 > Развёртывается на чистых ОС семейств **Ubuntu (20.04 / 22.04 / 24.04)** и **Debian (11 / 12)**.
 
 ---
@@ -30,12 +30,13 @@
 * **Паддинг заголовков:** Случайный мусор в HTTP-заголовках (`xPaddingBytes: 100-500`, ключ `X-Amz-Meta-Trace`).
 
 ### 4. Опциональный модуль AdGuard Home: Приватный DoH (DNS-over-HTTPS) + Split-DNS
-* **Защита от блокировок провайдеров:** Домашний роутер (Keenetic, OpenWrt, MikroTik) или мобильные устройства обращаются к серверу по защищённому протоколу DoH (порт 443, TLS 1.3), обходя блокировки 53-го UDP-порта и публичных DNS (8.8.8.8, 1.1.1.1).
-* **Защита от Open Resolver (ClientID):** Поддержка уникального токена в URL (`https://dns.domain.com/dns-query/SECRET_KEY`). Запросы от посторонних сканеров и ботов без токена сбрасываются со статусом `REFUSED`.
-* **Эталонный пул апстримов (Split-DNS):**
-  * Национальные домены (`.ru`, `.рф`, `.kz`, `.by`, `.su`) резолвятся через Яндекс DoH (`77.88.8.8:443`) для исключения проблем с гео-IP банков и госсервисов;
-  * Видеосерверы YouTube и сервисы Google (`googlevideo.com`, `youtube.com`, `1e100.net` и др.) направляются на официальный HTTP/3-резолвер Google (`h3://dns.google/dns-query`) для устранения 4K-буферизации;
-  * Все остальные мировые запросы обслуживаются сверхскоростными протоколами DNS-over-QUIC (DoQ) и HTTP/3 (Quad9, NextDNS, ControlD, AdGuard, Cloudflare).
+* **Защита от блокировок провайдеров:** Домашний роутер (Keenetic, OpenWrt/Podkop, MikroTik) или мобильные устройства обращаются к серверу по защищённому протоколу DoH (порт 443, TLS 1.3), обходя блокировки 53-го UDP-порта и публичных DNS (8.8.8.8, 1.1.1.1).
+* **Защита от Open Resolver (ClientID):** Поддержка уникального токена в URL (`https://dns.yourdomain.online/dns-query/SECRET_KEY`). Запросы от посторонних сканеров и ботов без токена сбрасываются со статусом `REFUSED`.
+* **Эталонный «Турбо-пул DE» (вшит в скрипт по умолчанию для зарубежных VPS):**
+  * Национальные домены (`.ru`, `.рф`, `.kz`, `.by`, `.su`) резолвятся через Яндекс DoH (`https://77.88.8.8:443/dns-query`) для исключения проблем с гео-IP банков и госсервисов;
+  * Видеосерверы YouTube и сервисы Google (`google.com`, `googlevideo.com`, `youtube.com`, `ytimg.com`, `1e100.net` и др.) направляются на официальный HTTP/3-резолвер Google (`h3://dns.google/dns-query`) для устранения 4K-буферизации;
+  * Все остальные мировые запросы обслуживаются сверхскоростными протоколами DNS-over-QUIC (DoQ) и HTTP/3 (Quad9, NextDNS, ControlD, AdGuard, FFMUC, Surfshark, Cloudflare).
+* **Адаптированный спецпул для серверов внутри РФ (RU VPS):** Регламентированный список апстримов строго по порту 443 (DoH) с поддержкой Comss.one SmartDNS для обхода региональных ограничений (ChatGPT, Notion, Spotify).
 * **Интеграция с VPN (3X-UI):** Весь трафик подключений VLESS, Hysteria 2 и AmneziaWG автоматически фильтруется AdGuard Home прямо на сервере при указании `127.0.0.1` в DNS панели.
 
 ### 5. Скоростные UDP-туннели: Hysteria 2 и AmneziaWG (UDP 443 / 8443 / 8444)
@@ -55,7 +56,7 @@
 * **Сквозная доступность:** Маск-сайт открывается по HTTPS на **всех** зарегистрированных на сервере доменах (основной, WWW, домены Steal-Oneself и дополнительные Direct-домены).
 
 ### 8. Двухрежимный гибридный SSL-движок
-* **Certbot (HTTP-01):** Автоматический выпуск через Snapd с индивидуальной изоляцией сертификатов (`--cert-name "$dom"`) и деплой-хуками прав (`chmod 755 / 644`).
+* **Certbot (HTTP-01):** Автоматический выпуск через Snapd со строгой изоляцией сертификатов (`--cert-name "$dom"`), защитой от дублирования аккаунтов (`rm -rf /etc/letsencrypt/accounts/*/*`) и деплой-хуками прав (`chmod 755 / 644`).
 * **acme.sh (Cloudflare DNS-01):** Выпуск сертификатов через Cloudflare API (Token или Global Key) с выносом в `/etc/ssl/acme/`.
 
 ---
@@ -76,7 +77,9 @@ graph TD
     Client443UDP[Клиент: 443/UDP / 8443/UDP / 8444/UDP] -->|Напрямую в обход Nginx| XrayHysteria[Xray: Hysteria 2 / AWG]
 
     NginxStream -->|SNI: Главный / WWW / Доп. домены / Пустой SNI| NginxSock[Unix Socket: /dev/shm/nginx-http.sock]
+    NginxStream -->|SNI: DoH dns.yourdomain.online| NginxSock
     NginxStream -->|SNI: Steal-Oneself cdn.yourdomain.online| XrayStealREALITY[Xray REALITY :45443]
+    NginxStream -.->|Failover: Xray выключен / backup| NginxSock
     NginxStream -->|SNI: Внешний SNI swdist.microsoft.com| XrayClassicREALITY[Xray REALITY :46443]
 
     XrayStealREALITY -->|Fallback не-REALITY браузер / xver=1| NginxFallbackHTTP[Nginx HTTP :9443 Anti-Loop]
@@ -102,7 +105,7 @@ graph TD
 | **Android** | **v2rayNG** / **NekoBox** / **Sing-box** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG, DoH | v2rayNG v1.9.15+, поддержка Частного DNS |
 | **iOS / iPadOS** | **Happ Proxy** / **FoXray** / **Streisand** / **Karing** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG, DoH | Актуальные версии из App Store |
 | **macOS** | **V2RayXS** / **FoXray** / **NekoBox** | VLESS (xHTTP/REALITY/Vision), Hysteria 2, AWG, DoH | Нативная поддержка Xray-core |
-| **Роутеры** | **Keenetic** / **OpenWrt** / **MikroTik** | VLESS REALITY, VLESS xHTTP, AWG v2.0, DoH | Нативная поддержка DoH с ClientID |
+| **Роутеры** | **Keenetic** / **OpenWrt (Podkop)** / **MikroTik** | VLESS REALITY, VLESS xHTTP, AWG v2.0, DoH | Нативная поддержка DoH с ClientID |
 
 ---
 
@@ -324,21 +327,68 @@ ufw deny 10443/tcp && ufw deny 55443/tcp && ufw deny 50443/tcp && ufw deny 9443/
 Панель AdGuard Home доступна исключительно по защищённому протоколу HTTPS:  
 👉 **`https://dns.yourdomain.online/`** (Логин и пароль задаются на Шаге 9 скрипта).
 
-### 2. Подключение домашнего роутера (на примере Keenetic)
-1. Откройте панель управления Keenetic (`192.168.1.1`).
-2. Перейдите в **«Сетевые правила» -> «Интернет-фильтр»** (или свойства подключения -> **«Серверы DNS»**).
-3. Нажмите **«Добавить сервер DNS»**:
-   * **Адрес сервера DNS (Bootstrap):** `IP_ВАШЕГО_VPS` *(нужен для первичного поиска домена)*
-   * **Протокол:** `DNS-over-HTTPS (DoH)`
-   * **URL-адрес DoH:** `https://dns.yourdomain.online/dns-query/home-router` *(где `home-router` — секретный ClientID)*
-   * **Доменное имя (SNI):** `dns.yourdomain.online`
-4. Поставьте галочку **«Игнорировать DNS провайдера»** и сохраните.
+---
+
+### 2. Вышестоящие DNS-серверы (Upstream DNS)
+
+#### Вариант А: Сервер расположен за рубежом (Германия / Европа / США) — Вшит в скрипт по умолчанию
+В веб-панели AGH (*«Настройки» -> «Настройки DNS» -> «Серверы вышестоящих DNS»*) скриптом автоматически прописан сбалансированный **«Турбо-пул EU»**:
+```text
+quic://dns.alidns.com:853
+[/ru/kz/by/su/xn--p1ai/]https://77.88.8.8:443/dns-query
+quic://dns.adguard-dns.com
+quic://dns.nextdns.io
+quic://p0.freedns.controld.com
+quic://dns.quad9.net
+quic://doq.ffmuc.net
+quic://dns.surfsharkdns.com
+[/google.com/googlevideo.com/youtube.com/ytimg.com/gstatic.com/googleapis.com/1e100.net/]h3://dns.google/dns-query
+h3://cloudflare-dns.com/dns-query
+```
+* **Плюсы:** Рунет уходит Яндексу (нет проблем с банками и гео-IP), YouTube/Google — напрямую Google по HTTP/3 (нет буферизации 4K), остальные запросы идут по ультрабыстрому DoQ с нулевым RTT.
+
+#### Вариант Б: Сервер расположен внутри России (RU VPS: Selectel, Timeweb и др.)
+В РФ протоколы DoQ/DoT на порту 853 блокируются ТСПУ, а зарубежные сервисы (ChatGPT, Notion, Spotify) блокируют российские IP.  
+Если Ваш сервер находится в РФ, откройте поле апстримов, удалите всё и вставьте специализированный **«Пул RU»**:
+```text
+[/ru/kz/by/su/xn--p1ai/]https://common.dot.dns.yandex.net/dns-query
+[/openai.com/chatgpt.com/oaistatic.com/oaiusercontent.com/anthropic.com/claude.ai/notion.so/spotify.com/]https://dns.comss.one/dns-query
+https://common.dot.dns.yandex.net/dns-query
+https://dns.adguard-dns.com/dns-query
+https://dns.quad9.net/dns-query
+https://freedns.controld.com/p0
+```
+* **Плюсы:** Все запросы идут строго по HTTPS (порт 443), фильтры ТСПУ по порту 853 бессильны, а Comss SmartDNS обеспечивает прозрачный доступ к зарубежным нейросетям без VPN.
+
+---
+
+### 3. Подключение домашнего роутера
 
 > [!TIP]
 > **Как работает защита ClientID:**  
 > Если посторонний бот или сканер отправит запрос на общий адрес `https://dns.yourdomain.online/dns-query`, сервер вернёт отказ `REFUSED`. Запросы обрабатываются **только** при наличии секретного токена `home-router`.
 
-### 3. Фильтрация рекламы внутри VPN (3X-UI)
+#### Подключение Keenetic:
+1. Откройте панель управления Keenetic (`192.168.1.1`).
+2. Перейдите в **«Сетевые правила» -> «Интернет-фильтр»** (или свойства подключения -> **«Серверы DNS»**).
+3. Нажмите **«Добавить сервер DNS»**:
+   * **Адрес сервера DNS (Bootstrap):** `77.88.8.8` или `9.9.9.9` *(нужен роутеру только для первичного поиска IP домена; не вводите IP своего VPS, так как 53 порт закрыт фаерволом снаружи)*;
+   * **Протокол:** `DNS-over-HTTPS (DoH)`;
+   * **URL-адрес DoH:** `https://dns.yourdomain.online/dns-query/home-router` *(где `home-router` — секретный ClientID)*;
+   * **Доменное имя (SNI):** `dns.yourdomain.online`.
+4. Поставьте галочку **«Игнорировать DNS провайдера»** и сохраните.
+
+#### Подключение OpenWrt (сервис Podkop):
+1. Откройте LuCI -> **«Службы» -> «Podkop» -> вкладка «Настройки»**.
+2. Заполните параметры:
+   * **Тип протокола DNS:** `DNS через HTTPS (DoH)`;
+   * **DNS-сервер:** `https://dns.yourdomain.online/dns-query/home-router`;
+   * **Bootstrap DNS-сервер:** `77.88.8.8 (Yandex DNS)` или `9.9.9.9 (Quad9 DNS)`.
+3. Нажмите **«Сохранить и применить»**. Podkop сам перехватит все DNS-запросы локальной сети.
+
+---
+
+### 4. Фильтрация рекламы внутри VPN (3X-UI)
 1. В панели 3X-UI перейдите в **«Настройки панели» -> «Настройки Xray»**.
 2. В конфигурации блока **DNS** пропишите первым сервером: `127.0.0.1`.
 3. Перезапустите Xray. Весь трафик подключений VLESS, Hysteria 2 и AmneziaWG начнёт автоматически очищаться от рекламы и трекеров прямо на сервере!
@@ -397,14 +447,14 @@ certbot renew --dry-run
 
 ## 💾 Резервное копирование и восстановление
 
-Для предотвращения повреждения базы данных SQLite (`x-ui.db`) и журналов WAL резервное копирование и восстановление выполняются с кратковременной остановкой служб (на 1–2 секунды). Также архивируется весь каталог `/etc/x-ui/`, а не только один файл базы.
+Для предотвращения повреждения базы данных SQLite (`x-ui.db`) и журналов WAL резервное копирование и восстановление выполняются с кратковременной остановкой служб (на 1–2 секунды). Каталог `/etc/x-ui/` архивируется целиком со всеми служебными файлами.
 
 ### Создание резервной копии:
 ```bash
-# Кратковременно останавливаем службы для консистентного слепка БД без блокировок
+# 1. Кратковременно останавливаем службы для консистентного слепка БД
 systemctl stop x-ui AdGuardHome 2>/dev/null || true
 
-# Создание архива (каталог /etc/x-ui архивируется целиком со всеми журналами)
+# 2. Создание архива (каталог /etc/x-ui архивируется целиком)
 tar -czvf backup_proxy_$(date +%F).tar.gz \
   /etc/nginx \
   /etc/letsencrypt \
@@ -413,7 +463,7 @@ tar -czvf backup_proxy_$(date +%F).tar.gz \
   /etc/x-ui \
   /var/www/html
 
-# Запускаем службы обратно
+# 3. Запускаем службы обратно
 systemctl start x-ui AdGuardHome 2>/dev/null || true
 ```
 
@@ -430,19 +480,14 @@ tar -xzvf backup_proxy_YYYY-MM-DD.tar.gz -C /
 
 # 4. Проверяем синтаксис Nginx и безопасно запускаем службы
 nginx -t && systemctl start nginx x-ui AdGuardHome
+```
 
 ---
 
-### Что изменилось:
-* `/etc/x-ui` теперь архивируется **целиком** как каталог (включая саму базу и возможные журналы транзакций).
-* В AdGuard Home архивируется его файл настроек `/opt/AdGuardHome/AdGuardHome.yaml` вместо попытки заархивировать огромный бинарный лог запросов.
-* Перед распаковкой удаляются `x-ui.db-wal` и `x-ui.db-shm`, благодаря чему SQLite запускается с чистой гарантированно рабочей базы.
-
-```
-</details>
+## 📄 Примеры конфигов (JSON-шаблоны) инбаундов Xray:
 
 <details>
-<summary><b>2. JSON: VLESS REALITY Steal-Oneself (Порт 45443, Anti-Loop Dest 9443)</b></summary>
+<summary><b>1. JSON: VLESS REALITY Steal-Oneself (Порт 45443, Anti-Loop Dest 9443)</b></summary>
 
 ```json
 {
