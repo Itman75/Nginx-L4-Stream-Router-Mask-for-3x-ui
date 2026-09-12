@@ -437,12 +437,12 @@ nginx -t && systemctl start nginx x-ui AdGuardHome
 * `/etc/x-ui` теперь архивируется **целиком** как каталог (включая саму базу и возможные журналы транзакций).
 * В AdGuard Home архивируется его файл настроек `/opt/AdGuardHome/AdGuardHome.yaml` вместо попытки заархивировать огромный бинарный лог запросов.
 * Перед распаковкой удаляются `x-ui.db-wal` и `x-ui.db-shm`, благодаря чему SQLite запускается с чистой гарантированно рабочей базы.
----
 
-## 📄 Примеры конфигов (JSON-шаблоны) инбаундов Xray:
+```
+</details>
 
 <details>
-<summary><b>1. JSON: VLESS REALITY Steal-Oneself (Порт 45443, Anti-Loop Dest 9443)</b></summary>
+<summary><b>2. JSON: VLESS REALITY Steal-Oneself (Порт 45443, Anti-Loop Dest 9443)</b></summary>
 
 ```json
 {
