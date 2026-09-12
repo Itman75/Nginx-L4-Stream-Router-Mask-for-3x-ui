@@ -17,8 +17,7 @@
 #   7) Опциональный модуль AdGuard Home:
 #      - Приватный DoH (DNS-over-HTTPS) с защитой ClientID для домашних роутеров
 #      - Загрузка с официального статического CDN static.adguard.com
-#      - Эталонный пул Upstream DNS: Split-DNS (РФ/СНГ -> Яндекс DoH, YouTube -> Google H3)
-#      - Скоростные апстримы DNS-over-QUIC (DoQ) и HTTP/3 (NextDNS, Quad9, Cloudflare)
+#      - Сбалансированный Турбо-пул DE (DoQ + H3 + Split-DNS: RuNet -> Yandex, YouTube -> Google H3)
 #      - Освобождение 53-го порта от systemd-resolved
 #      - Проксирование веб-панели и /dns-query через Nginx поддомен с TLS 1.3
 #   8) Гибридный SSL-движок с защитой от дублирования аккаунтов Certbot:
@@ -832,15 +831,17 @@ dns:
     - 127.0.0.1
     - ::1
   upstream_dns:
+    # Сбалансированный Турбо-пул DE (DoQ + H3 + Split-DNS: RuNet -> Yandex, YouTube -> Google H3)
     - "quic://dns.alidns.com:853"
     - "[/ru/kz/by/su/xn--p1ai/]https://77.88.8.8:443/dns-query"
     - "quic://dns.adguard-dns.com"
     - "quic://dns.nextdns.io"
     - "quic://p0.freedns.controld.com"
     - "quic://dns.quad9.net"
+    - "quic://doq.ffmuc.net"
+    - "quic://dns.surfsharkdns.com"
     - "[/google.com/googlevideo.com/youtube.com/ytimg.com/gstatic.com/googleapis.com/1e100.net/]h3://dns.google/dns-query"
     - "h3://cloudflare-dns.com/dns-query"
-    - "https://1.1.1.1:443/dns-query"
 clients:
   runtime_sources:
     whois: false
@@ -863,7 +864,7 @@ EOF
 
     /opt/AdGuardHome/AdGuardHome -s install >/dev/null 2>&1 || true
     systemctl restart AdGuardHome || true
-    ok "Служба AdGuard Home запущена с эталонным пулом апстримов (Веб: 127.0.0.1:3000, DNS: 127.0.0.1:53)!"
+    ok "Служба AdGuard Home запущена с европейским Турбо-пулом апстримов (Веб: 127.0.0.1:3000, DNS: 127.0.0.1:53)!"
 fi
 
 # =============================================================
