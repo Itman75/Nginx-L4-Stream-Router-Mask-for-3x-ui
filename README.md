@@ -382,7 +382,7 @@ https://freedns.controld.com/p0
 1. Откройте LuCI -> **«Службы» -> «Podkop» -> вкладка «Настройки»**.
 2. Заполните параметры:
    * **Тип протокола DNS:** `DNS через HTTPS (DoH)`;
-   * **DNS-сервер:** `https://dns.yourdomain.online/dns-query/home-router`;
+   * **DNS-сервер:** (Без https://) `dns.yourdomain.online/dns-query/home-router`;
    * **Bootstrap DNS-сервер:** `77.88.8.8 (Yandex DNS)` или `9.9.9.9 (Quad9 DNS)`.
 3. Нажмите **«Сохранить и применить»**. Podkop сам перехватит все DNS-запросы локальной сети.
 
