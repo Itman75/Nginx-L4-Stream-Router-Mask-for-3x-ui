@@ -310,15 +310,3 @@ nginx -t && systemctl start nginx x-ui AdGuardHome
 
 Проект распространяется под свободной лицензией **MIT**. Подробная информация содержится в файле [LICENSE](LICENSE).
 ```
-
----
-
-### Фиксация и отправка обновления на GitHub:
-
-В терминале **Git Bash** выполните:
-
-```bash
-git add README.md
-git commit -m "docs: release monolithic README.md with validated Mermaid syntax for v1.1.0 Universal"
-git push origin main
-```
