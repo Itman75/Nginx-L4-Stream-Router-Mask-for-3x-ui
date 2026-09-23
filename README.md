@@ -1,7 +1,3 @@
-<div align="center">
-
-<img src="assets/logo.png" alt="Hardened Master Engine Logo" width="180" style="max-width: 100%;">
-
 # 🛡️ Hardened Master Engine v1.1.0 Universal
 ### Production AutoSetup Monoscript: OS Hardening + BBR + Nginx L4 Stream + 3X-UI + Zero-Touch SQLite + Grouped Hosts + AdGuard DoH + Port Hopping
 
