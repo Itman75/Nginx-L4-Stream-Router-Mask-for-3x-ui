@@ -17,12 +17,14 @@ export PYTHONUTF8=1
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
+# --------------------------- Цветовая палитра ---------------------------
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 WHITE='\033[1;37m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 log()  { echo -e "${CYAN}[+]${NC} $*"; }
@@ -209,7 +211,7 @@ for alt_db in "/etc/x-ui/x-ui.db" "/usr/local/x-ui/bin/x-ui.db" "/etc/x-ui/db/x-
     fi
 done
 
-INSTALL_MODE="1" # 1: Clean Install, 2: Safe Migration
+INSTALL_MODE="1"
 if [ -n "$EXISTING_DB_PATH" ]; then
     echo
     echo -e "${YELLOW}=====================================================================${NC}"
@@ -593,9 +595,9 @@ else
     SSL_BASE_DIR="/etc/ssl/acme"
 fi
 
-# ==============================================================================
+# =============================================================
 #  ФАЗА 1: СИСТЕМНЫЙ ХАРДЕНИНГ (ОС, BBR, NO IPV6, SSH, FAIL2BAN)
-# ==============================================================================
+# =============================================================
 echo
 echo -e "${CYAN}=====================================================================${NC}"
 echo -e "${GREEN}  ФАЗА 1: Системный Hardening ОС, TCP BBR и защита SSH               ${NC}"
@@ -625,7 +627,6 @@ if [ "${INSTALL_EXTRA_UTILS:-0}" -eq 1 ]; then
 fi
 ok "Системные утилиты установлены."
 
-# 1. Тюнинг ядра и сетевого стека
 log "Настройка TCP BBR, fq, сокетов somaxconn и отключение IPv6..."
 modprobe tcp_bbr 2>/dev/null || true
 mkdir -p /etc/sysctl.d/
@@ -781,9 +782,9 @@ systemctl enable fail2ban >/dev/null 2>&1 || true
 systemctl restart fail2ban || true
 ok "Служба Fail2ban активна."
 
-# ==============================================================================
+# =============================================================
 #  ФАЗА 2: ВНЕШНИЙ ШЛЮЗ, SSL И МАСКИРОВКА (NGINX MAINLINE + ADGUARD HOME DOH)
-# ==============================================================================
+# =============================================================
 echo
 echo -e "${CYAN}=====================================================================${NC}"
 echo -e "${GREEN}  ФАЗА 2: Внешний шлюз Nginx Mainline, SSL и AdGuard Home DoH        ${NC}"
@@ -1042,169 +1043,498 @@ EOF
 fi
 
 # =============================================================
-#  ВЕБ-МАСКИРОВКА И MOCK REST API (ПУНКТЫ 1, 2 И 3)
+#  ВЕБ-МАСКИРОВКА И MOCK REST API
 # =============================================================
-log "Генерация выбранной веб-маскировки (пункты 1, 2) и Mock REST API (пункт 3)..."
+log "Генерация выбранной веб-маскировки (1/2) и Mock REST API (3)..."
 
 if [ "$DECOY_MODE" = "1" ]; then
-    # ПУНКТ 1: DataSphere Analytics Enterprise (Полноценный SPA в /index.html)
+    # -------------------------------------------------------------
+    # 1. DATASPHERE ANALYTICS ENTERPRISE (SPA)
+    # -------------------------------------------------------------
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DataSphere Analytics — Платформа распределенных данных</title>
     <style>
-        :root { --bg: #131314; --surface: #1e1f20; --border: rgba(255,255,255,0.08); --accent: #a8c7fa; --text: #e3e3e3; --muted: #9aa0a6; --ok: #81c995; }
+        :root {
+            --bg: #131314;
+            --surface: #1e1f20;
+            --surface-card: #1e1f20;
+            --border: rgba(255, 255, 255, 0.08);
+            --accent: #a8c7fa;
+            --accent-purple: #c58af9;
+            --text: #e3e3e3;
+            --text-muted: #9aa0a6;
+            --success: #81c995;
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; line-height: 1.6; }
-        header { display: flex; justify-content: space-between; align-items: center; padding: 18px 6%; border-bottom: 1px solid var(--border); background: rgba(19,19,20,0.85); backdrop-filter: blur(20px); }
-        .logo { font-size: 20px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 10px; }
-        .btn { background: var(--surface); border: 1px solid var(--border); color: #fff; padding: 10px 22px; border-radius: 999px; font-weight: 600; cursor: pointer; transition: all .2s; }
-        .btn:hover { border-color: var(--accent); transform: translateY(-1px); }
-        .hero { text-align: center; padding: 80px 20px 60px; max-width: 900px; margin: 0 auto; }
-        .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; font-size: 13px; color: var(--accent); margin-bottom: 24px; }
-        .dot { width: 8px; height: 8px; background: var(--ok); border-radius: 50%; box-shadow: 0 0 8px var(--ok); }
-        .hero h1 { font-size: clamp(32px, 5vw, 50px); font-weight: 700; line-height: 1.2; margin-bottom: 20px; color: #fff; }
-        .hero p { font-size: 17px; color: var(--muted); margin-bottom: 36px; }
-        .stats { display: flex; justify-content: center; gap: 40px; margin-top: 50px; padding-top: 40px; border-top: 1px solid var(--border); flex-wrap: wrap; }
-        .stat h4 { font-size: 28px; font-weight: 700; color: #fff; }
-        .stat p { font-size: 13px; color: var(--muted); margin-top: 4px; }
-        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; max-width: 1100px; margin: 30px auto 70px; padding: 0 6%; }
-        .card { background: var(--surface); padding: 30px 26px; border-radius: 20px; border: 1px solid var(--border); cursor: pointer; transition: all .25s; }
-        .card:hover { transform: translateY(-3px); border-color: var(--accent); }
-        .card h3 { font-size: 18px; margin-bottom: 10px; color: #fff; }
-        .card p { color: var(--muted); font-size: 14px; }
-        .modal { position: fixed; inset: 0; background: rgba(5,7,10,0.85); backdrop-filter: blur(16px); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 100; }
-        .modal.active { display: flex; }
-        .modal-box { background: var(--surface); border: 1px solid rgba(255,255,255,0.12); border-radius: 24px; width: 100%; max-width: 460px; padding: 32px; }
-        .inp { width: 100%; padding: 12px 16px; background: #131314; border: 1px solid var(--border); border-radius: 12px; color: #fff; font-size: 14px; margin: 10px 0 16px; outline: none; }
-        .inp:focus { border-color: var(--accent); }
-        footer { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); }
+        body {
+            font-family: 'Google Sans', 'Product Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            background-image: 
+                radial-gradient(circle at 50% -10%, rgba(66, 133, 244, 0.18) 0%, rgba(155, 114, 207, 0.1) 40%, rgba(217, 101, 112, 0.04) 65%, transparent 80%),
+                var(--bg);
+            color: var(--text); line-height: 1.6; overflow-x: hidden; min-height: 100vh;
+        }
+        header {
+            display: flex; justify-content: space-between; align-items: center; padding: 18px 6%;
+            border-bottom: 1px solid var(--border); backdrop-filter: blur(20px);
+            position: sticky; top: 0; z-index: 50; background: rgba(19, 19, 20, 0.8);
+        }
+        .logo { font-size: 21px; font-weight: 700; display: flex; align-items: center; gap: 10px; color: #fff; letter-spacing: -0.5px; }
+        .btn {
+            background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
+            padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+        }
+        .btn:hover { 
+            transform: translateY(-1px); border-color: rgba(168, 199, 250, 0.4); 
+            background: #242628; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); 
+        }
+        .btn-outline {
+            background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
+            box-shadow: none; border-radius: 999px;
+        }
+        .btn-outline:hover { background: #242628; border-color: rgba(168, 199, 250, 0.4); }
+        .hero { text-align: center; padding: 90px 20px 70px; max-width: 900px; margin: 0 auto; }
+        .badge {
+            display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px;
+            background: var(--surface-card); border: 1px solid var(--border);
+            border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--accent); margin-bottom: 24px;
+        }
+        .badge-dot { width: 7px; height: 7px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); }
+        .hero h1 {
+            font-size: clamp(34px, 5vw, 54px); font-weight: 700; line-height: 1.18; margin-bottom: 22px;
+            letter-spacing: -0.8px; color: #d1d5db; 
+        }
+        .hero p { font-size: clamp(16px, 2vw, 18px); color: var(--text-muted); margin: 0 auto 36px; line-height: 1.65; max-width: 720px; }
+        .hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+        .stats-bar { display: flex; justify-content: center; gap: 40px; margin-top: 60px; padding-top: 40px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+        .stat-item h4 { font-size: 28px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+        .stat-item p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; max-width: 1100px; margin: 40px auto 90px; padding: 0 6%; }
+        .feature-card {
+            background: var(--surface-card); padding: 32px 28px; border-radius: 24px; border: 1px solid var(--border);
+            backdrop-filter: blur(12px); transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer;
+            user-select: none; display: flex; flex-direction: column; justify-content: space-between;
+        }
+        .feature-card:hover {
+            transform: translateY(-4px); border-color: rgba(168, 199, 250, 0.4); background: #242628;
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 20px rgba(155, 114, 207, 0.12);
+        }
+        .feature-card:active { transform: scale(0.98); }
+        .feature-card .icon-box {
+            width: 44px; height: 44px; background: rgba(168, 199, 250, 0.08); border: 1px solid rgba(168, 199, 250, 0.18);
+            border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--accent); margin-bottom: 20px;
+        }
+        .feature-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 10px; color: #fff; }
+        .feature-card p { color: var(--text-muted); line-height: 1.55; font-size: 14px; margin-bottom: 16px; }
+        .card-action {
+            display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+            color: var(--accent); transition: gap 0.2s ease;
+        }
+        .feature-card:hover .card-action { gap: 10px; color: #d3e3fd; }
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(5, 7, 10, 0.85);
+            backdrop-filter: blur(16px); display: flex; align-items: center; justify-content: center;
+            padding: 20px; z-index: 100; opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .modal-overlay.active { opacity: 1; visibility: visible; }
+        .modal-card {
+            background: var(--surface); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 28px;
+            width: 100%; max-width: 480px; padding: 36px 32px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+        }
+        .modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+        .modal-header h2 { font-size: 21px; font-weight: 700; color: #fff; }
+        .modal-header p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+        .modal-close { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; }
+        .modal-close:hover { color: #fff; }
+        .form-group { margin-bottom: 18px; text-align: left; }
+        .form-group label { display: block; font-size: 13px; font-weight: 500; color: #c4c7c5; margin-bottom: 6px; }
+        .form-control {
+            width: 100%; padding: 13px 16px; background: #131314; border: 1px solid var(--border);
+            border-radius: 14px; color: #fff; font-size: 14px; outline: none; transition: all 0.2s ease;
+        }
+        .form-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(168, 199, 250, 0.2); }
+        .alert-box {
+            background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5;
+            padding: 12px 14px; border-radius: 12px; font-size: 13px; margin-bottom: 20px; display: none; align-items: center; gap: 10px;
+        }
+        .spinner { width: 18px; height: 18px; border: 2px solid rgba(255, 255, 255, 0.3); border-top: 2px solid #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        footer { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; border-top: 1px solid var(--border); }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <header>
         <div class="logo">
-            <svg viewBox="0 0 100 100" width="24" height="24"><circle cx="50" cy="50" r="46" fill="#008dd5"/><polygon points="50,15 85,35 85,75 50,95 15,75 15,35" fill="#fff"/></svg>
+            <svg viewBox="0 0 100 100" width="26" height="26" xmlns="http://www.w3.org/2000/svg">
+                <clipPath id="circleMask"><circle cx="50" cy="50" r="48"/></clipPath>
+                <g clip-path="url(#circleMask)">
+                    <rect x="0" y="0" width="100" height="100" fill="#008dd5"/>
+                    <polygon points="50,-8 100,21 100,79 50,108 0,79 0,21" fill="#ffffff"/>
+                    <polygon points="50,6.7 87.5,28.35 87.5,71.65 50,93.3 12.5,71.65 12.5,28.35" fill="#66a88f"/>
+                    <polygon points="50,28.35 68.75,39.17 68.75,60.83 50,71.65 31.25,60.83 31.25,39.17" fill="#e7ab21"/>
+                    <g stroke="#000000" stroke-width="4" stroke-linecap="round">
+                        <line x1="-10" y1="6.7" x2="110" y2="6.7"/>
+                        <line x1="-10" y1="28.35" x2="110" y2="28.35"/>
+                        <line x1="-10" y1="50" x2="110" y2="50"/>
+                        <line x1="-10" y1="71.65" x2="110" y2="71.65"/>
+                        <line x1="-10" y1="93.3" x2="110" y2="93.3"/>
+                        <line x1="15.36" y1="-10" x2="84.64" y2="110"/>
+                        <line x1="40.36" y1="-10" x2="109.64" y2="110"/>
+                        <line x1="-9.64" y1="-10" x2="59.64" y2="110"/>
+                        <line x1="84.64" y1="-10" x2="15.36" y2="110"/>
+                        <line x1="109.64" y1="-10" x2="40.36" y2="110"/>
+                        <line x1="59.64" y1="-10" x2="-9.64" y2="110"/>
+                    </g>
+                </g>
+                <circle cx="50" cy="50" r="48" fill="none" stroke="#000000" stroke-width="5"/>
+            </svg>
             <span>DataSphere</span>
         </div>
-        <button class="btn" onclick="openM('Вход в Консоль')">Консоль</button>
+        <button class="btn" onclick="openAuthModal('Вход в Консоль')">Консоль</button>
     </header>
     <main>
         <section class="hero">
-            <div class="badge"><span class="dot"></span><span>DataSphere Cloud Engine — Доступность <span id="sla">99.998%</span></span></div>
-            <h1>Инфраструктура распределенных данных нового поколения</h1>
-            <p>Корпоративная среда с аппаратным ускорением сетевого стека, сквозным шифрованием TLS 1.3 и Anycast-маршрутизацией узлов.</p>
-            <div style="display:flex; gap:12px; justify-content:center;">
-                <button class="btn" style="background:#fff; color:#000;" onclick="openM('Подключение вычислительного узла')">Подключить узел</button>
-                <button class="btn" onclick="checkCluster()">Статус сети</button>
+            <div class="badge"><span class="badge-dot"></span><span>DataSphere Cloud Engine v3.14 — Доступность <span id="heroSla">99.998%</span></span></div>
+            <h1>Инфраструктура распределения данных нового поколения</h1>
+            <p>Корпоративная аналитическая среда с аппаратным ускорением сетевого стека, сквозным TLS 1.3 шифрованием и Anycast-маршрутизацией узлов.</p>
+            <div class="hero-actions">
+                <button class="btn" style="padding: 13px 28px; font-size: 15px;" onclick="openAuthModal('Подключение вычислительного узла')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    Подключить узел
+                </button>
+                <button class="btn btn-outline" style="padding: 13px 28px; font-size: 15px;" onclick="fetchClusterStatus()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    Статус сети
+                </button>
             </div>
-            <div class="stats">
-                <div class="stat"><h4 id="lat">&lt; 1.2 ms</h4><p>Задержка ядра</p></div>
-                <div class="stat"><h4 id="bw">100 Gbps</h4><p>Пропускная способность</p></div>
-                <div class="stat"><h4>TLS 1.3 / H2</h4><p>Аппаратное шифрование</p></div>
+            <div class="stats-bar">
+                <div class="stat-item"><h4 id="heroLatency">&lt; 1.2 ms</h4><p>Средняя задержка ядра</p></div>
+                <div class="stat-item"><h4 id="heroBandwidth">100 Gbps</h4><p>Пропускная способность</p></div>
+                <div class="stat-item"><h4>TLS 1.3 / H2</h4><p>Аппаратное шифрование</p></div>
             </div>
         </section>
         <section class="features">
-            <div class="card" onclick="alert('Сквозной протокол TLS 1.3 / ChaCha20-Poly1305 активен.')">
-                <h3>Сквозное шифрование</h3>
-                <p>Аппаратная терминация сессий с защитой от перехвата на пограничных маршрутизаторах.</p>
+            <div class="feature-card" onclick="openDetailModal('crypto')">
+                <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+                <h3>Сквозное квантовое шифрование</h3>
+                <p>Передача пакетов осуществляется с аппаратным криптоускорением TLS 1.3 и защитой от перехвата на пограничных маршрутизаторах.</p>
+                <span class="card-action">Аудит протоколов &rarr;</span>
             </div>
-            <div class="card" onclick="alert('Anycast-магистраль: 148 пограничных POP-узлов в строю.')">
-                <h3>Anycast-телеметрия</h3>
-                <p>Многопоточный конвейер агрегирует метрики узлов в реальном времени с нулевой деградацией.</p>
+            <div class="feature-card" onclick="openDetailModal('telemetry')">
+                <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
+                <h3>Распределённая телеметрия</h3>
+                <p>Многопоточный конвейер аналитики агрегирует метрики узлов в реальном времени с нулевой деградацией пропускной способности.</p>
+                <span class="card-action">Anycast-магистраль &rarr;</span>
             </div>
-            <div class="card" onclick="alert('In-Memory сокеты IPC работают в RAM с нулевым копированием.')">
+            <div class="feature-card" onclick="openDetailModal('ipc')">
+                <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6"/></svg></div>
                 <h3>Изоляция сокетов IPC</h3>
-                <p>Процессы ввода-вывода распределяются по энергонезависимым сегментам оперативной памяти.</p>
+                <p>Все процессы ввода-вывода распределяются по энергонезависимым сегментам оперативной памяти с прямой маршрутизацией через Unix-сокеты.</p>
+                <span class="card-action">In-Memory конвейер &rarr;</span>
             </div>
         </section>
     </main>
-    <div id="m" class="modal" onclick="if(event.target===this)this.classList.remove('active')">
+
+    <div id="authModal" class="modal-overlay" onclick="if(event.target===this)closeAuthModal()">
         <div class="modal-card">
-            <h2 id="mTitle" style="color:#fff; font-size:20px; margin-bottom:6px;">Вход в Консоль</h2>
-            <p style="color:var(--muted); font-size:13px; margin-bottom:16px;">Введите ключ доступа узла</p>
-            <form onsubmit="event.preventDefault(); auth();">
-                <input id="u" class="inp" placeholder="cluster-admin@datasphere.cloud" required autocomplete="username">
-                <input id="p" type="password" class="inp" placeholder="••••••••••••••••" required autocomplete="current-password">
-                <button class="btn" style="width:100%; height:44px; margin-top:8px;">Подключиться</button>
+            <div class="modal-header">
+                <div>
+                    <h2 id="modalTitle">Авторизация в DataSphere</h2>
+                    <p>Введите учётные данные для доступа к консоли</p>
+                </div>
+                <button class="modal-close" onclick="closeAuthModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="errorAlert" class="alert-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg>
+                <span id="errorMsg">Ошибка аутентификации</span>
+            </div>
+            <form id="authForm" onsubmit="handleDataSphereAuth(event)">
+                <div class="form-group">
+                    <label>Идентификатор узла / Email</label>
+                    <input type="text" id="dsUser" class="form-control" placeholder="cluster-admin@datasphere.cloud" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label>API Token / Ключ</label>
+                    <input type="password" id="dsKey" class="form-control" placeholder="••••••••••••••••" required autocomplete="current-password">
+                </div>
+                <button type="submit" id="submitBtn" class="btn" style="width: 100%; height: 46px; margin-top: 10px;">Подключиться к кластеру</button>
             </form>
         </div>
     </div>
+
+    <div id="detailModal" class="modal-overlay" onclick="if(event.target===this)closeDetailModal()">
+        <div class="modal-card" style="max-width: 500px;">
+            <div class="modal-header">
+                <div>
+                    <h2 id="detailTitle" style="font-size: 20px; color: #fff;">Архитектурный узел</h2>
+                    <p id="detailSubtitle" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Спецификация и статус безопасности подсистемы</p>
+                </div>
+                <button class="modal-close" onclick="closeDetailModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="detailContent" style="font-size: 14px; line-height: 1.6; color: #cbd5e1;"></div>
+            <button class="btn" style="width: 100%; height: 44px; margin-top: 24px;" onclick="closeDetailModal()">Понятно</button>
+        </div>
+    </div>
+
     <footer>&copy; 2026 DataSphere Cloud Systems Inc. Платформа распределенной аналитики и защиты данных.</footer>
+
     <script>
-        document.getElementById('lat').innerText = '< ' + (1.1 + Math.random()*0.2).toFixed(1) + ' ms';
-        document.getElementById('sla').innerText = (99.995 + Math.random()*0.004).toFixed(3) + '%';
-        function openM(t){ document.getElementById('mTitle').innerText = t; document.getElementById('m').classList.add('active'); }
-        async function checkCluster(){
-            try { const r = await fetch('/api/v1/datasphere/status'); const d = await r.json(); alert('Статус кластера: ' + d.status + '\nУзлов онлайн: ' + d.nodes_active); }
-            catch(e){ openM('Мониторинг кластера'); }
+        function randVar(base, pct = 10, dec = 0) {
+            const delta = base * (pct / 100);
+            const val = base + (Math.random() * 2 - 1) * delta;
+            return dec > 0 ? val.toFixed(dec) : Math.round(val);
         }
-        async function auth(){
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const dynLat = randVar(1.18, 10, 1);
+            const dynBw = randVar(99.4, 8, 1);
+            const dynSla = (99.995 + Math.random() * 0.004).toFixed(3);
+            
+            document.getElementById("heroLatency").innerText = "< " + dynLat + " ms";
+            document.getElementById("heroBandwidth").innerText = dynBw + " Gbps";
+            document.getElementById("heroSla").innerText = dynSla + "%";
+        });
+
+        function getDynamicData() {
+            const nodes = randVar(148, 10, 0);
+            const rtt = randVar(1.15, 10, 1);
+            const bus = randVar(0.048, 10, 2);
+            const sla = (99.995 + Math.random() * 0.004).toFixed(3);
+
+            return {
+                crypto: {
+                    title: "Сквозное шифрование (Data-in-Transit)",
+                    subtitle: "Корпоративный криптографический аудит",
+                    content: `
+                        <div style="background: rgba(168, 199, 250, 0.08); border: 1px solid rgba(168, 199, 250, 0.2); padding: 14px; border-radius: 14px; margin-bottom: 16px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <span style="font-weight:600; color:#fff;">Статус криптомодуля:</span>
+                                <span style="color:#81c995; font-size:12px; font-weight:700;">● CERTIFIED</span>
+                            </div>
+                            <p style="font-size:13px; color:#9aa0a6; margin:0;">Аппаратная терминация сессий с защитой от компрометации закрытых ключей.</p>
+                        </div>
+                        <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;">
+                            <li style="display:flex; gap:10px; align-items:flex-start;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>Протоколы шифрования:</strong> TLS 1.3 (RFC 8446) / ChaCha20-Poly1305 & AES-256-GCM.</span>
+                            </li>
+                            <li style="display:flex; gap:10px; align-items:flex-start;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>Perfect Forward Secrecy:</strong> Ротация сессионных ключей на базе эллиптических кривых X25519.</span>
+                            </li>
+                            <li style="display:flex; gap:10px; align-items:flex-start;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>Комплаенс:</strong> Соответствие отраслевым стандартам SOC 2 Type II, ISO/IEC 27001 и GDPR.</span>
+                            </li>
+                        </ul>
+                    `
+                },
+                telemetry: {
+                    title: "Распределённая телеметрия Anycast",
+                    subtitle: "Мониторинг магистральной сети и доступность SLA",
+                    content: `
+                        <div style="background: rgba(129, 201, 149, 0.08); border: 1px solid rgba(129, 201, 149, 0.2); padding: 14px; border-radius: 14px; margin-bottom: 16px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <span style="font-weight:600; color:#fff;">Доступность SLA:</span>
+                                <span style="color:#81c995; font-size:12px; font-weight:700;">` + sla + `% ACTIVE</span>
+                            </div>
+                            <p style="font-size:13px; color:#9aa0a6; margin:0;">Многопоточный Anycast-конвейер маршрутизации трафика к ближайшему POP-узлу.</p>
+                        </div>
+                        <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;">
+                            <li style="display:flex; gap:10px; align-items:flex-start;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>Глобальная связность:</strong> ` + nodes + ` активных пограничных узлов Anycast.</span>
+                            </li>
+                            <li style="display:flex; gap:10px; align-items:flex-start;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>Потери пакетов:</strong> 0.00% благодаря динамической балансировке ядра.</span>
+                            </li>
+                            <li style="display:flex; gap:10px; align-items:flex-start;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>RTT задержка:</strong> Маршрутизация на границе датацентра с откликом &lt; ` + rtt + ` ms.</span>
+                            </li>
+                        </ul>
+                    `
+                },
+                ipc: {
+                    title: "Высокоскоростная IPC-обработка",
+                    subtitle: "In-Memory конвейер и архитектура Zero-Copy",
+                    content: `
+                        <div style="background: rgba(197, 138, 249, 0.08); border: 1px solid rgba(197, 138, 249, 0.2); padding: 14px; border-radius: 14px; margin-bottom: 16px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <span style="font-weight:600; color:#fff;">Подсистема ввода-вывода:</span>
+                                <span style="color:#c58af9; font-size:12px; font-weight:700;">● ZERO-COPY RAM</span>
+                            </div>
+                            <p style="font-size:13px; color:#9aa0a6; margin:0;">Изолированные очереди процессов в памяти без блокировок файлового хранилища.</p>
+                        </div>
+                        <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;">
+                            <li style="display:flex; gap:10px; align-items:flex-start;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>Изоляция процессов:</strong> Раздельные сегменты оперативной памяти с прямым межпроцессным обменом.</span>
+                            </li>
+                            <li style="display:flex; gap:10px; align-items:flex-start;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>Задержка шины:</strong> Менее ` + bus + ` ms при мультиплексировании стримов.</span>
+                            </li>
+                            <li style="display:flex; gap:10px; align-items:flex-start;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>Буферизация:</strong> Аппаратное масштабирование приёма пакетов до 4 MB на воркер.</span>
+                            </li>
+                        </ul>
+                    `
+                }
+            };
+        }
+
+        function openDetailModal(type) {
+            const data = getDynamicData()[type];
+            if (!data) return;
+            document.getElementById("detailTitle").innerText = data.title;
+            document.getElementById("detailSubtitle").innerText = data.subtitle;
+            document.getElementById("detailContent").innerHTML = data.content;
+            document.getElementById("detailModal").classList.add("active");
+        }
+
+        function closeDetailModal() {
+            document.getElementById("detailModal").classList.remove("active");
+        }
+
+        function openAuthModal(title) {
+            document.getElementById("modalTitle").innerText = title || "Авторизация в DataSphere";
+            document.getElementById("errorAlert").style.display = "none";
+            document.getElementById("authModal").classList.add("active");
+            document.getElementById("dsUser").focus();
+        }
+
+        function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
+
+        async function fetchClusterStatus() {
             try {
-                const r = await fetch('/api/v1/datasphere/auth', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({u:document.getElementById('u').value, p:document.getElementById('p').value}) });
-                const d = await r.json(); alert(d.error || 'Ошибка доступа');
-            } catch(e) { alert('Ошибка защищенного соединения с контроллером.'); }
+                const res = await fetch("/api/v1/datasphere/status");
+                const data = await res.json();
+                const curNodes = randVar(data.nodes_active || 148, 10, 0);
+                const curSla = (99.995 + Math.random() * 0.004).toFixed(3);
+                alert("Статус кластера DataSphere: " + (data.status || "online") + "\nАктивных Anycast-узлов: " + curNodes + "\nSLA: " + curSla + "%");
+            } catch(e) { openAuthModal("Мониторинг кластера (Требуется ключ)"); }
         }
-        document.cookie = 'datasphere_session=' + Math.random().toString(36).substring(2) + '; path=/; Secure; SameSite=Lax';
+
+        async function handleDataSphereAuth(e) {
+            e.preventDefault();
+            const btn = document.getElementById("submitBtn"), errBox = document.getElementById("errorAlert"), errText = document.getElementById("errorMsg");
+            errBox.style.display = "none"; btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+            try {
+                const response = await fetch("/api/v1/datasphere/auth", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ principal: document.getElementById("dsUser").value, secret: document.getElementById("dsKey").value })
+                });
+                const result = await response.json();
+                errText.innerText = result.error || "Недействительный токен кластера или ключ авторизации узла. Доступ запрещен.";
+                errBox.style.display = "flex";
+            } catch (err) {
+                errText.innerText = "Ошибка защищенного соединения с контроллером кластера.";
+                errBox.style.display = "flex";
+            } finally {
+                btn.disabled = false; btn.innerHTML = "Подключиться к кластеру";
+            }
+        }
+
+        document.cookie = "datasphere_session=" + Math.random().toString(36).substring(2) + "; path=/; Secure; SameSite=Lax";
     </script>
 </body>
 </html>
 EOF
 
 elif [ "$DECOY_MODE" = "2" ]; then
-    # ПУНКТ 2: CosmosCloud NextGen (Полноценный облачный портал в /index.html)
+    # -------------------------------------------------------------
+    # 2. COSMOSCLOUD NEXTGEN 
+    # -------------------------------------------------------------
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8"><title>My Cloud</title><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <title>My Cloud</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0">
     <style>
-        body { margin:0; padding:20px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#cbcae0; background-image:linear-gradient(135deg,#e2e1ec 0%,#bcbbcb 100%); display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; color:#333; box-sizing:border-box; }
-        .wrapper { width:100%; max-width:400px; box-shadow:0 15px 35px rgba(0,0,0,0.15); border-radius:12px; overflow:hidden; background:#fff; text-align:center; }
-        .banner { width:100%; height:auto; display:block; }
-        .box { padding:30px 28px; }
-        .title { font-size:20px; color:#4a4557; margin-bottom:20px; }
-        input { width:100%; padding:12px 14px; border:1px solid #ccc; border-radius:6px; font-size:15px; margin-bottom:12px; box-sizing:border-box; outline:none; }
-        input:focus { border-color:#735b8c; box-shadow:0 0 0 3px rgba(115,91,140,.15); }
-        button { width:100%; padding:12px; background:#735b8c; color:#fff; border:none; border-radius:6px; font-size:16px; font-weight:600; cursor:pointer; }
+        body { margin:0; padding:20px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background-color:#cbcae0; background-image:linear-gradient(135deg,#e2e1ec 0%,#bcbbcb 100%); display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; color:#333; box-sizing:border-box; }
+        .page-wrapper { width:100%; max-width:420px; display:flex; flex-direction:column; align-items:center; box-shadow:0 15px 35px rgba(0,0,0,0.15); border-radius:12px; overflow:hidden; }
+        .banner-img { width:100%; height:auto; display:block; }
+        .login-container { background:#fff; width:100%; text-align:center; padding:35px 30px; box-sizing:border-box; }
+        .header-title { font-size:20px; color:#4a4557; margin-bottom:25px; font-weight:400; }
+        .input-group { position:relative; margin-bottom:14px; }
+        input { width:100%; padding:12px 15px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box; font-size:15px; outline:none; transition:border-color .2s,box-shadow .2s; background:#fdfdfd; }
+        input:focus { border-color:#735b8c; box-shadow:0 0 0 3px rgba(115,91,140,.15); background:#fff; }
+        button { width:100%; padding:12px; background:#735b8c; color:#fff; border:none; border-radius:6px; font-size:16px; font-weight:600; cursor:pointer; margin-top:10px; transition:background .2s,opacity .2s; display:flex; justify-content:center; align-items:center; height:44px; }
         button:hover { background:#5d4874; }
-        .err { background:#e74c3c; color:#fff; padding:10px; border-radius:6px; margin-bottom:14px; font-size:14px; display:none; }
-        .foot { margin-top:20px; color:rgba(60,55,70,.6); font-size:13px; text-align:center; }
-        .foot a { color:#735b8c; text-decoration:none; font-weight:500; }
+        button:disabled { opacity:.7; cursor:not-allowed; }
+        .message-box { background:#e74c3c; color:#fff; padding:11px; border-radius:6px; margin-bottom:20px; font-size:14px; text-align:left; display:none; animation:fadeIn .3s ease; }
+        .spinner { display:inline-block; width:18px; height:18px; border:2px solid rgba(255,255,255,.3); border-top:2px solid #fff; border-radius:50%; animation:spin .8s linear infinite; }
+        .footer-text { margin-top:25px; color:rgba(60,55,70,.6); font-size:13px; text-align:center; width:100%; }
+        .footer-text a { color:#735b8c; text-decoration:none; font-weight:500; }
+        @keyframes spin { 100% { transform:rotate(360deg); } }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
     </style>
 </head>
 <body>
-    <div class="wrapper">
-        <img class="banner" src="logo.webp" alt="Cloud Header" onerror="this.style.display='none'">
-        <div class="box">
-            <div class="title">Вход в облако</div>
-            <div id="err" class="err"></div>
-            <form onsubmit="event.preventDefault(); login();">
-                <input id="u" placeholder="Имя пользователя или email" required autocomplete="username">
-                <input id="p" type="password" placeholder="Пароль" required autocomplete="current-password">
-                <button id="btn">Войти</button>
+    <div class="page-wrapper">
+        <img class="banner-img" src="logo.webp" alt="Cloud Header" onerror="this.style.display='none'">
+        <div class="login-container">
+            <div class="header-title">Вход в облако</div>
+            <div id="errorBox" class="message-box"></div>
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="input-group"><input id="user" type="text" placeholder="Имя пользователя или email" autocomplete="username" required></div>
+                <div class="input-group"><input id="pass" type="password" placeholder="Пароль" autocomplete="current-password" required></div>
+                <button type="submit" id="loginBtn">Войти</button>
             </form>
         </div>
     </div>
-    <div class="foot"><a href="#">Cosmos Cloud</a> – безопасный дом для ваших данных</div>
+    <div class="footer-text">
+        <a href="#">Cosmos Cloud</a> – безопасный дом для ваших данных
+    </div>
     <script>
-        async function login(){
-            const e = document.getElementById('err'); e.style.display = 'none';
+        function setFakeCookie() { document.cookie = "cosmos_session=" + Math.random().toString(36).substring(2) + "; path=/; Secure; SameSite=Lax"; }
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById("loginBtn"), errBox = document.getElementById("errorBox");
+            errBox.style.display = "none"; btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
             try {
-                const r = await fetch('/api/v1/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({u:document.getElementById('u').value, p:document.getElementById('p').value}) });
-                const d = await r.json(); e.innerText = d.error || 'Неверный логин или пароль.'; e.style.display = 'block';
-            } catch(err) { e.innerText = 'Ошибка соединения с облаком.'; e.style.display = 'block'; }
+                const response = await fetch("/api/v1/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ user: document.getElementById("user").value, pass: document.getElementById("pass").value })
+                });
+                const data = await response.json();
+                errBox.innerText = data.error || "Wrong nickname or password.";
+                errBox.style.display = "block";
+            } catch (err) {
+                errBox.innerText = "Ошибка сетевого соединения с облаком.";
+                errBox.style.display = "block";
+            } finally {
+                btn.disabled = false; btn.innerHTML = 'Войти';
+            }
         }
-        document.cookie = 'cosmos_session=' + Math.random().toString(36).substring(2) + '; path=/; Secure; SameSite=Lax';
+        setFakeCookie();
     </script>
 </body>
 </html>
 EOF
 
-    log "Загрузка графического логотипа Cosmos Cloud..."
-    curl -fsSL --connect-timeout 6 "https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/assets/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null || true
+    log "Загрузка графического логотипа Cosmos Cloud (с двойным зеркалом и валидацией)..."
+    curl -fsSL --connect-timeout 8 "https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null || \
+    curl -fsSL --connect-timeout 8 "https://cdn.jsdelivr.net/gh/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui@main/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null || true
+
     if [ -f "$WEBROOT/logo.webp" ]; then
         magic_riff=$(head -c 4 "$WEBROOT/logo.webp" | tr -d '\0' || true)
         magic_webp=$(dd if="$WEBROOT/logo.webp" bs=1 skip=8 count=4 status=none 2>/dev/null | tr -d '\0' || true)
@@ -1214,7 +1544,6 @@ EOF
     fi
 
 else
-    # Вариант 3: Стандартная заглушка Nginx
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html><html><head><title>Welcome to nginx!</title><style>body { width: 35em; margin: 0 auto; font-family: Tahoma, Verdana, Arial, sans-serif; }</style></head><body><h1>Welcome to nginx!</h1><p>If you see this page, the nginx web server is successfully installed and working.</p></body></html>
 EOF
@@ -1226,7 +1555,9 @@ EOF
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT"
 chmod 644 "$WEBROOT"/*.html
 
-# ПУНКТ 3: Легитимные Mock REST API эндпоинты в Nginx (БЕЗ ДЕМО-СТЕНДА /demo1 и /demo2)
+# -------------------------------------------------------------
+# 3. ЭМУЛЯЦИЯ MOCK REST API В NGINX 
+# -------------------------------------------------------------
 DECOY_LOCATION_BLOCKS="
     add_header X-DataSphere-Engine \"v3.14.8-enterprise\" always;
 
@@ -1594,9 +1925,9 @@ nginx -t || die "Критическая ошибка синтаксиса Nginx!
 systemctl restart nginx
 ok "Внешний шлюз Nginx Mainline успешно запущен."
 
-# ==============================================================================
+# =============================================================
 #  ФАЗА 3: УСТАНОВКА 3X-UI И ZERO-TOUCH ОРКЕСТРАЦИЯ SQLITE
-# ==============================================================================
+# =============================================================
 echo
 echo -e "${CYAN}=====================================================================${NC}"
 echo -e "${GREEN}  ФАЗА 3: Оркестрация 3X-UI и базы SQLite (Mode: ${INSTALL_MODE})             ${NC}"
@@ -1986,7 +2317,6 @@ if os.environ.get("ENABLE_AWG_V2") == "1":
     a2t_obj = {"externalProxy": [{"dest": domain, "port": a2p, "remark": "AmneziaWG v2"}]}
     upsert_inbound(a2p, "amneziawg", "in-awg-v2-legacy", "AmneziaWG v2", a2_obj, a2t_obj, listen="0.0.0.0")
 
-# Автоматизация таблицы hosts
 cur.execute("""
     CREATE TABLE IF NOT EXISTS hosts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2341,4 +2671,3 @@ echo -e "  ${DIM}После перезапуска сервера веб-пан�
 echo -e "${GREEN}=====================================================================${NC}"
 
 exit 0
-
