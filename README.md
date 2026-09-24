@@ -1,8 +1,8 @@
-# 🛡️ Hardened Master Engine v1.1.0 Universal
+# 🛡️ Hardened Master Engine v1.2.0 Universal
 ### Production AutoSetup Monoscript: OS Hardening + BBR + Nginx L4 Stream + 3X-UI + Zero-Touch SQLite + Grouped Hosts + AdGuard DoH + Port Hopping
 
-[![OS: Ubuntu & Debian](https://img.shields.io/badge/OS-Ubuntu%2020.04--26.04%20%7C%20Debian%2011--13-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://ubuntu.com)
-[![Xray Core](https://img.shields.io/badge/Xray--core-24.9%2B%20%7C%2025.x%20%7C%2026.x-2962FF?style=for-the-badge&logo=shield&logoColor=white)](https://github.com/XTLS/Xray-core)
+[![OS: Ubuntu & Debian](https://img.shields.io/badge/OS-Ubuntu%2022.04--26.04%20%7C%20Debian%2012--13-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://ubuntu.com)
+[![Xray Core](https://img.shields.io/badge/Xray--core-v26.7.28%20Native-2962FF?style=for-the-badge&logo=shield&logoColor=white)](https://github.com/XTLS/Xray-core)
 [![3X-UI](https://img.shields.io/badge/Panel-3X--UI%20Zero--Touch-009688?style=for-the-badge&logo=awesomelists&logoColor=white)](https://github.com/mhsanaei/3x-ui)
 [![Security: Hardened](https://img.shields.io/badge/Security-ML--KEM--768%20%7C%20BBR%20%7C%20UFW-4CAF50?style=for-the-badge&logo=auth0&logoColor=white)](https://github.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
@@ -15,7 +15,7 @@
 [Спецификация конвейера](#-спецификация-архитектурного-конвейера-фазы-04) •
 [Схема движения трафика](#-архитектурная-схема-движения-трафика) •
 [Быстрый старт](#-быстрый-старт-развертывание-в-одну-команду) •
-[Ключевые технологии](#-ключевые-технологические-преимущества) •
+[JSON-шаблоны инбаундов](#-эталонные-json-шаблоны-инбаундов-xray) •
 [Инструкции для клиентов](#-клиентские-подключения-и-экосистема) •
 [Диагностика](#-экспресс-диагностика-и-аудит)
 
@@ -23,16 +23,18 @@
 
 ---
 
-## 🌟 Ключевые технологические преимущества v1.1.0 Universal
+## 🌟 Ключевые технологические преимущества v1.2.0 Universal
 
 * **Полный Zero-Touch автопилот:** Пользователю больше не нужно вручную создавать инбаунды, прописывать порты или настраивать пути в веб-панели 3X-UI. Скрипт напрямую оркестрирует локальную базу SQLite (`/etc/x-ui/x-ui.db`), развертывая готовую рабочую конфигурацию с единым профилем `Client-Unified`.
 * **Гео-адаптивный конвейер (RU vs EU/Global):** Автоматическое определение геолокации VPS. Для узлов внутри РФ автоматически подключаются CDN-зеркала GitHub, оптимизированные резолверы Яндекс DNS и изолированный DoH-пул по порту 443 для надежного обхода ТСПУ/РКН. Для зарубежных узлов активируется скоростной Турбо-пул (DNS-over-QUIC / HTTP/3).
 * **Сквозное постквантовое шифрование VLESS Encryption (ML-KEM-768):** Автоматическая генерация симметричной квантово-устойчивой ключевой пары через нативный бинарник Xray (`xray vlessenc`).
-* **VLESS xHTTP Stream-One + XTLS-Vision:** Прямое H2C-проксирование через Nginx Mainline (`proxy_http_version 2`) без буферизации (`proxy_buffering off`), с архитектурным пулом соединений XMUX (`maxConcurrency: 0`, `maxConnections: 1-3`, `noSSEHeader: true`) и динамическим рандомизированным паддингом пакетов (`xPaddingBytes: 100-500`).
+* **VLESS xHTTP Stream-One + XTLS-Vision:** Прямое H2C-проксирование через Nginx Mainline без буферизации (`proxy_buffering off`), с архитектурным пулом соединений XMUX (`maxConcurrency: 0`, `maxConnections: 1-3`, `noSSEHeader: true`) и динамическим рандомизированным паддингом пакетов (`xPaddingBytes: 100-500`).
 * **Steal-Oneself REALITY с защитой Anti-Loop (Port 9443):** Безопасный камуфляж под собственный домен. Сканеры активного зондирования и обычные веб-браузеры перенаправляются Xray на изолированный локальный слушатель `127.0.0.1:9443` с Proxy Protocol (`xver: 1`), полностью исключая петлю бесконечной пересылки пакетов.
+* **Classic External REALITY:** Маскировка под доверенные внешние ресурсы (Т-Банк, Samsung, Apple, Microsoft) с прямым проксированием неавторизованных запросов (`xver: 0`) без раскрытия присутствия прокси.
+* **Разблокировка клиентов (`minClientVer: "1.0.0"`):** Устранение жесткого барьера ядра Xray v26.7.28, сбрасывавшего клиентов Mihomo, Sing-box, Hiddify, NekoBox и роутеры с Podkop на сайт-маску.
 * **Автоматизация сгруппированных хостов (Host Groups):** Автоматическое заполнение таблицы `hosts` в 3X-UI с поддержкой полной схемы GORM:
   * **Группа `ALL_443`:** Объединяет все протоколы (Steal REALITY, Classic REALITY, Hysteria 2) в одну универсальную карточку подписки на порту 443.
-  * **Группа `xHTTP`:** Выделенная карточка с принудительным `TLS`, SNI, ALPN `["h2"]` и браузерным фингерпринтом Chrome.
+  * **Группа `xHTTP`:** Выделенная карточка с принудительным `TLS`, SNI, ALPN `["h2"]` и браузерным фингерпринтом Firefox.
 * **Персистентный Port Hopping для Hysteria 2:** Защита от троттлинга UDP-трафика со стороны провайдеров через динамический трансляционный пул `20000:50000/udp -> 443/udp`, персистентно вшиваемый в таблицу `*nat` брандмауэра UFW.
 * **TCP MSS Clamping:** Персистентное ограничение максимального размера сегмента (`--clamp-mss-to-pmtu` в таблице `*mangle`), предотвращающее зависание и фрагментацию TLS-хендшейков в мобильных и туннельных сетях.
 * **Аппаратное отключение IPv6 и оптимизация ядра:** Переключение алгоритма перегрузки на TCP BBR + fq, расширение очередей сокетов (`somaxconn = 65535`), лимит файловых дескрипторов 524 288 и отключение IPv6 на уровне `sysctl` и ядра через параметры GRUB (`ipv6.disable=1`).
@@ -58,10 +60,10 @@ flowchart TD
     NginxStream -->|"SNI: DoH dns.domain.online"| NginxSock
     NginxStream -->|"SNI: Steal cdn.domain.online"| XraySteal["Xray Steal REALITY :45443"]
     NginxStream -.->|"L4 Failover Backup: Xray остановлен"| NginxSock
-    NginxStream -->|"SNI: Внешний SNI swdist.microsoft.com"| XrayClassic["Xray Classic REALITY :46443"]
+    NginxStream -->|"SNI: Внешний SNI tbank.ru"| XrayClassic["Xray Classic REALITY :46443"]
 
     XraySteal -->|"Fallback не-REALITY / xver=1"| NginxAntiLoop["Nginx HTTP Anti-Loop :9443"]
-    XrayClassic -->|"Fallback / Direct xver=0"| ExtMirror["Внешний легитимный сервер :443"]
+    XrayClassic -->|"Fallback Direct / xver=0"| ExtMirror["Внешний легитимный сервер :443"]
 
     NginxSock --> NginxL7["Nginx Mainline HTTP L7 Engine"]
     NginxAntiLoop --> NginxL7
@@ -85,25 +87,26 @@ flowchart TD
 * **Профиль [2] EU/Global:** Прямые апстримы Cloudflare (`1.1.1.1`), Google (`8.8.8.8`), Quad9 (`9.9.9.9`), DoQ/QUIC турбо-пул.
 
 ### Фаза 1: Системный Hardening ОС
+* **Целевая среда:** Строгая валидация дистрибутива: Ubuntu 22.04+ и Debian 12+.
 * **Ядро:** Алгоритм `bbr` + планировщик `fq`, увеличение буферов сокетов `tcp_rmem` / `tcp_wmem` до 16 МБ, защита `tcp_syncookies = 1`, обратная фильтрация `rp_filter = 1`.
-* **Защита от утечек IPv6:** Полное аппаратное отключение IPv6 в `sysctl` и на уровне ядра через загрузчик GRUB (`ipv6.disable=1`).
-* **Безопасность SSH:** Автоматический переход с системных сокетов `ssh.socket` на классический демон `ssh.service`, гарантированное включение `/etc/ssh/sshd_config.d/*.conf`, генерация ключей Ed25519, защита Fail2ban (`maxretry = 5`, `bantime = 1h`).
+* **Защита от утечек IPv6:** Полное аппаратное отключение IPv6 в `sysctl` и на уровне ядра через загрузчик GRUB (`ipv6.disable=1` для KVM/Bare-metal).
+* **Безопасность SSH:** Автоматический переход с системных сокетов `ssh.socket` на классический демон `ssh.service`, устранение аккумуляции 22 порта в `sshd_config`, генерация ключей Ed25519, защита Fail2ban (`maxretry = 5`, `bantime = 1h`).
 
-### Фаза 2: Внешний шлюз, SSL и AdGuard Home
-* **Nginx Mainline:** Подключение официального репозитория `nginx.org` с бесшовным откатом на дистрибутивный пакет.
+### Фаза 2: Внешний шлюз Nginx Mainline, SSL и AdGuard Home
+* **Nginx Mainline:** Подключение официального репозитория `nginx.org` (ветка Mainline) со встроенным монолитным модулем Stream (`--with-stream`).
 * **Межпроцессная связь в RAM:** Трафик между L4 Stream и L7 пересылается через сокет оперативной памяти `/dev/shm/nginx-http.sock` без сетевых оверхедов.
 * **Нативный Certbot без Snapd:** Выпуск сертификатов Let's Encrypt через системный пакет APT с деплой-хуками нормализации прав (`chmod 755 / 644`) или через `acme.sh` (Cloudflare DNS-01 API).
 * **Decoy Fronts:** Генерация адаптивного SPA-сайта *DataSphere Analytics Enterprise* с живой телеметрией SLA (±10%), эмуляцией сессий и защитой от сканеров безопасности (`nikto`, `sqlmap`, `censys`, `shodan` блокируются мгновенно).
 
 ### Фаза 3: Ядро 3X-UI и Zero-Touch SQLite
-* Автоматическая установка последней версии панели 3X-UI.
+* Автоматическая установка последней версии панели 3X-UI с предустановленным ядром Xray-core v26.7.28.
 * Нативная генерация постквантового ключа **ML-KEM-768** через команду `$XRAY_BIN vlessenc`.
 * **Direct SQLite Injection:** Внедрение учетных записей, параметров шаблона Xray, инбаундов и настроек роутинга напрямую в `/etc/x-ui/x-ui.db`.
 * **Автоматическое создание GORM Host Groups:** Полная очистка и пересборка таблицы `hosts` с автоматической генерацией групп `ALL_443` и `xHTTP`.
 * **Единый профиль:** Создание унифицированного клиента `Client-Unified` с генерацией готовых ссылок подписки во всех форматах (Base64, JSON, Clash).
 
 ### Фаза 4: Финальный замок брандмауэра
-* **UFW & NAT Port Hopping:** Персистентная инъекция цепочек `*nat` и `*mangle` в `/etc/ufw/before.rules`. Диапазон `20000:50000/udp` транслируется в порт Hysteria 2.
+* **UFW & NAT Port Hopping:** Персистентная инъекция цепочек `*nat` и `*mangle` в `/etc/ufw/before.rules` без затирания сторонних пользовательских таблиц. Диапазон `20000:50000/udp` транслируется в порт Hysteria 2.
 * **TCP MSS Clamping:** Правило `-A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu`.
 * **Абсолютная изоляция внутренних портов:** Порты `10443`, `55443`, `50443`, `9443`, `3000`, `45443`, `46443` закрываются фаерволом снаружи и доступны исключительно через внутренние прокси Nginx.
 * Экспорт реквизитов доступа в защищенный файл `/root/vpn_credentials.txt` (`chmod 600`).
@@ -113,7 +116,7 @@ flowchart TD
 ## 🚀 Быстрый старт: Развертывание в одну команду
 
 ### Требования к серверу:
-* **ОС:** Чистая установка Ubuntu (20.04 / 22.04 / 24.04 / 26.04) или Debian (11 / 12 / 13).
+* **ОС:** Чистая установка **Ubuntu (22.04 / 24.04 / 26.04)** или **Debian (12 / 13)**.
 * **Права:** Суперпользователь `root`.
 * **Домен:** Привязанный к IP сервера домен.
 
@@ -153,7 +156,7 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
 | **3** | **Сервер подписок 3X-UI** | `:55443`, `/my-post-key/` | Внутренний порт и секретный URI-путь раздачи клиентских подписок. |
 | **3** | **VLESS xHTTP Inbound** | `:50443`, `/Stream-One-Path/` | Локальный H2C-порт инбаунда xHTTP и путь стрима. |
 | **4** | **Steal-Oneself REALITY** | `y` (`:45443`) | Поддомен `cdn.yourdomain.online`, маскировка под свой сайт с защитой Anti-Loop `:9443`. |
-| **4** | **Classic REALITY** | `y` (`:46443`) | Автоматический выбор оптимального SNI с наименьшим RTT (`gateway.icloud.com` и др.). |
+| **4** | **Classic REALITY** | `y` (`:46443`) | Автоматический выбор оптимального внешнего SNI (`tbank.ru`, `gateway.icloud.com` и др.). |
 | **6** | **Hysteria 2 (UDP)** | `y` (`:443`, Mode 2) | Скоростной QUIC-транспорт. Режим 2 активирует Port Hopping (`20000-50000/udp`). |
 | **6** | **AmneziaWG v3.1 / v2.0** | `y` (`:8443` / `:8444`) | WG3 для ПК/смартфонов (MTU 1320) и Legacy для роутеров Keenetic/OpenWrt (MTU 1360). |
 | **7** | **Привратный AdGuard DoH** | `y` (`dns.yourdomain.online`) | Приватный DoH-резолвер с защитой ClientID (`home-router`) и Split-DNS. |
@@ -165,6 +168,338 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
 > 1. Откройте **новое** окно терминала и проверьте подключение по SSH к заданному порту.  
 > 2. В основном терминале выполните команду: `reboot`.  
 > После перезагрузки сетевые оптимизации ядра, правила фаервола и служба 3X-UI активируются в штатном режиме.
+
+---
+
+## 📄 Эталонные JSON-шаблоны инбаундов Xray
+
+<details>
+<summary><b>1. JSON: VLESS REALITY Steal-Oneself (Порт 45443, Anti-Loop Target 127.0.0.1:9443, xver 1)</b></summary>
+
+```json
+{
+  "listen": "127.0.0.1",
+  "port": 45443,
+  "protocol": "vless",
+  "tag": "in-steal-reality",
+  "settings": {
+    "clients": [
+      {
+        "id": "ВАШ_UUID",
+        "flow": "xtls-rprx-vision",
+        "email": "Client-Unified",
+        "subId": "ВАШ_SUB_ID",
+        "enable": true
+      }
+    ],
+    "decryption": "none"
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic", "fakedns"]
+  },
+  "streamSettings": {
+    "network": "tcp",
+    "security": "reality",
+    "tcpSettings": {
+      "acceptProxyProtocol": true,
+      "header": {
+        "type": "none"
+      }
+    },
+    "realitySettings": {
+      "show": false,
+      "xver": 1,
+      "target": "127.0.0.1:9443",
+      "dest": "127.0.0.1:9443",
+      "serverNames": [
+        "cdn.yourdomain.online"
+      ],
+      "privateKey": "ВАШ_PRIVATE_KEY",
+      "minClientVer": "1.0.0",
+      "maxClientVer": "",
+      "maxTimediff": 0,
+      "shortIds": [
+        "7d6c16726e66fe34"
+      ],
+      "settings": {
+        "publicKey": "ВАШ_PUBLIC_KEY",
+        "fingerprint": "firefox",
+        "serverName": "",
+        "spiderX": "/"
+      }
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>2. JSON: VLESS REALITY Classic External (Порт 46443, Внешний Target:443, xver 0)</b></summary>
+
+```json
+{
+  "listen": "127.0.0.1",
+  "port": 46443,
+  "protocol": "vless",
+  "tag": "in-classic-reality",
+  "settings": {
+    "clients": [
+      {
+        "id": "ВАШ_UUID",
+        "flow": "xtls-rprx-vision",
+        "email": "Client-Unified",
+        "subId": "ВАШ_SUB_ID",
+        "enable": true
+      }
+    ],
+    "decryption": "none"
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic", "fakedns"]
+  },
+  "streamSettings": {
+    "network": "tcp",
+    "security": "reality",
+    "tcpSettings": {
+      "acceptProxyProtocol": true,
+      "header": {
+        "type": "none"
+      }
+    },
+    "realitySettings": {
+      "show": false,
+      "xver": 0,
+      "target": "tbank.ru:443",
+      "dest": "tbank.ru:443",
+      "serverNames": [
+        "tbank.ru"
+      ],
+      "privateKey": "ВАШ_PRIVATE_KEY",
+      "minClientVer": "1.0.0",
+      "maxClientVer": "",
+      "maxTimediff": 0,
+      "shortIds": [
+        "7d6c16726e66fe34"
+      ],
+      "settings": {
+        "publicKey": "ВАШ_PUBLIC_KEY",
+        "fingerprint": "firefox",
+        "serverName": "",
+        "spiderX": "/"
+      }
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>3. JSON: VLESS xHTTP Stream-One + ML-KEM-768 + XMUX + Vision (Порт 50443)</b></summary>
+
+```json
+{
+  "listen": "127.0.0.1",
+  "port": 50443,
+  "protocol": "vless",
+  "tag": "in-xhttp-stream",
+  "settings": {
+    "clients": [
+      {
+        "id": "ВАШ_UUID",
+        "flow": "xtls-rprx-vision",
+        "email": "Client-Unified",
+        "subId": "ВАШ_SUB_ID",
+        "enable": true
+      }
+    ],
+    "decryption": "ВАШ_ML_KEM_768_DECRYPTION_KEY",
+    "encryption": "ВАШ_ML_KEM_768_ENCRYPTION_KEY"
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic", "fakedns"]
+  },
+  "streamSettings": {
+    "network": "xhttp",
+    "xhttpSettings": {
+      "path": "/Stream-One-Path/",
+      "host": "yourdomain.online",
+      "mode": "stream-one",
+      "noSSEHeader": true,
+      "xPaddingBytes": "100-500",
+      "xPaddingObfsMode": true,
+      "xPaddingKey": "X-Amz-Meta-Trace",
+      "xmux": {
+        "maxConcurrency": "0",
+        "maxConnections": "1-3",
+        "cMaxReuseTimes": "300-600",
+        "hKeepAlivePeriod": 600
+      }
+    },
+    "security": "none"
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>4. JSON: Hysteria 2 UDP (Порт 443 + Port Hopping 20000-50000)</b></summary>
+
+```json
+{
+  "listen": "0.0.0.0",
+  "port": 443,
+  "protocol": "hysteria",
+  "tag": "in-hysteria2",
+  "settings": {
+    "clients": [
+      {
+        "id": "ВАШ_ПАРОЛЬ_АВТОРИЗАЦИИ",
+        "auth": "ВАШ_ПАРОЛЬ_АВТОРИЗАЦИИ",
+        "email": "Client-Unified",
+        "subId": "ВАШ_SUB_ID",
+        "enable": true
+      }
+    ],
+    "version": 2
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic", "fakedns"]
+  },
+  "streamSettings": {
+    "network": "hysteria",
+    "hysteriaSettings": {
+      "version": 2,
+      "udpIdleTimeout": 60,
+      "masquerade": {
+        "type": "proxy",
+        "url": "http://127.0.0.1:80"
+      }
+    },
+    "security": "tls",
+    "tlsSettings": {
+      "serverName": "yourdomain.online",
+      "minVersion": "1.3",
+      "maxVersion": "1.3",
+      "certificates": [
+        {
+          "certificateFile": "/etc/letsencrypt/live/yourdomain.online/fullchain.pem",
+          "keyFile": "/etc/letsencrypt/live/yourdomain.online/privkey.pem"
+        }
+      ],
+      "alpn": [
+        "h3"
+      ]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>5. JSON: AmneziaWG v3.1 (Transport Protection — Порт 8443)</b></summary>
+
+```json
+{
+  "listen": "0.0.0.0",
+  "port": 8443,
+  "protocol": "amneziawg",
+  "tag": "in-8443-udp",
+  "settings": {
+    "clients": [
+      {
+        "privateKey": "CLIENT_PRIVATE_KEY",
+        "publicKey": "CLIENT_PUBLIC_KEY",
+        "allowedIPs": [
+          "10.8.1.2/32"
+        ],
+        "email": "Client-Unified",
+        "subId": "ВАШ_SUB_ID",
+        "enable": true
+      }
+    ],
+    "server": {
+      "contentPaddingAddition": "3-16",
+      "disableCookies": true,
+      "h1": "",
+      "h2": "",
+      "h3": "",
+      "h4": "",
+      "jc": 4,
+      "jmax": 160,
+      "jmin": 50,
+      "keepaliveTimeout": "8-10",
+      "maxHandshakeAttempts": "21-26",
+      "mtu": 1320,
+      "primaryDns": "8.8.8.8",
+      "privateKey": "SERVER_PRIVATE_KEY",
+      "publicKey": "SERVER_PUBLIC_KEY",
+      "randomTrailers": false,
+      "rejectAfterTime": "178-211",
+      "rekeyAfterTime": "107-135",
+      "rekeyTimeout": "3-4",
+      "s1": 45,
+      "s2": 60,
+      "s3": 24,
+      "s4": 16,
+      "secondaryDns": "8.8.4.4",
+      "subnetCidr": 24,
+      "subnetIp": "10.8.1.0"
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>6. JSON: AmneziaWG v2.0 / Legacy (Для Роутеров Keenetic/OpenWrt — Порт 8444)</b></summary>
+
+```json
+{
+  "listen": "0.0.0.0",
+  "port": 8444,
+  "protocol": "amneziawg",
+  "tag": "in-awg-v2-legacy",
+  "settings": {
+    "clients": [
+      {
+        "privateKey": "CLIENT_PRIVATE_KEY",
+        "publicKey": "CLIENT_PUBLIC_KEY",
+        "allowedIPs": [
+          "10.8.2.2/32"
+        ],
+        "email": "Client-Unified",
+        "subId": "ВАШ_SUB_ID",
+        "enable": true
+      }
+    ],
+    "server": {
+      "h1": "149419586",
+      "h2": "878791997",
+      "h3": "1251051976",
+      "h4": "1657628296",
+      "jc": 4,
+      "jmin": 50,
+      "jmax": 160,
+      "s1": 45,
+      "s2": 60,
+      "s3": 24,
+      "s4": 16,
+      "mtu": 1360,
+      "primaryDns": "8.8.8.8",
+      "secondaryDns": "8.8.4.4",
+      "privateKey": "SERVER_PRIVATE_KEY",
+      "publicKey": "SERVER_PUBLIC_KEY",
+      "subnetCidr": 24,
+      "subnetIp": "10.8.2.0"
+    }
+  }
+}
+```
+</details>
 
 ---
 
@@ -223,7 +558,7 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
 Команды быстрой проверки состояния всех компонентов системы:
 
 ```bash
-# 1. Проверка синтаксиса и статуса Nginx
+# 1. Проверка синтаксиса и статуса Nginx Mainline
 nginx -t && systemctl status nginx --no-pager
 
 # 2. Проверка активности сокета Nginx в RAM
