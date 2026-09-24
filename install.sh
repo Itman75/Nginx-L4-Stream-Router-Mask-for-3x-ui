@@ -10,7 +10,6 @@
 
 set -euo pipefail
 
-# --------------------------- Экспорт локали и кодировки ---------------------------
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 export PYTHONIOENCODING=utf-8
@@ -18,14 +17,12 @@ export PYTHONUTF8=1
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-# --------------------------- Цветовая палитра ---------------------------
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 WHITE='\033[1;37m'
 BOLD='\033[1m'
-DIM='\033[2m'
 NC='\033[0m'
 
 log()  { echo -e "${CYAN}[+]${NC} $*"; }
@@ -42,7 +39,6 @@ echo -e "${CYAN}  Dual-Mode: Clean Setup / Safe Migration + Nginx L4 Native + 3X
 echo -e "${WHITE}  Поддержка: Ubuntu 22.04/24.04/26.04 & Debian 12/13                  ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
-# ----------------------- Системные предусловия и матрица ОС -----------------------
 if [ "$EUID" -ne 0 ]; then
   die "Пожалуйста, запустите установщик с правами суперпользователя root (через sudo)."
 fi
@@ -70,19 +66,17 @@ if [ -f /etc/os-release ]; then
     fi
 
     if [ "$OS_COMPATIBLE" -ne 1 ]; then
-        die "Данный скрипт оптимизирован строго под дистрибутивы с поддержкой официального Nginx Mainline L4 Stream: Ubuntu (22.04+) и Debian (12+). Текущая ОС: ${PRETTY_NAME:-$OS_ID $OS_VER_ID} не поддерживается."
+        die "Скрипт оптимизирован строго под дистрибутивы с поддержкой Nginx Mainline L4 Stream: Ubuntu (22.04+) и Debian (12+). Текущая ОС: ${PRETTY_NAME:-$OS_ID $OS_VER_ID} не поддерживается."
     fi
     ok "Операционная система валидирована: ${PRETTY_NAME:-$OS_ID $OS_VER_ID} ($OS_CODENAME)"
 else
     die "Не удалось определить параметры текущего дистрибутива ОС."
 fi
 
-# Подавление запросов needrestart
 if [ -d /etc/needrestart/conf.d ]; then
     echo '$nrconf{restart} = "l";' > /etc/needrestart/conf.d/99-disable-auto-restart.conf 2>/dev/null || true
 fi
 
-# Первичная проверка базовых утилит
 EARLY_TOOLS_MISSING=0
 for tool in curl bc dig ip openssl gawk python3 xxd; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -102,7 +96,6 @@ validate_port() {
     [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 22 ] && [ "$1" -le 65535 ]
 }
 
-# Определение активного SSH-порта
 SSH_ACTIVE_PORT=""
 if [ -n "${SSH_CONNECTION:-}" ]; then
     SSH_ACTIVE_PORT=$(echo "$SSH_CONNECTION" | awk '{print $4}')
@@ -113,7 +106,6 @@ if [ -z "$SSH_ACTIVE_PORT" ] || ! validate_port "$SSH_ACTIVE_PORT"; then
 fi
 SSH_ACTIVE_PORT="${SSH_ACTIVE_PORT:-22}"
 
-# ----------------------- Функции валидации и загрузки -----------------------
 prompt_default() {
     local prompt_text="$1"
     local default_val="$2"
@@ -390,7 +382,7 @@ if [ "$INSTALL_MODE" = "1" ]; then
     DEFAULT_XP="Xui_$(openssl rand -hex 4)"
     prompt_default "Пароль администратора панели 3X-UI" "$DEFAULT_XP" ADMIN_PASS
 else
-    ok "В режиме Safe Migration учетные данные администратора панели сохраняются из существующей базы."
+    ok "В режиме Safe Migration учетные данные администратора панели сохраняются из действующей базы."
 fi
 
 echo
@@ -572,7 +564,7 @@ fi
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 8: Сайт-маскировка и сертификация SSL ---${NC}"
 echo -e "Выбор темы маскировочного сайта (Decoy Front):"
-echo -e "  1) ${GREEN}DataSphere Analytics Enterprise${NC} (Корпоративный SaaS, динамическая телеметрия ±10%)"
+echo -e "  1) ${GREEN}DataSphere Analytics Enterprise${NC} (Корпоративный SaaS, динамическая телеметрия ±10%, модальные окна)"
 echo -e "  2) ${GREEN}CosmosCloud NextGen${NC} (Облачный диск, логотип, сессии)"
 echo -e "  3) Стандартная заглушка Nginx (Welcome to nginx)"
 prompt_default "Ваш выбор" "1" DECOY_MODE
@@ -1049,9 +1041,13 @@ EOF
     ok "AdGuard Home DoH активен на 127.0.0.1:53 (Панель: 127.0.0.1:3000)."
 fi
 
-# Веб-маскировка
-log "Генерация веб-маскировки (Decoy Front)..."
+# =============================================================
+#  ВЕБ-МАСКИРОВКА И MOCK REST API (ПУНКТЫ 1, 2 И 3)
+# =============================================================
+log "Генерация выбранной веб-маскировки (пункты 1, 2) и Mock REST API (пункт 3)..."
+
 if [ "$DECOY_MODE" = "1" ]; then
+    # ПУНКТ 1: DataSphere Analytics Enterprise (Полноценный SPA в /index.html)
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
@@ -1059,60 +1055,169 @@ if [ "$DECOY_MODE" = "1" ]; then
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DataSphere Analytics — Платформа распределенных данных</title>
     <style>
-        :root { --bg: #131314; --surface-card: #1e1f20; --border: rgba(255, 255, 255, 0.08); --accent: #a8c7fa; --text: #e3e3e3; --text-muted: #9aa0a6; }
+        :root { --bg: #131314; --surface: #1e1f20; --border: rgba(255,255,255,0.08); --accent: #a8c7fa; --text: #e3e3e3; --muted: #9aa0a6; --ok: #81c995; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-        header { display: flex; justify-content: space-between; align-items: center; padding: 18px 6%; border-bottom: 1px solid var(--border); }
-        .logo { font-size: 21px; font-weight: 700; color: #fff; }
-        .btn { background: var(--surface-card); border: 1px solid var(--border); color: var(--text); padding: 10px 22px; border-radius: 999px; cursor: pointer; }
-        .hero { text-align: center; padding: 90px 20px 70px; max-width: 900px; margin: 0 auto; }
-        .hero h1 { font-size: 42px; margin-bottom: 20px; color: #fff; }
-        .hero p { color: var(--text-muted); font-size: 18px; margin-bottom: 30px; }
-        .stats { display: flex; justify-content: center; gap: 40px; margin-top: 40px; }
-        .stat h4 { font-size: 28px; color: #fff; }
-        .stat p { color: var(--text-muted); font-size: 13px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; line-height: 1.6; }
+        header { display: flex; justify-content: space-between; align-items: center; padding: 18px 6%; border-bottom: 1px solid var(--border); background: rgba(19,19,20,0.85); backdrop-filter: blur(20px); }
+        .logo { font-size: 20px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 10px; }
+        .btn { background: var(--surface); border: 1px solid var(--border); color: #fff; padding: 10px 22px; border-radius: 999px; font-weight: 600; cursor: pointer; transition: all .2s; }
+        .btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+        .hero { text-align: center; padding: 80px 20px 60px; max-width: 900px; margin: 0 auto; }
+        .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; font-size: 13px; color: var(--accent); margin-bottom: 24px; }
+        .dot { width: 8px; height: 8px; background: var(--ok); border-radius: 50%; box-shadow: 0 0 8px var(--ok); }
+        .hero h1 { font-size: clamp(32px, 5vw, 50px); font-weight: 700; line-height: 1.2; margin-bottom: 20px; color: #fff; }
+        .hero p { font-size: 17px; color: var(--muted); margin-bottom: 36px; }
+        .stats { display: flex; justify-content: center; gap: 40px; margin-top: 50px; padding-top: 40px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+        .stat h4 { font-size: 28px; font-weight: 700; color: #fff; }
+        .stat p { font-size: 13px; color: var(--muted); margin-top: 4px; }
+        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; max-width: 1100px; margin: 30px auto 70px; padding: 0 6%; }
+        .card { background: var(--surface); padding: 30px 26px; border-radius: 20px; border: 1px solid var(--border); cursor: pointer; transition: all .25s; }
+        .card:hover { transform: translateY(-3px); border-color: var(--accent); }
+        .card h3 { font-size: 18px; margin-bottom: 10px; color: #fff; }
+        .card p { color: var(--muted); font-size: 14px; }
+        .modal { position: fixed; inset: 0; background: rgba(5,7,10,0.85); backdrop-filter: blur(16px); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 100; }
+        .modal.active { display: flex; }
+        .modal-box { background: var(--surface); border: 1px solid rgba(255,255,255,0.12); border-radius: 24px; width: 100%; max-width: 460px; padding: 32px; }
+        .inp { width: 100%; padding: 12px 16px; background: #131314; border: 1px solid var(--border); border-radius: 12px; color: #fff; font-size: 14px; margin: 10px 0 16px; outline: none; }
+        .inp:focus { border-color: var(--accent); }
+        footer { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); }
     </style>
 </head>
 <body>
-    <header><div class="logo">DataSphere Analytics</div><button class="btn" onclick="alert('Доступ ограничен.')">Консоль</button></header>
-    <main><section class="hero">
-        <h1>Инфраструктура распределенных данных нового поколения</h1>
-        <p>Корпоративная среда с аппаратным ускорением сетевого стека и защитой данных.</p>
-        <div class="stats"><div class="stat"><h4 id="lat">&lt; 1.2 ms</h4><p>Задержка ядра</p></div><div class="stat"><h4 id="bw">100 Gbps</h4><p>Пропускная способность</p></div><div class="stat"><h4 id="sla">99.998%</h4><p>Доступность SLA</p></div></div>
-    </section></main>
+    <header>
+        <div class="logo">
+            <svg viewBox="0 0 100 100" width="24" height="24"><circle cx="50" cy="50" r="46" fill="#008dd5"/><polygon points="50,15 85,35 85,75 50,95 15,75 15,35" fill="#fff"/></svg>
+            <span>DataSphere</span>
+        </div>
+        <button class="btn" onclick="openM('Вход в Консоль')">Консоль</button>
+    </header>
+    <main>
+        <section class="hero">
+            <div class="badge"><span class="dot"></span><span>DataSphere Cloud Engine — Доступность <span id="sla">99.998%</span></span></div>
+            <h1>Инфраструктура распределенных данных нового поколения</h1>
+            <p>Корпоративная среда с аппаратным ускорением сетевого стека, сквозным шифрованием TLS 1.3 и Anycast-маршрутизацией узлов.</p>
+            <div style="display:flex; gap:12px; justify-content:center;">
+                <button class="btn" style="background:#fff; color:#000;" onclick="openM('Подключение вычислительного узла')">Подключить узел</button>
+                <button class="btn" onclick="checkCluster()">Статус сети</button>
+            </div>
+            <div class="stats">
+                <div class="stat"><h4 id="lat">&lt; 1.2 ms</h4><p>Задержка ядра</p></div>
+                <div class="stat"><h4 id="bw">100 Gbps</h4><p>Пропускная способность</p></div>
+                <div class="stat"><h4>TLS 1.3 / H2</h4><p>Аппаратное шифрование</p></div>
+            </div>
+        </section>
+        <section class="features">
+            <div class="card" onclick="alert('Сквозной протокол TLS 1.3 / ChaCha20-Poly1305 активен.')">
+                <h3>Сквозное шифрование</h3>
+                <p>Аппаратная терминация сессий с защитой от перехвата на пограничных маршрутизаторах.</p>
+            </div>
+            <div class="card" onclick="alert('Anycast-магистраль: 148 пограничных POP-узлов в строю.')">
+                <h3>Anycast-телеметрия</h3>
+                <p>Многопоточный конвейер агрегирует метрики узлов в реальном времени с нулевой деградацией.</p>
+            </div>
+            <div class="card" onclick="alert('In-Memory сокеты IPC работают в RAM с нулевым копированием.')">
+                <h3>Изоляция сокетов IPC</h3>
+                <p>Процессы ввода-вывода распределяются по энергонезависимым сегментам оперативной памяти.</p>
+            </div>
+        </section>
+    </main>
+    <div id="m" class="modal" onclick="if(event.target===this)this.classList.remove('active')">
+        <div class="modal-card">
+            <h2 id="mTitle" style="color:#fff; font-size:20px; margin-bottom:6px;">Вход в Консоль</h2>
+            <p style="color:var(--muted); font-size:13px; margin-bottom:16px;">Введите ключ доступа узла</p>
+            <form onsubmit="event.preventDefault(); auth();">
+                <input id="u" class="inp" placeholder="cluster-admin@datasphere.cloud" required autocomplete="username">
+                <input id="p" type="password" class="inp" placeholder="••••••••••••••••" required autocomplete="current-password">
+                <button class="btn" style="width:100%; height:44px; margin-top:8px;">Подключиться</button>
+            </form>
+        </div>
+    </div>
+    <footer>&copy; 2026 DataSphere Cloud Systems Inc. Платформа распределенной аналитики и защиты данных.</footer>
     <script>
-        document.getElementById("lat").innerText = "< " + (1.1 + Math.random() * 0.2).toFixed(1) + " ms";
-        document.getElementById("sla").innerText = (99.995 + Math.random() * 0.004).toFixed(3) + "%";
-        document.cookie = "datasphere_session=" + Math.random().toString(36).substring(2) + "; path=/; Secure; SameSite=Lax";
+        document.getElementById('lat').innerText = '< ' + (1.1 + Math.random()*0.2).toFixed(1) + ' ms';
+        document.getElementById('sla').innerText = (99.995 + Math.random()*0.004).toFixed(3) + '%';
+        function openM(t){ document.getElementById('mTitle').innerText = t; document.getElementById('m').classList.add('active'); }
+        async function checkCluster(){
+            try { const r = await fetch('/api/v1/datasphere/status'); const d = await r.json(); alert('Статус кластера: ' + d.status + '\nУзлов онлайн: ' + d.nodes_active); }
+            catch(e){ openM('Мониторинг кластера'); }
+        }
+        async function auth(){
+            try {
+                const r = await fetch('/api/v1/datasphere/auth', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({u:document.getElementById('u').value, p:document.getElementById('p').value}) });
+                const d = await r.json(); alert(d.error || 'Ошибка доступа');
+            } catch(e) { alert('Ошибка защищенного соединения с контроллером.'); }
+        }
+        document.cookie = 'datasphere_session=' + Math.random().toString(36).substring(2) + '; path=/; Secure; SameSite=Lax';
     </script>
 </body>
 </html>
 EOF
-    DECOY_LOCATION_BLOCKS="
-        location = / {
-            default_type text/html;
-            root $WEBROOT;
-            add_header Last-Modified \$date_gmt always;
-            add_header Cache-Control \"public, no-transform, max-age=86400\" always;
-            try_files /index.html =404;
+
+elif [ "$DECOY_MODE" = "2" ]; then
+    # ПУНКТ 2: CosmosCloud NextGen (Полноценный облачный портал в /index.html)
+    cat << 'EOF' > /var/www/html/index.html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8"><title>My Cloud</title><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin:0; padding:20px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#cbcae0; background-image:linear-gradient(135deg,#e2e1ec 0%,#bcbbcb 100%); display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; color:#333; box-sizing:border-box; }
+        .wrapper { width:100%; max-width:400px; box-shadow:0 15px 35px rgba(0,0,0,0.15); border-radius:12px; overflow:hidden; background:#fff; text-align:center; }
+        .banner { width:100%; height:auto; display:block; }
+        .box { padding:30px 28px; }
+        .title { font-size:20px; color:#4a4557; margin-bottom:20px; }
+        input { width:100%; padding:12px 14px; border:1px solid #ccc; border-radius:6px; font-size:15px; margin-bottom:12px; box-sizing:border-box; outline:none; }
+        input:focus { border-color:#735b8c; box-shadow:0 0 0 3px rgba(115,91,140,.15); }
+        button { width:100%; padding:12px; background:#735b8c; color:#fff; border:none; border-radius:6px; font-size:16px; font-weight:600; cursor:pointer; }
+        button:hover { background:#5d4874; }
+        .err { background:#e74c3c; color:#fff; padding:10px; border-radius:6px; margin-bottom:14px; font-size:14px; display:none; }
+        .foot { margin-top:20px; color:rgba(60,55,70,.6); font-size:13px; text-align:center; }
+        .foot a { color:#735b8c; text-decoration:none; font-weight:500; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <img class="banner" src="logo.webp" alt="Cloud Header" onerror="this.style.display='none'">
+        <div class="box">
+            <div class="title">Вход в облако</div>
+            <div id="err" class="err"></div>
+            <form onsubmit="event.preventDefault(); login();">
+                <input id="u" placeholder="Имя пользователя или email" required autocomplete="username">
+                <input id="p" type="password" placeholder="Пароль" required autocomplete="current-password">
+                <button id="btn">Войти</button>
+            </form>
+        </div>
+    </div>
+    <div class="foot"><a href="#">Cosmos Cloud</a> – безопасный дом для ваших данных</div>
+    <script>
+        async function login(){
+            const e = document.getElementById('err'); e.style.display = 'none';
+            try {
+                const r = await fetch('/api/v1/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({u:document.getElementById('u').value, p:document.getElementById('p').value}) });
+                const d = await r.json(); e.innerText = d.error || 'Неверный логин или пароль.'; e.style.display = 'block';
+            } catch(err) { e.innerText = 'Ошибка соединения с облаком.'; e.style.display = 'block'; }
         }
-        location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|webp)\$ {
-            root $WEBROOT;
-            expires 7d;
-            access_log off;
-            add_header Cache-Control \"public, max-age=604800, immutable\" always;
-            try_files \$uri =404;
-        }
-        location / { return 404; }
-    "
+        document.cookie = 'cosmos_session=' + Math.random().toString(36).substring(2) + '; path=/; Secure; SameSite=Lax';
+    </script>
+</body>
+</html>
+EOF
+
+    log "Загрузка графического логотипа Cosmos Cloud..."
+    curl -fsSL --connect-timeout 6 "https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null || true
+    if [ -f "$WEBROOT/logo.webp" ]; then
+        magic_riff=$(head -c 4 "$WEBROOT/logo.webp" | tr -d '\0' || true)
+        magic_webp=$(dd if="$WEBROOT/logo.webp" bs=1 skip=8 count=4 status=none 2>/dev/null | tr -d '\0' || true)
+        if [[ "$magic_riff" != "RIFF" || "$magic_webp" != "WEBP" ]]; then
+            rm -f "$WEBROOT/logo.webp"
+        fi
+    fi
+
 else
+    # Вариант 3: Стандартная заглушка Nginx
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html><html><head><title>Welcome to nginx!</title><style>body { width: 35em; margin: 0 auto; font-family: Tahoma, Verdana, Arial, sans-serif; }</style></head><body><h1>Welcome to nginx!</h1><p>If you see this page, the nginx web server is successfully installed and working.</p></body></html>
 EOF
-    DECOY_LOCATION_BLOCKS="
-        location = / { default_type text/html; root $WEBROOT; try_files /index.html =404; }
-        location / { return 404; }
-    "
 fi
 
 cat << 'EOF' > /var/www/html/404.html
@@ -1120,6 +1225,50 @@ cat << 'EOF' > /var/www/html/404.html
 EOF
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT"
 chmod 644 "$WEBROOT"/*.html
+
+# ПУНКТ 3: Легитимные Mock REST API эндпоинты в Nginx (БЕЗ ДЕМО-СТЕНДА /demo1 и /demo2)
+DECOY_LOCATION_BLOCKS="
+    add_header X-DataSphere-Engine \"v3.14.8-enterprise\" always;
+
+    location ~ ^/(api/v1/datasphere/status|status)\$ {
+        default_type application/json;
+        return 200 '{\"status\":\"online\",\"cluster\":\"datasphere-eu-central\",\"nodes_active\":148,\"telemetry_rate\":\"99.998%\",\"version\":\"3.14.8\"}';
+    }
+
+    location = /api/v1/datasphere/auth {
+        if (\$request_method = POST) {
+            add_header Content-Type \"application/json; charset=utf-8\" always;
+            return 401 '{\"status\":\"error\",\"code\":401,\"error\":\"Недействительный токен кластера или ключ авторизации узла. Доступ запрещен.\"}';
+        }
+        return 405;
+    }
+
+    location = /api/v1/auth/login {
+        if (\$request_method = POST) {
+            add_header Content-Type \"application/json; charset=utf-8\" always;
+            return 401 '{\"error\":\"Wrong nickname or password.\",\"code\":401}';
+        }
+        return 405;
+    }
+
+    location = / {
+        default_type text/html;
+        root $WEBROOT;
+        try_files /index.html =404;
+    }
+
+    location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|webp)\$ {
+        root $WEBROOT;
+        expires 7d;
+        access_log off;
+        add_header Cache-Control \"public, max-age=604800, immutable\" always;
+        try_files \$uri =404;
+    }
+
+    location / {
+        return 404;
+    }
+"
 
 # Конфигурация Nginx Mainline
 log "Сборка конфигурации Nginx (L4 Stream + L7)..."
@@ -1486,7 +1635,6 @@ ok "База SQLite 3X-UI готова: $DB_PATH"
 
 systemctl stop x-ui 2>/dev/null || true
 
-# Поиск штатного бинарного файла Xray из комплекта 3X-UI (v26.7.28)
 XRAY_BIN=""
 for b in "/usr/local/x-ui/bin/xray-linux-amd64" "/usr/local/x-ui/bin/xray-linux-arm64-v8a" "/usr/local/x-ui/bin/xray"; do
     if [ -x "$b" ]; then XRAY_BIN="$b"; break; fi
@@ -1545,7 +1693,6 @@ db_path = os.environ["DB_PATH"]
 conn = sqlite3.connect(db_path, timeout=30.0)
 cur = conn.cursor()
 
-# Сброс активного WAL перед модификацией
 try:
     cur.execute("PRAGMA wal_checkpoint(FULL)")
 except Exception:
@@ -1602,7 +1749,6 @@ install_mode = os.environ.get("INSTALL_MODE", "1")
 steal_doms = os.environ.get("STEAL_DOMAINS_STR", "").split()
 target_host = steal_doms[0] if steal_doms else domain
 
-# 1. Обработка таблицы users
 cur.execute("SELECT id, username, password FROM users LIMIT 1")
 urow = cur.fetchone()
 if install_mode == "1":
@@ -1621,7 +1767,6 @@ if install_mode == "1":
 else:
     uid = urow[0] if urow else 1
 
-# 2. Обработка таблицы settings
 settings_data = {
     "port": panel_port,
     "webPort": panel_port,
@@ -1682,27 +1827,22 @@ def_r_priv, def_r_pub = gen_reality_keypair()
 def_wg_s_priv, def_wg_s_pub = gen_wg_keypair()
 def_wg_c_priv, def_wg_c_pub = gen_wg_keypair()
 
-# Функция атомарного UPSERT инбаунда с поддержкой Safe Migration Mode
 def upsert_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, listen="127.0.0.1"):
     cur.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = ? OR tag = ?", (port, tag))
     row = cur.fetchone()
     sniff = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic", "fakedns"]})
     
     if row and install_mode == "2":
-        # SAFE MIGRATION MODE: сохраняем клиентов и действующие приватные ключи!
         existing_s = json.loads(row[1]) if row[1] else {}
         existing_st = json.loads(row[2]) if row[2] else {}
         
-        # Сохраняем клиентов
         final_s = existing_s if existing_s.get("clients") else s_obj_def
         if proto == "vless" and "decryption" in s_obj_def and s_obj_def["decryption"] != "none":
             final_s["decryption"] = s_obj_def["decryption"]
             final_s["encryption"] = s_obj_def.get("encryption", "")
 
-        # Патчим только сетевые настройки stream_settings
         final_st = st_obj_def
         if "realitySettings" in existing_st and "realitySettings" in final_st:
-            # Сохраняем существующие ключи Reality
             if existing_st["realitySettings"].get("privateKey"):
                 final_st["realitySettings"]["privateKey"] = existing_st["realitySettings"]["privateKey"]
             if existing_st["realitySettings"].get("shortIds"):
@@ -1725,7 +1865,7 @@ def upsert_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, listen="127.
         cur.execute("INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?, 0, 0, 0, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)",
                     (uid, remark, listen, port, proto, s_json, st_json, tag, sniff))
 
-# 1. Steal Reality (target/dest 127.0.0.1:9443, xver 1, uTLS firefox, minClientVer 1.0.0)
+# 1. Steal Reality
 if os.environ.get("ENABLE_STEAL") == "1":
     steal_dict = json.loads(os.environ.get("STEAL_JSON", "{}"))
     for p_str, doms in steal_dict.items():
@@ -1751,7 +1891,7 @@ if os.environ.get("ENABLE_STEAL") == "1":
         }
         upsert_inbound(p, "vless", tag, remark, s_obj, st_obj)
 
-# 2. Classic Reality (target/dest сторонний сайт, xver 0, uTLS firefox, minClientVer 1.0.0)
+# 2. Classic Reality
 if os.environ.get("ENABLE_CLASSIC") == "1":
     classic_dict = json.loads(os.environ.get("CLASSIC_JSON", "{}"))
     for p_str, snis in classic_dict.items():
@@ -1777,7 +1917,7 @@ if os.environ.get("ENABLE_CLASSIC") == "1":
         }
         upsert_inbound(p, "vless", tag, remark, c_obj, ct_obj)
 
-# 3. VLESS xHTTP (Stream-One + ML-KEM-768 + XTLS Vision)
+# 3. VLESS xHTTP
 x_obj = {
     "clients": [{"id": unified_uuid, "flow": "xtls-rprx-vision", "email": "Client-Unified", "subId": unified_sub_id, "enable": True}],
     "decryption": vless_dekey,
@@ -1813,7 +1953,7 @@ if os.environ.get("ENABLE_HY2") == "1":
     }
     upsert_inbound(hp, "hysteria", "in-hysteria2", "Hysteria 2", h_obj, ht_obj, listen="0.0.0.0")
 
-# 5. AmneziaWG v3.1 (WG3) - MTU 1320
+# 5. AmneziaWG v3.1 (WG3)
 if os.environ.get("ENABLE_AWG_V3") == "1":
     a3p = int(os.environ["AWG_V3_PORT"])
     a3_obj = {
@@ -1938,7 +2078,6 @@ if install_mode == "1":
         alpn_str = json.dumps(["h2"])
         add_host_entry(group_xhttp_uuid, x_row[0], "xHTTP", target_host, 443, "tls", sni=domain, alpn=alpn_str, fp="firefox", sort_order=2)
 else:
-    # SAFE MIGRATION: проверяем наличие записей; добавляем только если таблица пуста
     cur.execute("SELECT COUNT(*) FROM hosts")
     h_count = cur.fetchone()[0]
     if h_count == 0:
@@ -1987,9 +2126,9 @@ if [ -f "/tmp/vpn_unified_creds.txt" ]; then
     rm -f /tmp/vpn_unified_creds.txt
 fi
 
-# ==============================================================================
+# =============================================================
 #  ФАЗА 4: ФИНАЛЬНЫЙ ЗАМОК (ПЕРСИСТЕНТНЫЙ PORT HOPPING, MSS CLAMPING, UFW)
-# ==============================================================================
+# =============================================================
 echo
 echo -e "${CYAN}=====================================================================${NC}"
 echo -e "${GREEN}  ФАЗА 4: Персистентный Port Hopping, TCP MSS Clamping и изоляция UFW ${NC}"
@@ -2161,7 +2300,7 @@ echo -e "  Панель управления 3X-UI:     ${CYAN}https://${PRIMARY
 if [ "$INSTALL_MODE" = "1" ]; then
 echo -e "  Логин: ${WHITE}${ADMIN_USER}${NC} | Пароль: ${YELLOW}${BOLD}${ADMIN_PASS}${NC}"
 else
-echo -e "  Учетные данные:              ${GREEN}Сохранены из существующей базы${NC}"
+echo -e "  Учетные данные:              ${GREEN}Сохранены из действующей базы${NC}"
 fi
 echo
 if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
@@ -2202,3 +2341,4 @@ echo -e "  ${DIM}После перезапуска сервера веб-пан�
 echo -e "${GREEN}=====================================================================${NC}"
 
 exit 0
+
