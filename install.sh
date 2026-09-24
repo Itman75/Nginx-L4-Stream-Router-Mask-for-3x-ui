@@ -1532,8 +1532,8 @@ elif [ "$DECOY_MODE" = "2" ]; then
 EOF
 
     log "Загрузка графического логотипа Cosmos Cloud (с двойным зеркалом и валидацией)..."
-    curl -fsSL --connect-timeout 8 "https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null || \
-    curl -fsSL --connect-timeout 8 "https://cdn.jsdelivr.net/gh/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui@main/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null || true
+    curl -fsSL --connect-timeout 8 "https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/assets/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null || \
+    curl -fsSL --connect-timeout 8 "https://cdn.jsdelivr.net/gh/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui@main/assets/logo.webp" -o "$WEBROOT/logo.webp" 2>/dev/null || true
 
     if [ -f "$WEBROOT/logo.webp" ]; then
         magic_riff=$(head -c 4 "$WEBROOT/logo.webp" | tr -d '\0' || true)
