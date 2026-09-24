@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup Monoscript: Hardened Master Engine v1.1.0 Universal (Production Edition)
+# Production AutoSetup Monoscript: Hardened Master Engine v1.2.0 Universal
 # OS Hardening + BBR + Nginx L4 Stream + 3X-UI + Zero-Touch + Grouped Hosts + AdGuard DoH + Port Hop
 # ==============================================================================
-# Совместимость: Ubuntu 20.04 / 22.04 / 24.04 / 26.04 & Debian 11 / 12 / 13
+# Целевая матрица ОС: Ubuntu 22.04 / 24.04 / 26.04 & Debian 12 / 13
 # Архитектура конвейера:
 #   ФАЗА 0: Детекция сетевого гео-профиля (RU vs EU/Global) и настройка резолверов
 #   ФАЗА 1: Системный Hardening (APT, BBR, no-IPv6 в sysctl+GRUB, SSH Include, Fail2ban)
-#   ФАЗА 2: Внешний шлюз и фасад (DNS pre-flight, Nginx Adaptive, Certbot, Decoy, AdGuard)
-#   ФАЗА 3: Ядро 3X-UI и Zero-Touch SQLite (Multi-port Reality, Grouped Hosts, ML-KEM-768, xHTTP Vision)
+#   ФАЗА 2: Внешний шлюз и фасад (DNS pre-flight, Nginx Mainline Native Stream, Certbot, Decoy, AGH DoH)
+#   ФАЗА 3: Ядро 3X-UI и Zero-Touch SQLite (Target/Dest Anti-Loop, minClientVer 1.0.0, uTLS Firefox, ML-KEM-768)
 #   ФАЗА 4: Финальный замок (Персистентный Port Hopping, TCP MSS Clamping, изоляция сокетов UFW)
 # ==============================================================================
 
@@ -42,12 +42,12 @@ trap 'die "Скрипт аварийно прерван на строке $LINEN
 
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN}  Hardened Master Engine v1.1.0 Universal (Production Edition)        ${NC}"
-echo -e "${CYAN}  Geo-Adaptive (RU/EU) + Nginx L4 + 3X-UI + Grouped Hosts + AdGuard  ${NC}"
-echo -e "${WHITE}  Поддержка: Ubuntu 20.04/22.04/24.04/26.04 & Debian 11/12/13        ${NC}"
+echo -e "${GREEN}  Hardened Master Engine v1.2.0 Universal (Production Edition)        ${NC}"
+echo -e "${CYAN}  Geo-Adaptive (RU/EU) + Nginx L4 Native + 3X-UI + Grouped Hosts     ${NC}"
+echo -e "${WHITE}  Поддержка: Ubuntu 22.04/24.04/26.04 & Debian 12/13                  ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
-# ----------------------- Системные предусловия -----------------------
+# ----------------------- Системные предусловия и матрица ОС -----------------------
 if [ "$EUID" -ne 0 ]; then
   die "Пожалуйста, запустите установщик с правами суперпользователя root (через sudo)."
 fi
@@ -55,19 +55,36 @@ fi
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     OS_ID="${ID:-}"
+    OS_VER_ID="${VERSION_ID:-}"
     OS_CODENAME="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
     if [ -z "$OS_CODENAME" ]; then
         OS_CODENAME=$(lsb_release -cs 2>/dev/null || echo "")
     fi
 
-    if [[ "$OS_ID" != "ubuntu" && "$OS_ID" != "debian" ]]; then
-        die "Данный скрипт оптимизирован строго под дистрибутивы семейств Ubuntu (20.04-26.04) и Debian (11-13)."
+    OS_COMPATIBLE=0
+    if [ "$OS_ID" = "ubuntu" ]; then
+        # Требуется Ubuntu 22.04 LTS и новее
+        MAJOR_VER=$(echo "$OS_VER_ID" | cut -d. -f1)
+        if [[ "$MAJOR_VER" =~ ^[0-9]+$ ]] && [ "$MAJOR_VER" -ge 22 ]; then
+            OS_COMPATIBLE=1
+        fi
+    elif [ "$OS_ID" = "debian" ]; then
+        # Требуется Debian 12 (Bookworm) и новее
+        MAJOR_VER=$(echo "$OS_VER_ID" | cut -d. -f1)
+        if [[ "$MAJOR_VER" =~ ^[0-9]+$ ]] && [ "$MAJOR_VER" -ge 12 ]; then
+            OS_COMPATIBLE=1
+        fi
     fi
+
+    if [ "$OS_COMPATIBLE" -ne 1 ]; then
+        die "Данный скрипт оптимизирован строго под дистрибутивы с поддержкой официального Nginx Mainline L4 Stream: Ubuntu (22.04+) и Debian (12+). Текущая ОС: ${PRETTY_NAME:-$OS_ID $OS_VER_ID} не поддерживается."
+    fi
+    ok "Операционная система валидирована: ${PRETTY_NAME:-$OS_ID $OS_VER_ID} ($OS_CODENAME)"
 else
     die "Не удалось определить параметры текущего дистрибутива ОС."
 fi
 
-# Подавление запросов needrestart в Ubuntu 24.04 Noble
+# Подавление запросов needrestart
 if [ -d /etc/needrestart/conf.d ]; then
     echo '$nrconf{restart} = "l";' > /etc/needrestart/conf.d/99-disable-auto-restart.conf 2>/dev/null || true
 fi
@@ -82,7 +99,7 @@ for tool in curl bc dig ip openssl gawk python3 xxd; do
 done
 
 if [ "$EARLY_TOOLS_MISSING" -eq 1 ]; then
-    log "Первичная проверка и подготовка базовых утилит..."
+    log "Первичная подготовка базовых утилит..."
     apt-get update -q >/dev/null 2>&1 || true
     apt-get install -y curl bc dnsutils bind9-dnsutils iproute2 openssl gawk python3 python3-bcrypt xxd bsdextrautils -q >/dev/null 2>&1 || true
     ok "Базовые утилиты готовы к работе."
@@ -168,8 +185,8 @@ download_asset() {
 }
 
 benchmark_sni() {
-    local candidates=("gateway.icloud.com" "www.samsung.com" "addons.mozilla.org" "dl.google.com")
-    local best_sni="gateway.icloud.com"
+    local candidates=("tbank.ru" "gateway.icloud.com" "www.samsung.com" "dl.google.com")
+    local best_sni="tbank.ru"
     local min_rtt=999999
 
     echo -e "${CYAN}[+] Тестирование пула внешних SNI для Classic REALITY...${NC}" >&2
@@ -218,7 +235,7 @@ echo -e "  1) ${GREEN}[RU] Сервер в РФ${NC} (Яндекс DNS 77.88.8.8
 echo -e "  2) ${GREEN}[EU/World] Зарубежный сервер${NC} (Cloudflare/Google DNS, прямой GitHub/AdGuard, DoQ/QUIC)"
 prompt_default "Выберите сетевой профиль" "$DEFAULT_GEO_PROFILE" GEO_PROFILE
 
-# Мгновенная фиксация системного DNS до старта любых сетевых фаз
+# Мгновенная фиксация системного DNS
 if [ "$GEO_PROFILE" = "1" ]; then
     log "Активация сетевой стратегии для РФ (Яндекс DNS Primary)..."
     cat << 'EOF' > /etc/resolv.conf
@@ -270,7 +287,7 @@ while true; do
 done
 
 echo
-echo -e "${WHITE}${BOLD}--- ШАГ 2: Системные настройки и безопасность ОС (Ubuntu 20-26 / Debian 11-13) ---${NC}"
+echo -e "${WHITE}${BOLD}--- ШАГ 2: Системные настройки и безопасность ОС ---${NC}"
 prompt_yes_no "Выполнить полное обновление системы (apt upgrade) и очистку?" "y" && DO_SYS_UPGRADE=1 || DO_SYS_UPGRADE=0
 prompt_yes_no "Установить расширенные инструменты мониторинга (htop, btop, jq, tmux)?" "y" && INSTALL_EXTRA_UTILS=1 || INSTALL_EXTRA_UTILS=0
 prompt_yes_no "Включить TCP BBR и полностью отключить IPv6 (защита от утечек)?" "y" && ENABLE_BBR_IPV6=1 || ENABLE_BBR_IPV6=0
@@ -514,7 +531,7 @@ prompt_default "Ваш выбор" "1" DECOY_MODE
 
 echo
 echo -e "Метод выпуска SSL-сертификатов:"
-echo -e "  1) ${GREEN}Нативный Certbot HTTP-01 (Рекомендуется — через системный APT без Snapd)${NC}"
+echo -e "  1) ${GREEN}Нативный Certbot HTTP-01 (Рекомендуется — системный APT без Snapd)${NC}"
 echo -e "  2) ${GREEN}acme.sh + Cloudflare DNS-01${NC} (Каталог: /etc/ssl/acme/)"
 prompt_default "Ваш выбор" "1" SSL_ENGINE_CHOICE
 
@@ -546,11 +563,6 @@ echo -e "${CYAN}================================================================
 
 log "Обновление пакетных репозиториев..."
 apt-get update -q
-
-if [[ "$OS_ID" == "ubuntu" ]]; then
-    apt-get install -y software-properties-common -q || true
-    add-apt-repository -y universe || true
-fi
 
 if [ "${DO_SYS_UPGRADE:-0}" -eq 1 ]; then
     log "Полное обновление пакетов системы (apt upgrade)..."
@@ -613,7 +625,9 @@ net.ipv4.tcp_notsent_lowat = 16384
 EOF
 sysctl --system >/dev/null 2>&1 || true
 
-if [ -f /etc/default/grub ] && ! grep -q "ipv6.disable=1" /etc/default/grub; then
+# Отключение IPv6 в GRUB (для аппаратных серверов и KVM; пропуск в контейнерах LXC)
+IS_LXC=$(systemd-detect-virt 2>/dev/null | grep -q "lxc" && echo "1" || echo "0")
+if [ "$IS_LXC" -eq 0 ] && [ -f /etc/default/grub ] && ! grep -q "ipv6.disable=1" /etc/default/grub; then
     cp /etc/default/grub /etc/default/grub.bak 2>/dev/null || true
     sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="ipv6.disable=1 /' /etc/default/grub
     sed -i 's/GRUB_CMDLINE_LINUX="/GRUB_CMDLINE_LINUX="ipv6.disable=1 /' /etc/default/grub
@@ -676,11 +690,12 @@ if [ "${SETUP_KEYS:-0}" -eq 1 ]; then
     fi
 fi
 
-# Безопасное открытие целевого порта SSH в UFW сразу (Защита от Lockout)
+# Безопасное открытие целевого порта SSH в UFW
 ufw allow "${TARGET_SSH_PORT}/tcp" comment 'SSH Target Port' >/dev/null 2>&1 || true
 
-# Гарантия чтения sshd_config.d на всех версиях Ubuntu и Debian
+# Устранение аккумуляции портов в OpenSSH (предотвращение двойного прослушивания 22 + TARGET_PORT)
 if [ -f /etc/ssh/sshd_config ]; then
+    sed -i -E 's/^[#\s]*Port [0-9]+/Port '"$TARGET_SSH_PORT"'/' /etc/ssh/sshd_config || true
     if ! grep -q "^Include /etc/ssh/sshd_config.d/\*\.conf" /etc/ssh/sshd_config 2>/dev/null; then
         sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
     fi
@@ -730,7 +745,7 @@ systemctl restart fail2ban || true
 ok "Служба Fail2ban активна."
 
 # ==============================================================================
-#  ФАЗА 2: ВНЕШНИЙ ШЛЮЗ, SSL И МАСКИРОВКА (NGINX + ADGUARD HOME DOH)
+#  ФАЗА 2: ВНЕШНИЙ ШЛЮЗ, SSL И МАСКИРОВКА (NGINX MAINLINE + ADGUARD HOME DOH)
 # ==============================================================================
 echo
 echo -e "${CYAN}=====================================================================${NC}"
@@ -762,43 +777,27 @@ if [ -n "$WAN_IP" ]; then
     done
 fi
 
-# Адаптивное подключение официального Nginx Mainline
-log "Подключение Nginx для $OS_ID ($OS_CODENAME)..."
+# Подключение официального репозитория Nginx Mainline
+log "Подключение официального Nginx Mainline для $OS_ID ($OS_CODENAME)..."
 mkdir -p /usr/share/keyrings
-curl -fsSL --connect-timeout 4 https://nginx.org/keys/nginx_signing.key | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg --yes 2>/dev/null || true
-
-NGINX_UPSTREAM_AVAILABLE=0
-if [ -n "$OS_CODENAME" ]; then
-    if curl -fsI --connect-timeout 3 "https://nginx.org/packages/mainline/${OS_ID}/dists/${OS_CODENAME}/Release" >/dev/null 2>&1; then
-        NGINX_UPSTREAM_AVAILABLE=1
-    fi
-fi
+curl -fsSL --connect-timeout 5 https://nginx.org/keys/nginx_signing.key | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg --yes 2>/dev/null || true
 
 systemctl stop nginx 2>/dev/null || true
 
-if [ "$NGINX_UPSTREAM_AVAILABLE" -eq 1 ]; then
-    log "Официальный репозиторий Nginx Mainline подтвержден. Подключение..."
-    echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/$OS_ID $OS_CODENAME nginx" \
-        | tee /etc/apt/sources.list.d/nginx.list
+echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/$OS_ID $OS_CODENAME nginx" \
+    | tee /etc/apt/sources.list.d/nginx.list
 
-    cat << EOF > /etc/apt/preferences.d/99nginx
+cat << EOF > /etc/apt/preferences.d/99nginx
 Package: nginx*
 Pin: origin nginx.org
 Pin-Priority: 900
 EOF
-    apt-get update -q || { rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx; apt-get update -q; }
-    
-    # В официальном пакете nginx.org модуль stream встроен монолитно в бинарник!
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
-else
-    warn "Репозиторий nginx.org для релиза '$OS_CODENAME' не используется. Применение системного пакета Nginx..."
-    rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx
-    apt-get update -q
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
-    apt-get install -y -q libnginx-mod-stream >/dev/null 2>&1 || true
-fi
 
-# Сброс кэшей systemd для защиты от ошибки Device or resource busy (Noble/Usr-Merge)
+apt-get update -q
+# В официальном пакете nginx.org модуль stream встроен монолитно в бинарник (--with-stream)
+apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
+
+# Сброс кэшей systemd
 systemctl daemon-reload
 systemctl reset-failed nginx.service 2>/dev/null || true
 
@@ -807,14 +806,13 @@ id -u nginx >/dev/null 2>&1 || NGINX_USER="www-data"
 
 WEBROOT="/var/www/html"
 mkdir -p "$WEBROOT/.well-known/acme-challenge"
-mkdir -p /var/cache/nginx/img_cache /var/cache/nginx/html_cache /var/cache/nginx/video_cache
-mkdir -p /var/www/mirror /var/www/proxy_temp /etc/nginx/stream.d /etc/nginx/conf.d
+mkdir -p /var/cache/nginx /var/www/mirror /var/www/proxy_temp /etc/nginx/stream.d /etc/nginx/conf.d
 
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT" /var/cache/nginx /var/www/mirror /var/www/proxy_temp
 chmod 755 "$WEBROOT" /var/cache/nginx /var/www/mirror /var/www/proxy_temp
 
-# Очистка всех конфликтных дефолтных сайтов дистрибутива
-rm -rf /etc/nginx/sites-enabled/* /etc/nginx/sites-available/* /etc/nginx/conf.d/* /etc/nginx/stream.d/*
+# Очистка дефолтных сайтов
+rm -rf /etc/nginx/conf.d/* /etc/nginx/stream.d/*
 
 cat << EOF > "/etc/nginx/conf.d/00-acme.conf"
 server {
@@ -928,7 +926,6 @@ EOF
     AGH_TAR="/tmp/agh.tar.gz"
     rm -f "$AGH_TAR"
 
-    # Формирование пула зеркал для загрузки AdGuard Home в зависимости от профиля
     if [ "$GEO_PROFILE" = "1" ]; then
         AGH_URLS=(
             "https://ghfast.top/https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${AGH_ARCH}.tar.gz"
@@ -943,13 +940,12 @@ EOF
         )
     fi
 
-    download_asset "$AGH_TAR" "${AGH_URLS[@]}" || die "Не удалось загрузить бинарный архив AdGuard Home ни из одного зеркала!"
+    download_asset "$AGH_TAR" "${AGH_URLS[@]}" || die "Не удалось загрузить архив AdGuard Home!"
     tar -zxvf "$AGH_TAR" -C /opt/ >/dev/null
     rm -f "$AGH_TAR"
 
     AGH_PASS_HASH=$(htpasswd -b -n -B -C 10 "" "$AGH_PASS" | tr -d '\n' | cut -d: -f2)
 
-    # Адаптивный выбор апстримов: в РФ исключаются заблокированные зарубежные quic://
     if [ "$GEO_PROFILE" = "1" ]; then
         AGH_UPSTREAMS="    - \"[/ru/kz/by/su/xn--p1ai/]https://77.88.8.8:443/dns-query\"
     - \"https://common.dot.dns.yandex.net/dns-query\"
@@ -1006,7 +1002,7 @@ EOF
 fi
 
 # Веб-маскировка
-log "Генерация веб-маскировки (Decoy Front) с защитой от фингерпринтинга..."
+log "Генерация веб-маскировки (Decoy Front)..."
 if [ "$DECOY_MODE" = "1" ]; then
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
@@ -1077,16 +1073,8 @@ EOF
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT"
 chmod 644 "$WEBROOT"/*.html
 
-# Определение синтаксиса HTTP/2 под версию Nginx (совместимость 1.18 на Ubuntu 20.04 и 1.26+ Mainline)
-NGINX_H2_DIRECTIVE="http2 on;"
-NGINX_H2_LISTEN_PARAM=""
-if nginx -v 2>&1 | grep -qE "nginx/1\.(1[0-9]|2[0-4])\."; then
-    NGINX_H2_DIRECTIVE=""
-    NGINX_H2_LISTEN_PARAM="http2"
-fi
-
-# Сборка Nginx
-log "Сборка конфигурации Nginx (L4 Stream + L7)..."
+# Сборка Nginx Mainline (L4 Stream + L7 Core)
+log "Сборка монолитной конфигурации Nginx (L4 Stream + L7)..."
 rm -f /etc/nginx/conf.d/00-acme.conf
 
 cat << EOF > /etc/nginx/nginx.conf
@@ -1110,9 +1098,6 @@ http {
     tcp_nodelay on;
     server_tokens off;
     resolver 77.88.8.8 1.1.1.1 ipv6=off valid=300s;
-
-    http2_recv_buffer_size 16m;
-    http2_max_concurrent_streams 512;
 
     map \$proxy_protocol_addr \$ak_real_ip {
         ""      \$remote_addr;
@@ -1260,9 +1245,9 @@ server {
 }
 
 server {
-    listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol ${NGINX_H2_LISTEN_PARAM};
-    listen 127.0.0.1:$REALITY_FALLBACK_PORT ssl proxy_protocol ${NGINX_H2_LISTEN_PARAM};
-    ${NGINX_H2_DIRECTIVE}
+    listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol;
+    listen 127.0.0.1:$REALITY_FALLBACK_PORT ssl proxy_protocol;
+    http2 on;
     server_name $PRIMARY_DOMAIN;
 
     ssl_certificate ${SSL_BASE_DIR}/$PRIMARY_DOMAIN/fullchain.pem;
@@ -1309,7 +1294,7 @@ server {
 
     location ^~ ${XHTTP_STREAM_PATH} {
         if (\$request_method !~ ^(GET|POST)\$) { return 404; }
-        proxy_http_version 2;
+        proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$ak_real_ip;
         proxy_set_header X-Forwarded-For \$ak_real_ip;
@@ -1333,9 +1318,9 @@ if [ "${ENABLE_AGH:-0}" -eq 1 ] && [ -f "${SSL_BASE_DIR}/$AGH_DOMAIN/fullchain.p
 upstream adguard_backend { server 127.0.0.1:3000; keepalive 32; }
 
 server {
-    listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol ${NGINX_H2_LISTEN_PARAM};
-    listen 127.0.0.1:$REALITY_FALLBACK_PORT ssl proxy_protocol ${NGINX_H2_LISTEN_PARAM};
-    ${NGINX_H2_DIRECTIVE}
+    listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol;
+    listen 127.0.0.1:$REALITY_FALLBACK_PORT ssl proxy_protocol;
+    http2 on;
     server_name $AGH_DOMAIN;
 
     ssl_certificate ${SSL_BASE_DIR}/$AGH_DOMAIN/fullchain.pem;
@@ -1371,9 +1356,9 @@ for ((i=1; i<${#ALL_DOMAINS[@]}; i++)); do
     if [ "$ext_dom" != "$PRIMARY_DOMAIN" ] && [ "$ext_dom" != "${AGH_DOMAIN:-}" ] && [ -f "${SSL_BASE_DIR}/$ext_dom/fullchain.pem" ]; then
         cat << EOF > "/etc/nginx/conf.d/02-${ext_dom}.conf"
 server {
-    listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol ${NGINX_H2_LISTEN_PARAM};
-    listen 127.0.0.1:$REALITY_FALLBACK_PORT ssl proxy_protocol ${NGINX_H2_LISTEN_PARAM};
-    ${NGINX_H2_DIRECTIVE}
+    listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol;
+    listen 127.0.0.1:$REALITY_FALLBACK_PORT ssl proxy_protocol;
+    http2 on;
     server_name $ext_dom;
 
     ssl_certificate ${SSL_BASE_DIR}/$ext_dom/fullchain.pem;
@@ -1409,9 +1394,8 @@ EOF
 done
 
 nginx -t || die "Критическая ошибка синтаксиса Nginx!"
-systemctl daemon-reload
 systemctl restart nginx
-ok "Внешний шлюз Nginx успешно запущен."
+ok "Внешний шлюз Nginx Mainline успешно запущен."
 
 # ==============================================================================
 #  ФАЗА 3: УСТАНОВКА 3X-UI И ZERO-TOUCH СИНХРОНИЗАЦИЯ БАЗЫ SQLITE
@@ -1454,7 +1438,7 @@ ok "База SQLite 3X-UI готова: $DB_PATH"
 
 systemctl stop x-ui 2>/dev/null || true
 
-# Предварительная синхронизация базовых реквизитов через CLI 3X-UI
+# Предварительная синхронизация базовых реквизитов через CLI
 XUI_CLI=""
 for c in "/usr/local/x-ui/x-ui" "/usr/bin/x-ui"; do
     [ -x "$c" ] && XUI_CLI="$c" && break
@@ -1473,7 +1457,7 @@ if [ -z "$XRAY_BIN" ]; then
 fi
 [ -n "$XRAY_BIN" ] || die "Бинарник Xray не найден в /usr/local/x-ui/bin/! Невозможно сгенерировать ключ VLESS Encryption."
 
-# Нативная строгая генерация ключей ML-KEM-768 без подмены на "none"
+# Генерация постквантового ключа VLESS Encryption (ML-KEM-768)
 log "Генерация постквантового ключа VLESS Encryption (ML-KEM-768) через $XRAY_BIN vlessenc..."
 vl_out=$("$XRAY_BIN" vlessenc 2>&1)
 VLESS_DECRYPTION=$(echo "$vl_out" | grep '"decryption":' | tail -n1 | awk -F'"' '{print $4}' || true)
@@ -1484,13 +1468,13 @@ if [[ ! "$VLESS_DECRYPTION" =~ ^mlkem768 ]] || [ -z "$VLESS_ENCRYPTION" ]; then
 fi
 ok "Квантово-устойчивый ключ ML-KEM-768 успешно сгенерирован!"
 
-# Сериализация списков портов и доменов Reality в JSON для передачи в Python
+# Сериализация списков портов и доменов Reality в JSON
 STEAL_JSON="{"
 first_p=1
 for p in "${STEAL_PORTS_LIST[@]:-}"; do
     [ -n "$p" ] || continue
-    doms_arr=(${STEAL_PORT_DOMAINS[$p]})
-    doms_json=$(printf '%s\n' "${doms_arr[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[\"${doms_arr[0]}\"]")
+    doms_arr=(${STEAL_PORT_DOMAINS[$p]:-})
+    doms_json=$(printf '%s\n' "${doms_arr[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[\"${doms_arr[0]:-cdn.$PRIMARY_DOMAIN}\"]")
     [ $first_p -eq 0 ] && STEAL_JSON="${STEAL_JSON},"
     STEAL_JSON="${STEAL_JSON}\"${p}\":${doms_json}"
     first_p=0
@@ -1501,8 +1485,8 @@ CLASSIC_JSON="{"
 first_cp=1
 for cp in "${CLASSIC_PORTS_LIST[@]:-}"; do
     [ -n "$cp" ] || continue
-    snis_arr=(${CLASSIC_PORT_SNIS[$cp]})
-    snis_json=$(printf '%s\n' "${snis_arr[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[\"${snis_arr[0]}\"]")
+    snis_arr=(${CLASSIC_PORT_SNIS[$cp]:-})
+    snis_json=$(printf '%s\n' "${snis_arr[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[\"${snis_arr[0]:-tbank.ru}\"]")
     [ $first_cp -eq 0 ] && CLASSIC_JSON="${CLASSIC_JSON},"
     CLASSIC_JSON="${CLASSIC_JSON}\"${cp}\":${snis_json}"
     first_cp=0
@@ -1570,7 +1554,6 @@ admin_p = os.environ["ADMIN_PASS"]
 vless_dekey = os.environ["VLESS_DECRYPTION"]
 vless_enkey = os.environ["VLESS_ENCRYPTION"]
 
-# Определение целевого адреса маскировки хостов (Steal CDN поддомен или основной домен)
 steal_doms = os.environ.get("STEAL_DOMAINS_STR", "").split()
 target_host = steal_doms[0] if steal_doms else domain
 
@@ -1662,49 +1645,83 @@ def upsert_inbound(port, proto, tag, remark, s_obj, st_obj, listen="127.0.0.1"):
         cur.execute("INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (?, 0, 0, 0, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)",
                     (uid, remark, listen, port, proto, s_json, st_json, tag, sniff))
 
-# 1. Steal Reality (Мультипорты и мультидомены)
+# 1. Steal Reality (Синхронизация полей target/dest, uTLS Firefox, minClientVer 1.0.0, xver 1)
 if os.environ.get("ENABLE_STEAL") == "1":
     steal_dict = json.loads(os.environ.get("STEAL_JSON", "{}"))
     for p_str, doms in steal_dict.items():
         p = int(p_str)
         primary_dom = doms[0] if doms else f"cdn.{domain}"
         tag = f"in-steal-reality-{p}" if p != 45443 else "in-steal-reality"
-        remark = f"VLESS Steal ({p})" if len(steal_dict) > 1 else "VLESS Steal"
+        remark = f"REALITY-443 ({p})" if len(steal_dict) > 1 else "REALITY-443"
         s_obj = {"clients": [{"id": unified_uuid, "flow": "xtls-rprx-vision", "email": "Client-Unified", "subId": unified_sub_id, "enable": True}], "decryption": "none"}
         st_obj = {
-            "network": "tcp", "tcpSettings": {"acceptProxyProtocol": True},
+            "network": "tcp",
             "security": "reality",
+            "tcpSettings": {
+                "acceptProxyProtocol": True,
+                "header": {"type": "none"}
+            },
             "realitySettings": {
-                "show": False, "xver": 1, "dest": "127.0.0.1:9443", "serverNames": doms,
-                "privateKey": def_r_priv, "shortIds": [unified_sub_id],
-                "settings": {"publicKey": def_r_pub, "fingerprint": "chrome", "spiderX": f"/{unified_sub_id}"}
+                "show": False,
+                "xver": 1,
+                "target": "127.0.0.1:9443",
+                "dest": "127.0.0.1:9443",
+                "serverNames": doms,
+                "privateKey": def_r_priv,
+                "minClientVer": "1.0.0",
+                "maxClientVer": "",
+                "maxTimediff": 0,
+                "shortIds": [unified_sub_id],
+                "settings": {
+                    "publicKey": def_r_pub,
+                    "fingerprint": "firefox",
+                    "serverName": "",
+                    "spiderX": "/"
+                }
             },
             "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": remark}]
         }
         upsert_inbound(p, "vless", tag, remark, s_obj, st_obj)
 
-# 2. Classic Reality (Мультипорты и мульти-SNI)
+# 2. Classic Reality (Сторонний внешний target/dest, xver 0, uTLS Firefox, minClientVer 1.0.0)
 if os.environ.get("ENABLE_CLASSIC") == "1":
     classic_dict = json.loads(os.environ.get("CLASSIC_JSON", "{}"))
     for p_str, snis in classic_dict.items():
         p = int(p_str)
-        primary_sni = snis[0] if snis else "gateway.icloud.com"
+        primary_sni = snis[0] if snis else "tbank.ru"
         tag = f"in-classic-reality-{p}" if p != 46443 else "in-classic-reality"
-        remark = f"VLESS Classic ({p})" if len(classic_dict) > 1 else "VLESS Classic"
+        remark = f"REALITY-Classic ({p})" if len(classic_dict) > 1 else "REALITY-Classic"
         c_obj = {"clients": [{"id": unified_uuid, "flow": "xtls-rprx-vision", "email": "Client-Unified", "subId": unified_sub_id, "enable": True}], "decryption": "none"}
         ct_obj = {
-            "network": "tcp", "tcpSettings": {"acceptProxyProtocol": True},
+            "network": "tcp",
             "security": "reality",
+            "tcpSettings": {
+                "acceptProxyProtocol": True,
+                "header": {"type": "none"}
+            },
             "realitySettings": {
-                "show": False, "xver": 0, "dest": f"{primary_sni}:443", "serverNames": snis,
-                "privateKey": def_r_priv, "shortIds": [unified_sub_id],
-                "settings": {"publicKey": def_r_pub, "fingerprint": "chrome", "spiderX": f"/{unified_sub_id}"}
+                "show": False,
+                "xver": 0,
+                "target": f"{primary_sni}:443",
+                "dest": f"{primary_sni}:443",
+                "serverNames": snis,
+                "privateKey": def_r_priv,
+                "minClientVer": "1.0.0",
+                "maxClientVer": "",
+                "maxTimediff": 0,
+                "shortIds": [unified_sub_id],
+                "settings": {
+                    "publicKey": def_r_pub,
+                    "fingerprint": "firefox",
+                    "serverName": "",
+                    "spiderX": "/"
+                }
             },
             "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": remark}]
         }
         upsert_inbound(p, "vless", tag, remark, c_obj, ct_obj)
 
-# 3. VLESS xHTTP (Stream-One/Up + Квантово-устойчивый VLESSENC ML-KEM-768 + XTLS Vision по спецификации rprx)
+# 3. VLESS xHTTP (Stream-One + ML-KEM-768 + XTLS Vision)
 x_obj = {
     "clients": [{"id": unified_uuid, "flow": "xtls-rprx-vision", "email": "Client-Unified", "subId": unified_sub_id, "enable": True}],
     "decryption": vless_dekey,
@@ -1718,7 +1735,7 @@ xt_obj = {
         "xmux": {"maxConcurrency": "0", "maxConnections": "1-3", "cMaxReuseTimes": "300-600", "hKeepAlivePeriod": 600}
     },
     "security": "none",
-    "externalProxy": [{"dest": domain, "port": 443, "forceTls": "tls", "sni": domain, "fingerprint": "chrome", "remark": "VLESS xHTTP"}]
+    "externalProxy": [{"dest": domain, "port": 443, "forceTls": "tls", "sni": domain, "fingerprint": "firefox", "remark": "VLESS xHTTP"}]
 }
 upsert_inbound(xhttp_port, "vless", "in-xhttp-stream", "VLESS xHTTP", x_obj, xt_obj)
 
@@ -1773,10 +1790,7 @@ if os.environ.get("ENABLE_AWG_V2") == "1":
     a2t_obj = {"externalProxy": [{"dest": domain, "port": a2p, "remark": "AmneziaWG v2"}]}
     upsert_inbound(a2p, "amneziawg", "in-awg-v2-legacy", "AmneziaWG v2", a2_obj, a2t_obj, listen="0.0.0.0")
 
-# ------------------------------------------------------------------------------
-# АВТОМАТИЗАЦИЯ СГРУППИРОВАННЫХ ХОСТОВ (HOST GROUPS) В 3X-UI v3.4.0–v3.8.5+
-# Полная совместимость со схемой GORM model.Host: поддержка group_id, sort_order, is_disabled, is_hidden
-# ------------------------------------------------------------------------------
+# Автоматизация сгруппированных хостов (Hosts Table)
 cur.execute("""
     CREATE TABLE IF NOT EXISTS hosts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1804,31 +1818,20 @@ cur.execute("""
     )
 """)
 
-# Динамическая миграция: проверка и добавление отсутствующих колонок в старых базах
 cur.execute("PRAGMA table_info(hosts)")
 existing_h_cols = {r[1] for r in cur.fetchall()}
 
 host_col_defs = {
-    "group_id": "TEXT DEFAULT ''",
-    "inbound_id": "INTEGER NOT NULL DEFAULT 0",
-    "sort_order": "INTEGER DEFAULT 0",
-    "remark": "TEXT DEFAULT ''",
-    "address": "TEXT DEFAULT ''",
-    "port": "INTEGER DEFAULT 443",
-    "security": "TEXT DEFAULT 'same'",
-    "sni": "TEXT DEFAULT ''",
-    "host_header": "TEXT DEFAULT ''",
-    "path": "TEXT DEFAULT ''",
-    "alpn": "TEXT DEFAULT ''",
-    "fingerprint": "TEXT DEFAULT ''",
-    "allow_insecure": "INTEGER DEFAULT 0",
-    "is_disabled": "INTEGER DEFAULT 0",
-    "is_hidden": "INTEGER DEFAULT 0",
-    "tags": "TEXT DEFAULT ''",
-    "ech_config_list": "TEXT DEFAULT ''",
-    "mux_params": "TEXT DEFAULT ''",
-    "sockopt_params": "TEXT DEFAULT ''",
-    "final_mask": "TEXT DEFAULT ''",
+    "group_id": "TEXT DEFAULT ''", "inbound_id": "INTEGER NOT NULL DEFAULT 0",
+    "sort_order": "INTEGER DEFAULT 0", "remark": "TEXT DEFAULT ''",
+    "address": "TEXT DEFAULT ''", "port": "INTEGER DEFAULT 443",
+    "security": "TEXT DEFAULT 'same'", "sni": "TEXT DEFAULT ''",
+    "host_header": "TEXT DEFAULT ''", "path": "TEXT DEFAULT ''",
+    "alpn": "TEXT DEFAULT ''", "fingerprint": "TEXT DEFAULT ''",
+    "allow_insecure": "INTEGER DEFAULT 0", "is_disabled": "INTEGER DEFAULT 0",
+    "is_hidden": "INTEGER DEFAULT 0", "tags": "TEXT DEFAULT ''",
+    "ech_config_list": "TEXT DEFAULT ''", "mux_params": "TEXT DEFAULT ''",
+    "sockopt_params": "TEXT DEFAULT ''", "final_mask": "TEXT DEFAULT ''",
     "exclude_from_sub_types": "TEXT DEFAULT ''"
 }
 
@@ -1844,34 +1847,15 @@ active_cols = {r[1] for r in cur.fetchall()}
 
 def add_host_entry(gid, ib_id, remark, addr, port, sec, sni="", alpn="", fp="", sort_order=0):
     col_candidates = {
-        "group_id": gid,
-        "groupId": gid,
-        "inbound_id": ib_id,
-        "inboundId": ib_id,
-        "sort_order": sort_order,
-        "sortOrder": sort_order,
-        "remark": remark,
-        "address": addr,
-        "port": port,
-        "security": sec,
-        "sni": sni,
-        "host_header": "",
-        "hostHeader": "",
-        "path": "",
-        "alpn": alpn,
-        "fingerprint": fp,
-        "allow_insecure": 0,
-        "allowInsecure": 0,
-        "is_disabled": 0,
-        "isDisabled": 0,
-        "is_hidden": 0,
-        "isHidden": 0,
-        "tags": "",
-        "ech_config_list": "",
-        "mux_params": "",
-        "sockopt_params": "",
-        "final_mask": "",
-        "exclude_from_sub_types": ""
+        "group_id": gid, "groupId": gid,
+        "inbound_id": ib_id, "inboundId": ib_id,
+        "sort_order": sort_order, "sortOrder": sort_order,
+        "remark": remark, "address": addr, "port": port, "security": sec,
+        "sni": sni, "host_header": "", "hostHeader": "", "path": "",
+        "alpn": alpn, "fingerprint": fp, "allow_insecure": 0, "allowInsecure": 0,
+        "is_disabled": 0, "isDisabled": 0, "is_hidden": 0, "isHidden": 0,
+        "tags": "", "ech_config_list": "", "mux_params": "", "sockopt_params": "",
+        "final_mask": "", "exclude_from_sub_types": ""
     }
     insert_data = {}
     for k, v in col_candidates.items():
@@ -1883,30 +1867,32 @@ def add_host_entry(gid, ib_id, remark, addr, port, sec, sni="", alpn="", fp="", 
     placeholders = ",".join(["?"] * len(keys))
     cur.execute(f"INSERT INTO hosts ({','.join(keys)}) VALUES ({placeholders})", vals)
 
-# Полная очистка таблицы hosts перед пересозданием
 cur.execute("DELETE FROM hosts")
 
 group_all_uuid = str(uuid.uuid4())
 group_xhttp_uuid = str(uuid.uuid4())
 
-# Группа 1: ALL_443 (Объединяет ВСЕ входящие кроме xHTTP в одну карточку [VLESS Steal] +4)
+# Группа 1: ALL_443
 cur.execute("SELECT id, tag FROM inbounds WHERE tag != 'in-xhttp-stream' AND protocol != 'dokodemo-door'")
 for ib_id, ib_tag in cur.fetchall():
     add_host_entry(group_all_uuid, ib_id, "ALL_443", target_host, 443, "same", sort_order=1)
 
-# Группа 2: xHTTP (Выделенная карточка xHTTP с принудительным TLS, SNI и валидным JSON-массивом ALPN)
+# Группа 2: xHTTP
 cur.execute("SELECT id FROM inbounds WHERE tag = 'in-xhttp-stream'")
 x_row = cur.fetchone()
 if x_row:
     alpn_str = json.dumps(["h2"])
-    add_host_entry(group_xhttp_uuid, x_row[0], "xHTTP", target_host, 443, "tls", sni=domain, alpn=alpn_str, fp="chrome", sort_order=2)
+    add_host_entry(group_xhttp_uuid, x_row[0], "xHTTP", target_host, 443, "tls", sni=domain, alpn=alpn_str, fp="firefox", sort_order=2)
 
 cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
 tables = set(r[0] for r in cur.fetchall())
 if "client_traffics" in tables:
+    cur.execute("SELECT id FROM inbounds LIMIT 1")
+    first_ib = cur.fetchone()
+    fib_id = first_ib[0] if first_ib else 1
     cur.execute("SELECT id FROM client_traffics WHERE email = 'Client-Unified'")
     if not cur.fetchone():
-        cur.execute("INSERT INTO client_traffics (inbound_id, enable, email, up, down, expiry_time, total, reset) VALUES (1, 1, 'Client-Unified', 0, 0, 0, 0, 0)")
+        cur.execute("INSERT INTO client_traffics (inbound_id, enable, email, up, down, expiry_time, total, reset) VALUES (?, 1, 'Client-Unified', 0, 0, 0, 0, 0)", (fib_id,))
 
 conn.commit()
 conn.close()
@@ -1922,7 +1908,7 @@ sleep 2
 if ss -tlnp 2>/dev/null | grep -q "127.0.0.1:${PANEL_PORT}"; then
     ok "Служба 3X-UI успешно запущена и слушает локальный сокет 127.0.0.1:${PANEL_PORT}."
 else
-    warn "Служба 3X-UI стартовала. При первом открытии веб-панели проверьте статус."
+    warn "Служба 3X-UI стартовала. Проверьте статус в дашборде."
 fi
 
 UNIFIED_SUB_ID=""
@@ -1957,7 +1943,7 @@ ufw allow 8443/tcp comment 'HTTPS L4 Stream' >/dev/null 2>&1 || true
 [ "${ENABLE_AWG_V3:-0}" -eq 1 ] && ufw allow "${AWG_V3_PORT}/udp" comment 'AmneziaWG v3' >/dev/null 2>&1 || true
 [ "${ENABLE_AWG_V2:-0}" -eq 1 ] && ufw allow "${AWG_V2_PORT}/udp" comment 'AmneziaWG v2' >/dev/null 2>&1 || true
 
-# Формирование персистентных таблиц *nat и *mangle с полными базовыми цепочками
+# Аккуратная персистентная модификация /etc/ufw/before.rules без затирания сторонних таблиц
 export ENABLE_HY2_HOP HY2_PORT
 python3 - << 'EOF_UFW_PYTHON'
 # -*- coding: utf-8 -*-
@@ -1970,11 +1956,9 @@ if not os.path.exists(rules_file):
 with open(rules_file, "r") as f:
     content = f.read()
 
-# Очистка всех предыдущих генераций блоков NAT и MANGLE
+# Очистка строго маркированных блоков
 content = re.sub(r'# START HARDENED NAT[\s\S]*?# END HARDENED NAT\n?', '', content)
 content = re.sub(r'# START HARDENED MANGLE[\s\S]*?# END HARDENED MANGLE\n?', '', content)
-content = re.sub(r'\*nat[\s\S]*?COMMIT\n?', '', content)
-content = re.sub(r'\*mangle[\s\S]*?COMMIT\n?', '', content)
 content = content.strip() + "\n"
 
 enable_hop = os.environ.get("ENABLE_HY2_HOP") == "1"
@@ -2006,7 +1990,7 @@ COMMIT
 # END HARDENED MANGLE
 """
 
-# В UFW таблица *nat всегда должна предшествовать таблице *filter, а *mangle размещаться в хвосте
+# В UFW *nat должен предшествовать *filter, а *mangle размещаться в конце
 final_body = nat_part + content + mangle_part + "\n"
 
 with open(rules_file, "w") as f:
@@ -2025,7 +2009,7 @@ log "Активация TCP MSS Clamping (--clamp-mss-to-pmtu)..."
 iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
     iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
-# Строгая изоляция всех внутренних сокетов от внешнего мира
+# Строгая изоляция всех внутренних сокетов
 DENIED_PORTS=(10443 55443 50443 9443 3000)
 for p in "${ALL_REALITY_PORTS[@]:-}"; do
     DENIED_PORTS+=("$p")
@@ -2052,7 +2036,7 @@ HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT}"
 CRED_FILE="/root/vpn_credentials.txt"
 cat << EOF > "$CRED_FILE"
 =====================================================================
-  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Monoscript v1.1.0 Universal)
+  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Monoscript v1.2.0 Universal)
   ОС: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
   Сетевой профиль: $([ "$GEO_PROFILE" = "1" ] && echo "RU (Россия / Зеркала / Яндекс DNS)" || echo "EU/World (Зарубежный)")
   Дата развертывания: $(date '+%Y-%m-%d %H:%M:%S')
@@ -2099,7 +2083,7 @@ chmod 600 "$CRED_FILE"
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА И ГОТОВА К РАБОТЕ (v1.1.0)!              ${NC}"
+echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА И ГОТОВА К РАБОТЕ (v1.2.0)!              ${NC}"
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Панель управления 3X-UI:     ${CYAN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 echo -e "  Логин: ${WHITE}${ADMIN_USER}${NC} | Пароль: ${YELLOW}${BOLD}${ADMIN_PASS}${NC}"
@@ -2122,8 +2106,10 @@ if [ "${ENABLE_HY2:-0}" -eq 1 ]; then
 echo -e "  ${WHITE}Hysteria 2 (UDP):${NC}            ${CYAN}${HY2_REPORT_LINE}${NC}"
 fi
 echo -e "  ${WHITE}TCP MSS Clamping:${NC}            ${GREEN}Персистентно в mangle (--clamp-mss-to-pmtu)${NC}"
-echo -e "  ${WHITE}VLESS xHTTP:${NC}                 ${GREEN}ML-KEM-768 + XTLS Vision (спецификация rprx)${NC}"
-echo -e "  ${WHITE}Раздел «Хосты» 3X-UI:${NC}        ${GREEN}Группировка ALL_443 (+4) и xHTTP (эталон Скриншота 2)${NC}"
+echo -e "  ${WHITE}VLESS xHTTP:${NC}                 ${GREEN}ML-KEM-768 + XTLS Vision${NC}"
+echo -e "  ${WHITE}VLESS Steal REALITY:${NC}         ${GREEN}target/dest 127.0.0.1:9443, xver 1, uTLS firefox${NC}"
+echo -e "  ${WHITE}VLESS Classic REALITY:${NC}       ${GREEN}target/dest external:443, xver 0, uTLS firefox${NC}"
+echo -e "  ${WHITE}Раздел «Хосты» 3X-UI:${NC}        ${GREEN}Группировка ALL_443 (+4) и xHTTP${NC}"
 echo -e "  ${WHITE}Сетевой профиль:${NC}             ${GREEN}$([ "$GEO_PROFILE" = "1" ] && echo "RU (Яндекс DNS + Зеркала)" || echo "EU/World")${NC}"
 echo
 echo -e "  Все доступы сохранены в файл: ${CYAN}${CRED_FILE}${NC} (chmod 600)"
