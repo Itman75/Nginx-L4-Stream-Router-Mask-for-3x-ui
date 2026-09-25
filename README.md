@@ -92,11 +92,11 @@ flowchart TD
 ### Требования к серверу:
 * **ОС:** Чистая установка **Ubuntu (22.04 / 24.04 / 26.04)** или **Debian (12 / 13)**.
 * **Права:** Суперпользователь `root`.
-* **Домены:** Минимум 3 сертификата: **1 домен** (your.domain - основной для Nginx и маскировки) и **2 поддомена** (`cdn.your.domain` для Steal REALITY и `dns.your.domain` для AdGuard Home DoH).
+* **Домены:** Минимум 3 сертификата: **1 домен** (yourdomain.online - основной для Nginx и маскировки) и **2 поддомена** (`cdn.yourdomain.online` для Steal REALITY и `dns.yourdomain.online` для AdGuard Home DoH).
 
 > [!CAUTION]
 > ### ⚠️ Важно: Режим работы DNS в Cloudflare
-> Все DNS A-записи (`@`, `cdn`, `dns`) в панели Cloudflare **обязаны** находиться строго в режиме **DNS-Only (Серое облако)**.  
+> Все DNS A-записи (`yourdomain`, `cdn`, `dns`) в панели Cloudflare **обязаны** находиться строго в режиме **DNS-Only (Серое облако)**.  
 > Проксирование Cloudflare (Оранжевое облако) блокирует L4 SNI-маршрутизацию, протокол REALITY и H2C-стриминг xHTTP.
 
 ### Команда развертывания:
