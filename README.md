@@ -92,7 +92,7 @@ flowchart TD
 ### Требования к серверу:
 * **ОС:** Чистая установка **Ubuntu (22.04 / 24.04 / 26.04)** или **Debian (12 / 13)**.
 * **Права:** Суперпользователь `root`.
-* **Домены:** Минимум 3 домена для сертификатов: **1 домен** (yourdomain.online - основной для Nginx и маскировки) и **2 поддомена** (`cdn.yourdomain.online` для Steal REALITY и `dns.yourdomain.online` для AdGuard Home DoH).
+* **Домены:** Нужны минимум **3 домена** привязанных к IP сервера: **1 домен** (yourdomain.online - основной для Nginx и маскировки) и **2 поддомена** (`cdn.yourdomain.online` для Steal REALITY и `dns.yourdomain.online` для AdGuard Home DoH).
 
 > [!CAUTION]
 > ### ⚠️ Важно: Режим работы DNS в Cloudflare
