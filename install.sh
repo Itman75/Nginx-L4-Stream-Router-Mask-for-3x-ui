@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup Monoscript: Hardened Master Engine v2.0 Universal
+# Production AutoSetup Monoscript: Hardened Master Engine v2.1 Universal
 # OS Hardening + BBR + Nginx L4 Stream + 3X-UI + Zero-Touch (Production Release)
-# Xray v26.7.28 Pinned + Native H2C xHTTP + ML-KEM-768 + Client "Test" Auto-Link
-# Adaptive Clash/Mihomo Auto-Detect + Sing-box JSON Array Enforcement
+# Xray v26.7.28 Pinned + Native H2C xHTTP + ML-KEM-768 + Dynamic AGH & DNS
+# Smart Situational Flow Preservation + Adaptive Clash/JSON Subscriptions
 # ==============================================================================
 # Совместимость: Ubuntu 22.04 / 24.04 / 26.04 & Debian 12 / 13
 # Режимы: Чистая установка (Clean Install) & Безопасное обновление (Safe Migration)
@@ -38,9 +38,9 @@ trap 'die "Скрипт аварийно прерван на строке $LINEN
 
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN}  Hardened Master Engine v3.1.0 Universal (Production Release)        ${NC}"
+echo -e "${GREEN}  Hardened Master Engine v2.1 Universal (Production Release)          ${NC}"
 echo -e "${CYAN}  Dual-Mode: Clean Setup / Safe Migration + Nginx L4 Native + 3X-UI  ${NC}"
-echo -e "${WHITE}  Xray Core v26.7.28 Pinned + Native H2C xHTTP + Adaptive Clash/JSON  ${NC}"
+echo -e "${WHITE}  Xray Core v26.7.28 Pinned + Native H2C xHTTP + Smart DNS / Flow     ${NC}"
 echo -e "${WHITE}  Поддержка: Ubuntu 22.04/24.04/26.04 & Debian 12/13                  ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
@@ -1011,7 +1011,9 @@ EOF
     - \"h3://cloudflare-dns.com/dns-query\""
     fi
 
-    cat << EOF > /opt/AdGuardHome/AdGuardHome.yaml
+    # Защита от затирания существующего AdGuardHome.yaml в режиме миграции
+    if [ "$INSTALL_MODE" = "1" ] || [ ! -f /opt/AdGuardHome/AdGuardHome.yaml ]; then
+        cat << EOF > /opt/AdGuardHome/AdGuardHome.yaml
 http:
   address: 127.0.0.1:3000
   doh:
@@ -1047,6 +1049,10 @@ tls:
   allow_unencrypted_doh: true
 schema_version: 28
 EOF
+    else
+        ok "Существующая конфигурация AdGuard Home (/opt/AdGuardHome/AdGuardHome.yaml) сохранена."
+    fi
+
     /opt/AdGuardHome/AdGuardHome -s install >/dev/null 2>&1 || true
     systemctl restart AdGuardHome || true
     ok "AdGuard Home DoH активен на 127.0.0.1:53 (Панель: 127.0.0.1:3000)."
@@ -2090,7 +2096,7 @@ STEAL_DOMAINS_STR="${STEAL_DOMAINS[*]:-}"
 export DB_PATH PRIMARY_DOMAIN PANEL_PORT PANEL_PATH SUB_PORT SUB_PATH
 export XHTTP_STREAM_PORT XHTTP_STREAM_PATH ENABLE_STEAL STEAL_JSON
 export ENABLE_CLASSIC CLASSIC_JSON ENABLE_HY2 HY2_PORT ENABLE_AWG_V3 AWG_V3_PORT
-export ENABLE_AWG_V2 AWG_V2_PORT ADMIN_USER ADMIN_PASS SSL_BASE_DIR VLESS_DECRYPTION VLESS_ENCRYPTION STEAL_DOMAINS_STR INSTALL_MODE
+export ENABLE_AWG_V2 AWG_V2_PORT ADMIN_USER ADMIN_PASS SSL_BASE_DIR VLESS_DECRYPTION VLESS_ENCRYPTION STEAL_DOMAINS_STR INSTALL_MODE ENABLE_AGH GEO_PROFILE
 
 # -------------------------------------------------------------
 # ZERO-TOUCH SQLITE ENGINE (ТОЧНАЯ АНАТОМИЯ РАБОЧЕГО ДАМПА)
@@ -2159,6 +2165,7 @@ admin_p = os.environ["ADMIN_PASS"]
 vless_dekey = os.environ["VLESS_DECRYPTION"]
 vless_enkey = os.environ["VLESS_ENCRYPTION"]
 install_mode = os.environ.get("INSTALL_MODE", "1")
+enable_agh = os.environ.get("ENABLE_AGH") == "1"
 
 steal_doms = os.environ.get("STEAL_DOMAINS_STR", "").split()
 target_host = f"cdn.{domain}" if steal_doms else domain
@@ -2181,7 +2188,7 @@ if install_mode == "1":
 else:
     uid = urow[0] if urow else 1
 
-# 1. Эталонный реестр параметров таблицы settings со всеми подтвержденными флагами
+# 1. Реестр параметров settings с подтвержденными адаптивными флагами
 settings_data = {
     "port": panel_port,
     "webPort": panel_port,
@@ -2215,7 +2222,7 @@ settings_data = {
     "realityScanCandidates": "www.cloudflare.com:443,www.microsoft.com:443,www.amazon.com:443,aws.amazon.com:443,www.samsung.com:443,www.nvidia.com:443,www.amd.com:443,www.intel.com:443,www.sony.com:443,dl.google.com:443",
     "restartXrayOnClientDisable": "true",
     "xrayOutboundTestUrl": "https://www.google.com/generate_204",
-    # Утвержденные переключатели
+    # Адаптивные подписки
     "subJsonAlwaysArray": "true",
     "subClashAutoDetect": "true",
     "subJsonAutoDetect": "false"
@@ -2228,13 +2235,24 @@ for k, v in settings_data.items():
     else:
         cur.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
 
-# 2. Эталонный xrayTemplateConfig с DoH на AdGuard Home (127.0.0.1:53) и ForceIPv4
-tpl_config = {
-    "api": {
-        "services": ["HandlerService", "LoggerService", "StatsService", "RoutingService"],
-        "tag": "api"
-    },
-    "dns": {
+# 2. Интеллектуальный xrayTemplateConfig (Динамический DNS и Freedom finalRules)
+freedom_final_rules = []
+if enable_agh:
+    freedom_final_rules.append({"action": "allow", "ip": ["127.0.0.1"], "port": "53"})
+freedom_final_rules.append({"action": "block", "ip": ["geoip:private"]})
+freedom_final_rules.append({"action": "allow"})
+
+routing_rules = [
+    {"inboundTag": ["api"], "outboundTag": "api", "type": "field"}
+]
+if enable_agh:
+    routing_rules.append({"ip": ["127.0.0.1"], "outboundTag": "direct", "port": "53", "ruleTag": "xui-dns-allow", "type": "field"})
+routing_rules.append({"ip": ["geoip:private"], "outboundTag": "blocked", "type": "field"})
+routing_rules.append({"outboundTag": "blocked", "protocol": ["bittorrent"], "type": "field"})
+
+dns_config = {}
+if enable_agh:
+    dns_config = {
         "tag": "dns_inbound",
         "hosts": {},
         "servers": [
@@ -2261,7 +2279,14 @@ tpl_config = {
         "useSystemHosts": False,
         "serveStale": False,
         "serveExpiredTTL": 0
+    }
+
+tpl_config = {
+    "api": {
+        "services": ["HandlerService", "LoggerService", "StatsService", "RoutingService"],
+        "tag": "api"
     },
+    "dns": dns_config,
     "fakedns": None,
     "inbounds": [
         {
@@ -2288,10 +2313,7 @@ tpl_config = {
             "tag": "direct",
             "protocol": "freedom",
             "settings": {
-                "finalRules": [
-                    {"action": "block", "ip": ["geoip:private"]},
-                    {"action": "allow"}
-                ]
+                "finalRules": freedom_final_rules
             },
             "streamSettings": {
                 "sockopt": {"domainStrategy": "ForceIPv4"}
@@ -2319,30 +2341,7 @@ tpl_config = {
     },
     "routing": {
         "domainStrategy": "IPIfNonMatch",
-        "rules": [
-            {
-                "inboundTag": ["api"],
-                "outboundTag": "api",
-                "type": "field"
-            },
-            {
-                "ip": ["127.0.0.1"],
-                "outboundTag": "direct",
-                "port": "53",
-                "ruleTag": "xui-dns-allow",
-                "type": "field"
-            },
-            {
-                "ip": ["geoip:private"],
-                "outboundTag": "blocked",
-                "type": "field"
-            },
-            {
-                "outboundTag": "blocked",
-                "protocol": ["bittorrent"],
-                "type": "field"
-            }
-        ]
+        "rules": routing_rules
     },
     "stats": {}
 }
@@ -2360,7 +2359,7 @@ test_uuid = str(uuid.uuid4())
 test_password = secrets.token_hex(8)
 test_auth = secrets.token_hex(8)
 
-# Строгий 16-ричный HEX shortId для Reality (исключает падение Xray)
+# Строгий 16-ричный HEX shortId для Reality
 reality_hex_sid = secrets.token_hex(8)
 
 def_r_priv, def_r_pub = gen_reality_keypair()
@@ -2369,31 +2368,20 @@ def_wg_c_priv, def_wg_c_pub = gen_wg_keypair()
 
 now_ms = int(time.time() * 1000)
 
-client_common_dict = {
-    "auth": test_auth,
-    "comment": "",
-    "created_at": now_ms,
-    "email": test_email,
-    "enable": True,
-    "expiryTime": 0,
-    "flow": "xtls-rprx-vision",
-    "id": test_uuid,
-    "keepAlive": 25,
-    "limitIp": 0,
-    "password": test_password,
-    "privateKey": def_wg_c_priv,
-    "publicKey": def_wg_c_pub,
-    "reset": 0,
-    "resetDay": 0,
-    "resetMax": 0,
-    "security": "auto",
-    "subId": test_sub_id,
-    "tgId": 0,
-    "totalGB": 0,
-    "trafficReset": "never",
-    "trafficResetDay": 1,
-    "updated_at": now_ms
+# Для чистой установки Reality идет с чистым flow: "" (максимальная совместимость)
+client_reality_dict = {
+    "auth": test_auth, "comment": "", "created_at": now_ms, "email": test_email,
+    "enable": True, "expiryTime": 0, "flow": "", "id": test_uuid, "keepAlive": 25,
+    "limitIp": 0, "password": test_password, "privateKey": def_wg_c_priv, "publicKey": def_wg_c_pub,
+    "reset": 0, "resetDay": 0, "resetMax": 0, "security": "auto", "subId": test_sub_id,
+    "tgId": 0, "totalGB": 0, "trafficReset": "never", "trafficResetDay": 1, "updated_at": now_ms
 }
+
+client_xhttp_dict = dict(client_reality_dict)
+client_xhttp_dict["flow"] = "xtls-rprx-vision"
+
+# Безопасная инициализация переменных инбаундов (исключает NameError при отказе от протоколов)
+ib1_id = ib2_id = ib3_id = ib4_id = ib5_id = ib6_id = None
 
 def upsert_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, listen="127.0.0.1"):
     cur.execute("SELECT id, settings, stream_settings FROM inbounds WHERE port = ? OR tag = ?", (port, tag))
@@ -2406,23 +2394,29 @@ def upsert_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, listen="127.
         existing_s = json.loads(row[1]) if row[1] else {}
         existing_st = json.loads(row[2]) if row[2] else {}
         
-        final_s = existing_s if existing_s.get("clients") else s_obj_def
+        # Умное сохранение существующих клиентов без изменения их flow
+        final_s = existing_s
+        if not final_s.get("clients"):
+            final_s["clients"] = s_obj_def.get("clients", [])
+
         if proto == "vless" and "decryption" in s_obj_def and s_obj_def["decryption"] != "none":
             final_s["decryption"] = s_obj_def["decryption"]
             final_s["encryption"] = s_obj_def.get("encryption", "")
 
-        final_st = st_obj_def
-        if "realitySettings" in existing_st and "realitySettings" in final_st:
-            if existing_st["realitySettings"].get("privateKey"):
-                final_st["realitySettings"]["privateKey"] = existing_st["realitySettings"]["privateKey"]
-            if existing_st["realitySettings"].get("shortIds"):
-                old_sid = existing_st["realitySettings"]["shortIds"][0] if existing_st["realitySettings"]["shortIds"] else ""
-                if old_sid and all(c in "0123456789abcdefABCDEF" for c in old_sid):
-                    final_st["realitySettings"]["shortIds"] = existing_st["realitySettings"]["shortIds"]
-                else:
-                    final_st["realitySettings"]["shortIds"] = [reality_hex_sid]
-            if existing_st["realitySettings"].get("settings", {}).get("publicKey"):
-                final_st["realitySettings"]["settings"]["publicKey"] = existing_st["realitySettings"]["settings"]["publicKey"]
+        # Сохраняем существующие streamSettings, обновляя только префикс spiderX и minClientVer
+        final_st = existing_st
+        if "realitySettings" in final_st:
+            rs = final_st["realitySettings"]
+            rs["minClientVer"] = "1.0.0"
+            if not rs.get("shortIds"):
+                rs["shortIds"] = [reality_hex_sid]
+            # Гарантируем универсальный корень spiderX, если он был пустым
+            if not rs.get("spiderX"):
+                rs["spiderX"] = "/"
+            if "settings" in rs and not rs["settings"].get("spiderX"):
+                rs["settings"]["spiderX"] = "/"
+            if rs.get("xver") is None:
+                rs["xver"] = 1
 
         s_json = json.dumps(final_s, ensure_ascii=False)
         st_json = json.dumps(final_st, ensure_ascii=False)
@@ -2444,56 +2438,58 @@ def upsert_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, listen="127.
 
 # 4. Создание инбаундов
 # 4.1 Steal Reality
-steal_dict = json.loads(os.environ.get("STEAL_JSON", "{}"))
-for p_str, doms in steal_dict.items():
-    p = int(p_str)
-    primary_dom = doms[0] if doms else f"cdn.{domain}"
-    tag = f"in-steal-reality-{p}" if p != 45443 else "in-steal-reality"
-    remark = f"REALITY-443 ({p})" if len(steal_dict) > 1 else "REALITY-443"
-    s_obj = {"clients": [client_common_dict], "decryption": "none"}
-    st_obj = {
-        "network": "tcp", "security": "reality",
-        "tcpSettings": {"acceptProxyProtocol": True, "header": {"type": "none"}},
-        "realitySettings": {
-            "show": False, "xver": 1,
-            "target": "127.0.0.1:9443", "dest": "127.0.0.1:9443",
-            "serverNames": doms,
-            "privateKey": def_r_priv,
-            "minClientVer": "1.0.0", "maxClientVer": "", "maxTimediff": 0,
-            "shortIds": [reality_hex_sid],
-            "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": "", "spiderX": "/"}
-        },
-        "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": remark}]
-    }
-    ib1_id = upsert_inbound(p, "vless", tag, remark, s_obj, st_obj)
+if os.environ.get("ENABLE_STEAL") == "1":
+    steal_dict = json.loads(os.environ.get("STEAL_JSON", "{}"))
+    for p_str, doms in steal_dict.items():
+        p = int(p_str)
+        primary_dom = doms[0] if doms else f"cdn.{domain}"
+        tag = f"in-steal-reality-{p}" if p != 45443 else "in-steal-reality"
+        remark = f"REALITY-443 ({p})" if len(steal_dict) > 1 else "REALITY-443"
+        s_obj = {"clients": [client_reality_dict], "decryption": "none"}
+        st_obj = {
+            "network": "tcp", "security": "reality",
+            "tcpSettings": {"acceptProxyProtocol": True, "header": {"type": "none"}},
+            "realitySettings": {
+                "show": False, "xver": 1,
+                "target": "127.0.0.1:9443", "dest": "127.0.0.1:9443",
+                "serverNames": doms,
+                "privateKey": def_r_priv,
+                "minClientVer": "1.0.0", "maxClientVer": "", "maxTimediff": 0,
+                "shortIds": [reality_hex_sid],
+                "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": "", "spiderX": "/"}
+            },
+            "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": remark}]
+        }
+        ib1_id = upsert_inbound(p, "vless", tag, remark, s_obj, st_obj)
 
 # 4.2 Classic Reality
-classic_dict = json.loads(os.environ.get("CLASSIC_JSON", "{}"))
-for p_str, snis in classic_dict.items():
-    p = int(p_str)
-    primary_sni = snis[0] if snis else "tbank.ru"
-    tag = f"in-classic-reality-{p}" if p != 46443 else "in-classic-reality"
-    remark = f"REALITY-Classic ({p})" if len(classic_dict) > 1 else "REALITY-Classic"
-    c_obj = {"clients": [client_common_dict], "decryption": "none"}
-    ct_obj = {
-        "network": "tcp", "security": "reality",
-        "tcpSettings": {"acceptProxyProtocol": True, "header": {"type": "none"}},
-        "realitySettings": {
-            "show": False, "xver": 0,
-            "target": f"{primary_sni}:443", "dest": f"{primary_sni}:443",
-            "serverNames": snis,
-            "privateKey": def_r_priv,
-            "minClientVer": "1.0.0", "maxClientVer": "", "maxTimediff": 0,
-            "shortIds": [reality_hex_sid],
-            "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": "", "spiderX": "/"}
-        },
-        "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": remark}]
-    }
-    ib2_id = upsert_inbound(p, "vless", tag, remark, c_obj, ct_obj)
+if os.environ.get("ENABLE_CLASSIC") == "1":
+    classic_dict = json.loads(os.environ.get("CLASSIC_JSON", "{}"))
+    for p_str, snis in classic_dict.items():
+        p = int(p_str)
+        primary_sni = snis[0] if snis else "tbank.ru"
+        tag = f"in-classic-reality-{p}" if p != 46443 else "in-classic-reality"
+        remark = f"REALITY-Classic ({p})" if len(classic_dict) > 1 else "REALITY-Classic"
+        c_obj = {"clients": [client_reality_dict], "decryption": "none"}
+        ct_obj = {
+            "network": "tcp", "security": "reality",
+            "tcpSettings": {"acceptProxyProtocol": True, "header": {"type": "none"}},
+            "realitySettings": {
+                "show": False, "xver": 0,
+                "target": f"{primary_sni}:443", "dest": f"{primary_sni}:443",
+                "serverNames": snis,
+                "privateKey": def_r_priv,
+                "minClientVer": "1.0.0", "maxClientVer": "", "maxTimediff": 0,
+                "shortIds": [reality_hex_sid],
+                "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": "", "spiderX": "/"}
+            },
+            "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": remark}]
+        }
+        ib2_id = upsert_inbound(p, "vless", tag, remark, c_obj, ct_obj)
 
-# 4.3 VLESS xHTTP
+# 4.3 VLESS xHTTP (Native H2C Stream-One)
 x_obj = {
-    "clients": [client_common_dict],
+    "clients": [client_xhttp_dict],
     "decryption": vless_dekey,
     "encryption": vless_enkey
 }
@@ -2511,60 +2507,63 @@ xt_obj = {
 ib3_id = upsert_inbound(xhttp_port, "vless", "in-xhttp-stream", "VLESS xHTTP", x_obj, xt_obj)
 
 # 4.4 Hysteria 2
-hp = int(os.environ["HY2_PORT"]) if os.environ.get("ENABLE_HY2") == "1" else 443
-ssl_dir = os.environ["SSL_BASE_DIR"]
-hy_client = dict(client_common_dict)
-hy_client.pop("flow", None)
-h_obj = {"clients": [hy_client], "version": 2}
-ht_obj = {
-    "network": "hysteria",
-    "hysteriaSettings": {"version": 2, "udpIdleTimeout": 60, "masquerade": {"type": "proxy", "url": "http://127.0.0.1:80"}},
-    "security": "tls",
-    "tlsSettings": {
-        "serverName": domain, "minVersion": "1.3", "maxVersion": "1.3",
-        "certificates": [{"certificateFile": f"{ssl_dir}/{domain}/fullchain.pem", "keyFile": f"{ssl_dir}/{domain}/privkey.pem"}],
-        "alpn": ["h3"]
-    },
-    "externalProxy": [{"dest": domain, "port": hp, "forceTls": "tls", "remark": "Hysteria 2"}]
-}
-ib4_id = upsert_inbound(hp, "hysteria", "in-hysteria2", "Hysteria 2", h_obj, ht_obj, listen="0.0.0.0")
-
-# 4.5 AmneziaWG v3
-a3p = int(os.environ["AWG_V3_PORT"]) if os.environ.get("ENABLE_AWG_V3") == "1" else 8443
-a3_client = dict(client_common_dict)
-a3_client["allowedIPs"] = ["10.8.1.3/32"]
-a3_client.pop("flow", None)
-a3_obj = {
-    "clients": [a3_client],
-    "server": {
-        "h1": "", "h2": "", "h3": "", "h4": "", "jc": 4, "jmin": 50, "jmax": 160, "s1": 45, "s2": 60, "s3": 24, "s4": 16,
-        "mtu": 1320, "primaryDns": "8.8.8.8", "secondaryDns": "8.8.4.4",
-        "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
-        "randomTrailers": False, "disableCookies": True, "contentPaddingAddition": "3-16",
-        "keepaliveTimeout": "8-10", "rekeyAfterTime": "107-135", "rekeyTimeout": "3-4", "rejectAfterTime": "178-211", "maxHandshakeAttempts": "21-26",
-        "subnetCidr": 24, "subnetIp": "10.8.1.0"
+if os.environ.get("ENABLE_HY2") == "1":
+    hp = int(os.environ["HY2_PORT"])
+    ssl_dir = os.environ["SSL_BASE_DIR"]
+    hy_client = dict(client_reality_dict)
+    hy_client.pop("flow", None)
+    h_obj = {"clients": [hy_client], "version": 2}
+    ht_obj = {
+        "network": "hysteria",
+        "hysteriaSettings": {"version": 2, "udpIdleTimeout": 60, "masquerade": {"type": "proxy", "url": "http://127.0.0.1:80"}},
+        "security": "tls",
+        "tlsSettings": {
+            "serverName": domain, "minVersion": "1.3", "maxVersion": "1.3",
+            "certificates": [{"certificateFile": f"{ssl_dir}/{domain}/fullchain.pem", "keyFile": f"{ssl_dir}/{domain}/privkey.pem"}],
+            "alpn": ["h3"]
+        },
+        "externalProxy": [{"dest": domain, "port": hp, "forceTls": "tls", "remark": "Hysteria 2"}]
     }
-}
-a3t_obj = {"externalProxy": [{"dest": domain, "port": a3p, "remark": "AmneziaWG v3"}]}
-ib5_id = upsert_inbound(a3p, "amneziawg", "in-8443-udp", "AmneziaWG v3", a3_obj, a3t_obj, listen="0.0.0.0")
+    ib4_id = upsert_inbound(hp, "hysteria", "in-hysteria2", "Hysteria 2", h_obj, ht_obj, listen="0.0.0.0")
 
-# 4.6 AmneziaWG v2
-a2p = int(os.environ["AWG_V2_PORT"]) if os.environ.get("ENABLE_AWG_V2") == "1" else 8444
-a2_client = dict(client_common_dict)
-a2_client["allowedIPs"] = ["10.8.2.3/32"]
-a2_client.pop("flow", None)
-a2_obj = {
-    "clients": [a2_client],
-    "server": {
-        "h1": "149419586", "h2": "878791997", "h3": "1251051976", "h4": "1657628296",
-        "jc": 4, "jmin": 50, "jmax": 160, "s1": 45, "s2": 60, "s3": 24, "s4": 16, "mtu": 1360,
-        "primaryDns": "8.8.8.8", "secondaryDns": "8.8.4.4",
-        "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
-        "subnetCidr": 24, "subnetIp": "10.8.2.0"
+# 4.5 AmneziaWG v3.1
+if os.environ.get("ENABLE_AWG_V3") == "1":
+    a3p = int(os.environ["AWG_V3_PORT"])
+    a3_client = dict(client_reality_dict)
+    a3_client["allowedIPs"] = ["10.8.1.3/32"]
+    a3_client.pop("flow", None)
+    a3_obj = {
+        "clients": [a3_client],
+        "server": {
+            "h1": "", "h2": "", "h3": "", "h4": "", "jc": 4, "jmin": 50, "jmax": 160, "s1": 45, "s2": 60, "s3": 24, "s4": 16,
+            "mtu": 1320, "primaryDns": "8.8.8.8", "secondaryDns": "8.8.4.4",
+            "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
+            "randomTrailers": False, "disableCookies": True, "contentPaddingAddition": "3-16",
+            "keepaliveTimeout": "8-10", "rekeyAfterTime": "107-135", "rekeyTimeout": "3-4", "rejectAfterTime": "178-211", "maxHandshakeAttempts": "21-26",
+            "subnetCidr": 24, "subnetIp": "10.8.1.0"
+        }
     }
-}
-a2t_obj = {"externalProxy": [{"dest": domain, "port": a2p, "remark": "AmneziaWG v2"}]}
-ib6_id = upsert_inbound(a2p, "amneziawg", "in-awg-v2-legacy", "AmneziaWG v2", a2_obj, a2t_obj, listen="0.0.0.0")
+    a3t_obj = {"externalProxy": [{"dest": domain, "port": a3p, "remark": "AmneziaWG v3"}]}
+    ib5_id = upsert_inbound(a3p, "amneziawg", "in-8443-udp", "AmneziaWG v3", a3_obj, a3t_obj, listen="0.0.0.0")
+
+# 4.6 AmneziaWG v2.0
+if os.environ.get("ENABLE_AWG_V2") == "1":
+    a2p = int(os.environ["AWG_V2_PORT"])
+    a2_client = dict(client_reality_dict)
+    a2_client["allowedIPs"] = ["10.8.2.3/32"]
+    a2_client.pop("flow", None)
+    a2_obj = {
+        "clients": [a2_client],
+        "server": {
+            "h1": "149419586", "h2": "878791997", "h3": "1251051976", "h4": "1657628296",
+            "jc": 4, "jmin": 50, "jmax": 160, "s1": 45, "s2": 60, "s3": 24, "s4": 16, "mtu": 1360,
+            "primaryDns": "8.8.8.8", "secondaryDns": "8.8.4.4",
+            "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
+            "subnetCidr": 24, "subnetIp": "10.8.2.0"
+        }
+    }
+    a2t_obj = {"externalProxy": [{"dest": domain, "port": a2p, "remark": "AmneziaWG v2"}]}
+    ib6_id = upsert_inbound(a2p, "amneziawg", "in-awg-v2-legacy", "AmneziaWG v2", a2_obj, a2t_obj, listen="0.0.0.0")
 
 cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
 tables = set(r[0] for r in cur.fetchall())
@@ -2573,7 +2572,7 @@ tables = set(r[0] for r in cur.fetchall())
 if "clients" in tables:
     cur.execute("SELECT id FROM clients WHERE email = ?", (test_email,))
     cl_row = cur.fetchone()
-    if not cl_row:
+    if not cl_row and install_mode == "1":
         cur.execute("""
             INSERT INTO clients (
                 email, sub_id, uuid, password, auth, flow, security, reverse,
@@ -2590,27 +2589,50 @@ if "clients" in tables:
             )
         """, (test_email, test_sub_id, test_uuid, test_password, test_auth, def_wg_c_priv, def_wg_c_pub, now_ms, now_ms))
         client_global_id = cur.lastrowid
-    else:
+    elif cl_row:
         client_global_id = cl_row[0]
+    else:
+        client_global_id = None
 
-    # 6. Синхронизация junction-связей Many-to-Many (client_inbounds)
-    if "client_inbounds" in tables and client_global_id:
+    # 6. Синхронизация junction-связей Many-to-Many (Безопасный цикл без NameError)
+    if "client_inbounds" in tables and client_global_id and install_mode == "1":
         cur.execute("DELETE FROM client_inbounds WHERE client_id = ?", (client_global_id,))
-        for ib_id, flow_val in [(ib1_id, "xtls-rprx-vision"), (ib2_id, "xtls-rprx-vision"), (ib3_id, "xtls-rprx-vision"), (ib4_id, ""), (ib5_id, ""), (ib6_id, "")]:
-            if ib_id:
-                cur.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id, flow_override, created_at) VALUES (?, ?, ?, ?)",
-                            (client_global_id, ib_id, flow_val, now_ms))
+        active_inbound_links = [
+            (ib_id, fl) for ib_id, fl in [
+                (ib1_id, ""),
+                (ib2_id, ""),
+                (ib3_id, "xtls-rprx-vision"),
+                (ib4_id, ""),
+                (ib5_id, ""),
+                (ib6_id, "")
+            ] if ib_id is not None
+        ]
+        for ib_id, flow_val in active_inbound_links:
+            cur.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id, flow_override, created_at) VALUES (?, ?, ?, ?)",
+                        (client_global_id, ib_id, flow_val, now_ms))
+    elif "client_inbounds" in tables and install_mode == "2":
+        # Умная ситуативная миграция flow для ВСЕХ существующих клиентов
+        cur.execute("SELECT id, settings FROM inbounds WHERE protocol = 'vless'")
+        for v_ib_id, v_s_json in cur.fetchall():
+            if not v_s_json: continue
+            v_s = json.loads(v_s_json)
+            for c in v_s.get("clients", []):
+                c_mail = c.get("email")
+                c_flow = c.get("flow", "")  # Сохраняем ТОЧНО ТОТ flow, который уже был у клиента!
+                cur.execute("SELECT id FROM clients WHERE email = ?", (c_mail,))
+                c_row = cur.fetchone()
+                if c_row:
+                    cur.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id, flow_override, created_at) VALUES (?, ?, ?, ?)",
+                                (c_row[0], v_ib_id, c_flow, now_ms))
 
 # 7. Синхронизация таблицы client_traffics (строго одна запись на email)
-if "client_traffics" in tables:
+if "client_traffics" in tables and install_mode == "1":
     cur.execute("SELECT id FROM client_traffics WHERE email = ?", (test_email,))
     ct_row = cur.fetchone()
-    last_ib = ib6_id or 1
+    first_valid_ib = next((i for i in [ib1_id, ib2_id, ib3_id, ib4_id, ib5_id, ib6_id] if i is not None), 1)
     if not ct_row:
         cur.execute("INSERT INTO client_traffics (inbound_id, enable, email, up, down, expiry_time, total, reset) VALUES (?, 1, ?, 0, 0, 0, 0, 0)",
-                    (last_ib, test_email))
-    else:
-        cur.execute("UPDATE client_traffics SET enable = 1, inbound_id = ? WHERE id = ?", (last_ib, ct_row[0]))
+                    (first_valid_ib, test_email))
 
 # 8. Таблица hosts (100% безопасная эталонная структура 1.2.0)
 cur.execute("""
@@ -2835,7 +2857,7 @@ HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT}"
 CRED_FILE="/root/vpn_credentials.txt"
 cat << EOF > "$CRED_FILE"
 =====================================================================
-  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Monoscript v3.1.0 Universal)
+  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Monoscript v2.1 Universal)
   ОС: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
   Ядро Xray-core: ${DETECTED_XRAY_VER} (Pinned)
   Режим развертывания: $([ "$INSTALL_MODE" = "2" ] && echo "Safe Migration (Существующие клиенты сохранены)" || echo "Clean Setup (С нуля)")
@@ -2869,8 +2891,7 @@ $([ "$INSTALL_MODE" = "1" ] && cat << EOF_SUB_CRED
 EOF_SUB_CRED
 )
 $([ "$INSTALL_MODE" = "2" ] && echo "[ ПОДПИСКИ КЛИЕНТОВ ]
-Все существующие подписки, клиенты, UUID и ключи сохранены без изменений.
-Клиент '${TEST_EMAIL}' синхронизирован с базой.")
+Все существующие подписки, клиенты, UUID, индивидуальные flow и ключи сохранены без изменений.")
 
 $([ "${ENABLE_HY2:-0}" -eq 1 ] && echo "[ HYSTERIA 2 ]
 Подключение:           ${HY2_REPORT_LINE}
@@ -2890,7 +2911,7 @@ chmod 600 "$CRED_FILE"
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА И ГОТОВА К РАБОТЕ!               ${NC}"
+echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА И ГОТОВА К РАБОТЕ (v2.1)!                ${NC}"
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Панель управления 3X-UI:     ${CYAN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 if [ "$INSTALL_MODE" = "1" ]; then
@@ -2915,20 +2936,20 @@ echo -e "  ${BOLD}Клиент «${TEST_EMAIL}» (Выделенная ссыл�
 echo -e "  ${GREEN}https://${PRIMARY_DOMAIN}${SUB_CLASH_PATH}${UNIFIED_SUB_ID}${NC}"
 echo
 else
-echo -e "  ${BOLD}Клиентская база:${NC}          ${GREEN}Существующие клиенты сохранены + активирован клиент «${TEST_EMAIL}»${NC}"
+echo -e "  ${BOLD}Клиентская база:${NC}          ${GREEN}100% действующих клиентов сохранены со своими персональными flow${NC}"
 echo
 fi
 if [ "${ENABLE_HY2:-0}" -eq 1 ]; then
 echo -e "  ${WHITE}Hysteria 2 (UDP):${NC}            ${CYAN}${HY2_REPORT_LINE}${NC}"
 fi
 echo -e "  ${WHITE}Ядро Xray-core:${NC}              ${GREEN}${DETECTED_XRAY_VER} (Pinned)${NC}"
-echo -e "  ${WHITE}Встроенный DNS Xray:${NC}         ${GREEN}127.0.0.1:53 (AdGuard Home DoH, ForceIPv4)${NC}"
+echo -e "  ${WHITE}Встроенный DNS Xray:${NC}         ${GREEN}$([ "${ENABLE_AGH:-0}" -eq 1 ] && echo "127.0.0.1:53 (AGH DoH, ForceIPv4)" || echo "Выключен (Системный resolv.conf)")${NC}"
 echo -e "  ${WHITE}Маршрутизация Freedom:${NC}       ${GREEN}IPIfNonMatch, Block BitTorrent & Private IPs${NC}"
 echo -e "  ${WHITE}База данных SQLite:${NC}          ${GREEN}Синхронизирована (Таблицы clients, client_inbounds)${NC}"
 echo -e "  ${WHITE}TCP MSS Clamping:${NC}            ${GREEN}Персистентно в mangle (--clamp-mss-to-pmtu)${NC}"
 echo -e "  ${WHITE}VLESS xHTTP:${NC}                 ${GREEN}Native H2C + ML-KEM-768 + XTLS Vision${NC}"
-echo -e "  ${WHITE}VLESS Steal REALITY:${NC}         ${GREEN}target/dest 127.0.0.1:9443, xver 1, uTLS firefox${NC}"
-echo -e "  ${WHITE}VLESS Classic REALITY:${NC}       ${GREEN}target/dest external:443, xver 0, uTLS firefox${NC}"
+echo -e "  ${WHITE}VLESS Steal REALITY:${NC}         ${GREEN}target/dest 127.0.0.1:9443, xver 1, spiderX /${NC}"
+echo -e "  ${WHITE}VLESS Classic REALITY:${NC}       ${GREEN}target/dest external:443, xver 0, spiderX /${NC}"
 echo -e "  ${WHITE}Раздел «Хосты» 3X-UI:${NC}        ${GREEN}Группировка ALL_443 (+4) и xHTTP (ALPN: h2)${NC}"
 echo -e "  ${WHITE}Сетевой профиль:${NC}             ${GREEN}$([ "$GEO_PROFILE" = "1" ] && echo "RU (Яндекс DNS + Зеркала)" || echo "EU/World")${NC}"
 echo
