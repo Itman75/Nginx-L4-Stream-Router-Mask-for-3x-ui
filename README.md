@@ -135,7 +135,7 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
 | **6** | **Hysteria 2 (UDP)** | `y` (`:443`, Режим 2) | QUIC-транспорт. Режим 2 включает Port Hopping (`20000-50000/udp`). |
 | **6** | **AmneziaWG v3.1 / v2.0** | `y` (`:8443` / `:8444`) | WG3 для ПК/смартфонов (MTU 1320) и Legacy для роутеров (MTU 1360). |
 | **7** | **AdGuard Home DoH** | `y` (`dns.yourdomain.online`)| Приватный DoH-резолвер с защитой токеном ClientID (`home-router`). |
-| **8** | **Сайт-маскировка** | `1` | `1` — DataSphere Analytics SPA (Live SLA ±10%), `2` — CosmosCloud, `3` — Nginx Stub. |
+| **8** | **Сайт-маскировка** | `1` | `1` — DataSphere Analytics SPA (Live SLA ±10%), `2` — Nginx Stub. |
 | **8** | **Метод SSL** | `1` | `1` — Нативный Certbot HTTP-01 без Snapd, `2` — acme.sh DNS-01 (Cloudflare API). |
 
 > [!IMPORTANT]
