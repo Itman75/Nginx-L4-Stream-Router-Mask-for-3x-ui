@@ -1,5 +1,5 @@
-# 🛡️ Hardened Master Engine v2.0 Universal (Public Edition)
-### Монолитный автоустановщик: OS Hardening + BBR + Nginx L4/L7 Stream + 3X-UI v3.8.5 + Xray v26.7.28 Pinned + VLESS xHTTP (Native H2C) + ML-KEM-768 + Reality + AdGuard Home DoH + Port Hopping
+# 🛡️ Hardened Master Engine v2.1 Universal (Public Edition)
+### Монолитный автоустановщик: OS Hardening + BBR + Nginx L4/L7 Stream + 3X-UI v3.8.5 + Xray v26.7.28 Pinned + VLESS xHTTP (Native H2C) + ML-KEM-768 + Reality + Dynamic AGH DoH + Port Hopping
 
 [![OS: Ubuntu & Debian](https://img.shields.io/badge/OS-Ubuntu%2022.04--26.04%20%7C%20Debian%2012--13-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://ubuntu.com)
 [![Xray Core](https://img.shields.io/badge/Xray--core-v26.7.28%20Pinned-2962FF?style=for-the-badge&logo=shield&logoColor=white)](https://github.com/XTLS/Xray-core)
@@ -12,7 +12,7 @@
   Разворачивается «из коробки» за 5 минут в диалоговом режиме без необходимости ручной настройки веб-интерфейса панели.
 </p>
 
-[Ключевые возможности](#-ключевые-возможности-релиза-v20) •
+[Ключевые возможности](#-ключевые-возможности-релиза-v21) •
 [Схема движения трафика](#-архитектура-движения-трафика) •
 [Быстрый старт](#-быстрый-старт) •
 [Параметры опросника](#-интерактивные-параметры-мастера-установки) •
@@ -24,11 +24,17 @@
 
 ---
 
-## ⚙️ Ключевые возможности релиза v2.0
+## ⚙️ Ключевые возможности релиза v2.1
 
 * **Два режима установки (Dual-Mode):**
-  * **Clean Install (1)** — установка с нуля для чистых VPS с автоматической генерацией мультипротокольного клиента `Test`.
-  * **Safe Migration (2)** — обновление сетевого стека Nginx и ядра Xray на уже работающих серверах со **100% сохранением базы данных, всех существующих клиентов, UUID, ключей, паролей и счетчиков трафика**.
+  * **Clean Install (1)** — развертывание с нуля для новых VPS с автоматической генерацией мультипротокольного клиента `Test`.
+  * **Safe Migration (2)** — обновление сетевого стека Nginx и ядра Xray на уже работающих серверах со **100% сохранением базы данных, всех существующих клиентов, UUID, персональных ключей, паролей и счетчиков трафика**.
+* **Умная ситуативная миграция Flow (Smart Situational Flow):** В режиме обновления скрипт индивидуально считывает параметры каждого пользователя из базы: клиенты без Vision сохраняют чистый TCP (`flow: ""`), а клиенты с включенным Vision сохраняют `xtls-rprx-vision`. Исключен конфликт версий и сброс роутеров на сайт-маску.
+* **Адаптивный DNS и интеграция AdGuard Home:**
+  * **При отказе от AGH (`ENABLE_AGH=0`):** Встроенный DNS Xray не активируется (`"dns": {}`), тумблер в панели выключен, исключая таймауты к закрытому порту 53. Xray резолвит домены напрямую через системный `/etc/resolv.conf` ядра Linux с нулевой задержкой.
+  * **При выборе AGH (`ENABLE_AGH=1`):** В исходящем шлюзе Freedom (`direct`) первой строчкой прописывается исключение `allow 127.0.0.1:53` перед блокировкой `geoip:private`, устраняя конфликт внутренней петли. Существующий `AdGuardHome.yaml` при обновлении не перезаписывается.
+* **Универсальный префикс Reality (`spiderX = "/"`):** Алгоритм префиксного совпадения ядра Xray гарантирует одновременный коннект клиентов со специфическим параметром `spx` в ключе и клиентов со стандартным корнем `/`.
+* **Отказоустойчивость мастера установки:** Безопасная инициализация идентификаторов инбаундов в Python (`ib1_id ... ib6_id = None`) устраняет сбои области видимости при любой комбинации выбранных пользователем протоколов.
 * **Закрепление ядра Xray-core v26.7.28 (Pinned):** Загрузка и атомарная подмена бинарника до первого запуска службы. Панель 3X-UI сразу отображает активный статус: `● Xray · Запущен v26.7.28`.
 * **VLESS xHTTP (Полнодуплексный H2C Stream-One):**
   * Сквозное проксирование через Nginx Mainline по протоколу HTTP/2 (`proxy_http_version 2;`) без даунгрейда до HTTP/1.1.
@@ -39,13 +45,12 @@
 * **Steal-Oneself REALITY с защитой Anti-Loop (Порт 9443):** Камуфляж под собственный поддомен `cdn.`. Трафик сканеров цензуры и обычных браузеров прозрачно пересылается Xray на локальный слушатель Nginx `127.0.0.1:9443` с PROXY protocol (`xver: 1`), исключая петлю бесконечной пересылки.
 * **Classic External REALITY:** Параллельная маскировка под внешние доверенные SNI (`tbank.ru`, `gateway.icloud.com` и др.) с прямым сбросом неавторизованных пакетов (`xver: 0`).
 * **Разблокировка клиентов (`minClientVer: "1.0.0"`):** Устранение жесткого барьера ядра Xray, сбрасывавшего мобильные клиенты и роутеры на сайт-заглушку.
-* **Синхронизация структуры БД 3X-UI v3.8.5:** Автоматическое наполнение таблиц `clients`, `client_inbounds` (со связкой `flow_override: xtls-rprx-vision`), `hosts` и `client_traffics` (строго 1 запись на email для предотвращения сбоя `UNIQUE constraint`).
+* **Синхронизация структуры БД 3X-UI v3.8.5:** Автоматическое наполнение таблиц `clients`, `client_inbounds`, `hosts` и `client_traffics` (строго 1 запись на email для предотвращения сбоя `UNIQUE constraint`).
 * **Адаптивные мультиформатные подписки:**
   * Автоопределение Clash/Mihomo (`subClashAutoDetect = "true"`): базовая ссылка автоматически отдает YAML-конфиг при запросе совместимого клиента.
   * Принудительный массив JSON (`subJsonAlwaysArray = "true"`): исключает ошибку парсинга одиночных нод в Sing-box/Happ.
 * **Hysteria 2 + Port Hopping:** Высокоскоростной QUIC-транспорт на порту `443/udp` с персистентным пулом ротации портов `20000:50000/udp` в таблице `*nat` брандмауэра UFW (защита от провайдерского троттлинга).
 * **AmneziaWG (WG3 + Legacy):** AmneziaWG v3.1 для смартфонов и ПК (порт 8443, MTU 1320) и v2.0/Legacy для роутеров Keenetic/OpenWrt (порт 8444, MTU 1360).
-* **Приватный AdGuard Home DoH:** Защищенный резолвер со Split-DNS на поддомене `dns.` с авторизацией по токенам `ClientID` (`home-router`).
 * **Сетевой Hardening ОС:** Алгоритм TCP BBR + fq, буферы сокетов 16 МБ, персистентный TCP MSS Clamping (`--clamp-mss-to-pmtu`), деактивация IPv6 в `sysctl` и загрузчике GRUB (`ipv6.disable=1`), защита Fail2ban.
 
 ---
@@ -92,11 +97,11 @@ flowchart TD
 ### Требования к серверу:
 * **ОС:** Чистая установка **Ubuntu (22.04 / 24.04 / 26.04)** или **Debian (12 / 13)**.
 * **Права:** Суперпользователь `root`.
-* **Домены:** Нужны минимум **3 домена** привязанных к IP сервера: **1 домен** (yourdomain.online - основной для Nginx и маскировки) и **2 поддомена** (`cdn.yourdomain.online` для Steal REALITY и `dns.yourdomain.online` для AdGuard Home DoH).
+* **Домены:** Минимум **1 основной домен** (`yourdomain.online`) и **2 поддомена** (`cdn.yourdomain.online` для Steal REALITY и `dns.yourdomain.online` для AdGuard Home DoH).
 
 > [!CAUTION]
 > ### ⚠️ Важно: Режим работы DNS в Cloudflare
-> Все DNS A-записи (`yourdomain`, `cdn`, `dns`) в панели Cloudflare **обязаны** находиться строго в режиме **DNS-Only (Серое облако)**.  
+> Все DNS A-записи (`yourdomain.online`, `cdn`, `dns`) в панели Cloudflare **обязаны** находиться строго в режиме **DNS-Only (Серое облако)**.  
 > Проксирование Cloudflare (Оранжевое облако) блокирует L4 SNI-маршрутизацию, протокол REALITY и H2C-стриминг xHTTP.
 
 ### Команда развертывания:
@@ -157,7 +162,7 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
     "clients": [
       {
         "id": "ВАШ_UUID",
-        "flow": "xtls-rprx-vision",
+        "flow": "",
         "email": "Test",
         "subId": "SUB_Test",
         "enable": true
@@ -218,7 +223,7 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
     "clients": [
       {
         "id": "ВАШ_UUID",
-        "flow": "xtls-rprx-vision",
+        "flow": "",
         "email": "Test",
         "subId": "SUB_Test",
         "enable": true
@@ -468,6 +473,38 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
 ```
 </details>
 
+<details>
+<summary><b>7. JSON: Outbound Direct (Freedom) с обходом блокировки 127.0.0.1:53</b></summary>
+
+```json
+{
+  "tag": "direct",
+  "protocol": "freedom",
+  "settings": {
+    "finalRules": [
+      {
+        "action": "allow",
+        "ip": ["127.0.0.1"],
+        "port": "53"
+      },
+      {
+        "action": "block",
+        "ip": ["geoip:private"]
+      },
+      {
+        "action": "allow"
+      }
+    ]
+  },
+  "streamSettings": {
+    "sockopt": {
+      "domainStrategy": "ForceIPv4"
+    }
+  }
+}
+```
+</details>
+
 ---
 
 ## 📱 Клиентские подписки и совместимость
@@ -584,3 +621,4 @@ nginx -t && systemctl start nginx x-ui AdGuardHome
 ## 📄 Лицензия
 
 Проект распространяется под свободной лицензией **MIT**. Подробная информация содержится в файле [LICENSE](LICENSE).
+```
