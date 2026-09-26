@@ -1,4 +1,4 @@
-# 🛡️ Hardened Master Engine v2.1 Universal (Public Edition)
+# 🛡️ Hardened Master Engine v3.0 Universal (Public Edition)
 ### Монолитный автоустановщик: OS Hardening + BBR + Nginx L4/L7 Stream + 3X-UI v3.8.5 + Xray v26.7.28 Pinned + VLESS xHTTP (Native H2C) + ML-KEM-768 + Reality + Dynamic AGH DoH + Port Hopping
 
 [![OS: Ubuntu & Debian](https://img.shields.io/badge/OS-Ubuntu%2022.04--26.04%20%7C%20Debian%2012--13-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://ubuntu.com)
@@ -24,7 +24,7 @@
 
 ---
 
-## ⚙️ Ключевые возможности релиза v2.1
+## ⚙️ Ключевые возможности релиза v3.0
 
 * **Два режима установки (Dual-Mode):**
   * **Clean Install (1)** — развертывание с нуля для новых VPS с автоматической генерацией мультипротокольного клиента `Test`.
