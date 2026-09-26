@@ -621,4 +621,3 @@ nginx -t && systemctl start nginx x-ui AdGuardHome
 ## 📄 Лицензия
 
 Проект распространяется под свободной лицензией **MIT**. Подробная информация содержится в файле [LICENSE](LICENSE).
-```
