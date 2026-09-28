@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup Monoscript: Hardened Master Engine v3.0 Universal
-# OS Hardening + BBR + Nginx L4 Stream + 3X-UI + Zero-Touch (Public Release)
+# Production AutoSetup Monoscript: Hardened Master Engine v3.1 Universal
+# OS Hardening + BBR + Nginx L4 Stream + 3X-UI + Zero-Touch (Production Release)
 # Xray v26.7.28 Pinned + Native H2C xHTTP + ML-KEM-768 + XTLS Vision + AGH DoH
 # Dynamic Ingress Routing + Seamless Subscriptions + Enterprise Decoy Shield
+# Hardened AWG L3 Forwarding + Zonal CSP Architecture + Zero-Inline Frontend
 # ==============================================================================
 # Совместимость: Ubuntu 22.04 / 24.04 / 26.04 & Debian 12 / 13
 # Режимы: Чистая установка (Clean Install) & Безопасное обновление (Safe Migration)
 # ==============================================================================
 
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
@@ -38,10 +40,10 @@ trap 'die "Скрипт аварийно прерван на строке $LINEN
 
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN}  Hardened Master Engine v3.0 Universal (Public Production Release)   ${NC}"
+echo -e "${GREEN}  Hardened Master Engine v3.1 Universal (Production Hardened Release)  ${NC}"
 echo -e "${CYAN}  Dual-Mode: Clean Setup / Safe Migration + Nginx L4 Native + 3X-UI  ${NC}"
 echo -e "${WHITE}  Xray Core v26.7.28 Pinned + Native H2C xHTTP + ML-KEM-768 + Vision  ${NC}"
-echo -e "${WHITE}  Dynamic Ingress Routing + Seamless Subscriptions + Enterprise Decoy  ${NC}"
+echo -e "${WHITE}  AWG L3 Routing + Zonal CSP + DataSphere Enterprise Decoy Shield    ${NC}"
 echo -e "${WHITE}  Поддержка: Ubuntu 22.04/24.04/26.04 & Debian 12/13                  ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
@@ -49,7 +51,12 @@ if [ "$EUID" -ne 0 ]; then
   die "Пожалуйста, запустите установщик с правами суперпользователя root (через sudo)."
 fi
 
+# Превентивное блокирование интерактивных диалогов needrestart
+mkdir -p /etc/needrestart/conf.d
+echo "\$nrconf{restart} = 'a';" > /etc/needrestart/conf.d/99-disable-auto-restart.conf 2>/dev/null || true
+
 if [ -f /etc/os-release ]; then
+    # shellcheck source=/dev/null
     . /etc/os-release
     OS_ID="${ID:-}"
     OS_VER_ID="${VERSION_ID:-}"
@@ -72,20 +79,16 @@ if [ -f /etc/os-release ]; then
     fi
 
     if [ "$OS_COMPATIBLE" -ne 1 ]; then
-        die "Скрипт оптимизирован строго под дистрибутивы с поддержкой Nginx Mainline L4 Stream: Ubuntu (22.04+) и Debian (12+). Текущая ОС: ${PRETTY_NAME:-$OS_ID $OS_VER_ID} не поддерживается."
+        die "Скрипт оптимизирован строго под ОС Ubuntu (22.04+) и Debian (12+). Текущая ОС: ${PRETTY_NAME:-$OS_ID $OS_VER_ID} не поддерживается."
     fi
     ok "Операционная система валидирована: ${PRETTY_NAME:-$OS_ID $OS_VER_ID} ($OS_CODENAME)"
 else
     die "Не удалось определить параметры текущего дистрибутива ОС."
 fi
 
-if [ -d /etc/needrestart/conf.d ]; then
-    echo '$nrconf{restart} = "l";' > /etc/needrestart/conf.d/99-disable-auto-restart.conf 2>/dev/null || true
-fi
-
 log "Первичная подготовка системных утилит (включая unzip и sqlite3 CLI)..."
 apt-get update -q >/dev/null 2>&1 || true
-apt-get install -y curl bc dnsutils bind9-dnsutils iproute2 openssl gawk python3 python3-bcrypt xxd unzip jq sqlite3 bsdextrautils -q >/dev/null 2>&1 || true
+apt-get install -y curl bc bind9-dnsutils iproute2 openssl gawk python3 python3-bcrypt xxd unzip jq sqlite3 bsdextrautils -q >/dev/null 2>&1 || true
 ok "Базовые утилиты готовы к работе."
 
 validate_port() {
@@ -220,7 +223,6 @@ if [ -n "$EXISTING_DB_PATH" ]; then
         ok "Активирован режим БЕЗОПАСНОГО ОБНОВЛЕНИЯ (Safe Migration Mode)!"
         log "Создание горячего аварийного бэкапа перед миграцией (Hot Backup)..."
         
-        # Сброс WAL-журнала SQLite из памяти на диск без остановки служб
         python3 - << 'EOF_WAL'
 import sqlite3
 for p in ["/etc/x-ui/x-ui.db", "/usr/local/x-ui/bin/x-ui.db", "/etc/x-ui/db/x-ui.db"]:
@@ -324,10 +326,29 @@ done
 
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 2: Системные настройки и безопасность ОС ---${NC}"
-prompt_yes_no "Выполнить полное обновление системы (apt upgrade) и очистку?" "y" && DO_SYS_UPGRADE=1 || DO_SYS_UPGRADE=0
-prompt_yes_no "Установить расширенные инструменты мониторинга (htop, btop, jq, tmux)?" "y" && INSTALL_EXTRA_UTILS=1 || INSTALL_EXTRA_UTILS=0
-prompt_yes_no "Включить TCP BBR и полностью отключить IPv6 (защита от утечек)?" "y" && ENABLE_BBR_IPV6=1 || ENABLE_BBR_IPV6=0
-prompt_yes_no "Блокировать входящие ICMP (Ping) запросы в фаерволе?" "n" && BLOCK_PING=1 || BLOCK_PING=0
+if prompt_yes_no "Выполнить полное обновление системы (apt upgrade) и очистку?" "y"; then
+    DO_SYS_UPGRADE=1
+else
+    DO_SYS_UPGRADE=0
+fi
+
+if prompt_yes_no "Установить расширенные инструменты мониторинга (htop, btop, jq, tmux)?" "y"; then
+    INSTALL_EXTRA_UTILS=1
+else
+    INSTALL_EXTRA_UTILS=0
+fi
+
+if prompt_yes_no "Включить TCP BBR и полностью отключить IPv6 (защита от утечек)?" "y"; then
+    ENABLE_BBR_IPV6=1
+else
+    ENABLE_BBR_IPV6=0
+fi
+
+if prompt_yes_no "Блокировать входящие ICMP (Ping) запросы в фаерволе?" "n"; then
+    BLOCK_PING=1
+else
+    BLOCK_PING=0
+fi
 
 echo -e "Текущий активный порт SSH: ${GREEN}${SSH_ACTIVE_PORT}${NC}"
 if prompt_yes_no "Сменить порт SSH на нестандартный?" "n"; then
@@ -346,8 +367,8 @@ fi
 CHANGE_ROOT_PASS=0
 ROOT_PASSWORD=""
 if [ "$INSTALL_MODE" = "1" ]; then
-    prompt_yes_no "Сменить пароль root?" "n" && CHANGE_ROOT_PASS=1 || CHANGE_ROOT_PASS=0
-    if [ "$CHANGE_ROOT_PASS" -eq 1 ]; then
+    if prompt_yes_no "Сменить пароль root?" "n"; then
+        CHANGE_ROOT_PASS=1
         read -rsp "Введите новый пароль root: " ROOT_PASSWORD; echo
     fi
 fi
@@ -356,14 +377,18 @@ CREATE_USER=0
 NEW_USERNAME=""
 NEW_USER_PASS=""
 if [ "$INSTALL_MODE" = "1" ]; then
-    prompt_yes_no "Создать непривилегированного пользователя с sudo?" "n" && CREATE_USER=1 || CREATE_USER=0
-    if [ "$CREATE_USER" -eq 1 ]; then
+    if prompt_yes_no "Создать непривилегированного пользователя с sudo?" "n"; then
+        CREATE_USER=1
         read -rp "Введите имя пользователя: " NEW_USERNAME
         read -rsp "Введите пароль для $NEW_USERNAME: " NEW_USER_PASS; echo
     fi
 fi
 
-prompt_yes_no "Настроить SSH ключи Ed25519?" "$([ "$INSTALL_MODE" = "2" ] && echo "n" || echo "y")" && SETUP_KEYS=1 || SETUP_KEYS=0
+if prompt_yes_no "Настроить SSH ключи Ed25519?" "$([ "$INSTALL_MODE" = "2" ] && echo "n" || echo "y")"; then
+    SETUP_KEYS=1
+else
+    SETUP_KEYS=0
+fi
 
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 3: Настройка панели 3X-UI и секретных путей ---${NC}"
@@ -418,7 +443,12 @@ fi
 
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 4: Настройка протоколов маскировки REALITY ---${NC}"
-prompt_yes_no "Включить Steal-Oneself REALITY (Кража у своего поддомена)?" "y" && ENABLE_STEAL=1 || ENABLE_STEAL=0
+if prompt_yes_no "Включить Steal-Oneself REALITY (Кража у своего поддомена)?" "y"; then
+    ENABLE_STEAL=1
+else
+    ENABLE_STEAL=0
+fi
+
 declare -A STEAL_PORT_DOMAINS
 if [ "$ENABLE_STEAL" -eq 1 ]; then
     while true; do
@@ -477,7 +507,12 @@ if [ "$ENABLE_STEAL" -eq 1 ]; then
     done
 fi
 
-prompt_yes_no "Включить Classic External REALITY (Сторонний доверенный SNI)?" "y" && ENABLE_CLASSIC=1 || ENABLE_CLASSIC=0
+if prompt_yes_no "Включить Classic External REALITY (Сторонний доверенный SNI)?" "y"; then
+    ENABLE_CLASSIC=1
+else
+    ENABLE_CLASSIC=0
+fi
+
 declare -A CLASSIC_PORT_SNIS
 if [ "$ENABLE_CLASSIC" -eq 1 ]; then
     while true; do
@@ -553,7 +588,12 @@ done
 
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 6: Скоростные UDP VPN туннели ---${NC}"
-prompt_yes_no "Установить Hysteria 2 (UDP)?" "y" && ENABLE_HY2=1 || ENABLE_HY2=0
+if prompt_yes_no "Установить Hysteria 2 (UDP)?" "y"; then
+    ENABLE_HY2=1
+else
+    ENABLE_HY2=0
+fi
+
 ENABLE_HY2_HOP=0
 if [ "$ENABLE_HY2" -eq 1 ]; then
     prompt_default "  Внешний UDP-порт для Hysteria 2" "443" HY2_PORT
@@ -570,19 +610,31 @@ if [ "$ENABLE_HY2" -eq 1 ]; then
     fi
 fi
 
-prompt_yes_no "Установить AmneziaWG v3.1 (WG3 — для смартфонов и ПК)?" "y" && ENABLE_AWG_V3=1 || ENABLE_AWG_V3=0
+if prompt_yes_no "Установить AmneziaWG v3.1 (WG3 — для смартфонов и ПК)?" "y"; then
+    ENABLE_AWG_V3=1
+else
+    ENABLE_AWG_V3=0
+fi
 if [ "$ENABLE_AWG_V3" -eq 1 ]; then
     prompt_default "  Внешний UDP-порт для AmneziaWG v3.1" "8443" AWG_V3_PORT
 fi
 
-prompt_yes_no "Установить AmneziaWG v2.0 / Legacy (для роутеров Keenetic / OpenWrt)?" "y" && ENABLE_AWG_V2=1 || ENABLE_AWG_V2=0
+if prompt_yes_no "Установить AmneziaWG v2.0 / Legacy (для роутеров Keenetic / OpenWrt)?" "y"; then
+    ENABLE_AWG_V2=1
+else
+    ENABLE_AWG_V2=0
+fi
 if [ "$ENABLE_AWG_V2" -eq 1 ]; then
     prompt_default "  Внешний UDP-порт для AmneziaWG v2.0" "8444" AWG_V2_PORT
 fi
 
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 7: Приватный DNS AdGuard Home (DoH) ---${NC}"
-prompt_yes_no "Установить приватный AdGuard Home DoH со Split-DNS?" "y" && ENABLE_AGH=1 || ENABLE_AGH=0
+if prompt_yes_no "Установить приватный AdGuard Home DoH со Split-DNS?" "y"; then
+    ENABLE_AGH=1
+else
+    ENABLE_AGH=0
+fi
 if [ "$ENABLE_AGH" -eq 1 ]; then
     prompt_default "  Поддомен для AdGuard Home DoH" "dns.$PRIMARY_DOMAIN" AGH_DOMAIN
     ALL_DOMAINS+=("$AGH_DOMAIN")
@@ -593,10 +645,9 @@ if [ "$ENABLE_AGH" -eq 1 ]; then
 fi
 
 echo
-echo -e "${WHITE}${BOLD}--- ШАГ 8: Сайт-маскировка и сертификация SSL ---${NC}"
 echo -e "Выбор темы маскировочного сайта (Decoy Front):"
-echo -e "  1) ${GREEN}DataSphere Analytics Enterprise${NC} (Корпоративный SaaS, Toast HUD, OpenGraph, динамическая телеметрия)"
-echo -e "  2) ${GREEN}Stealth Hardened Nginx Front${NC} (Страница приветствия Nginx с эшелонированной MOCK-защитой)"
+echo -e "  1) ${GREEN}DataSphere Analytics Enterprise${NC} (Корпоративный SaaS, Zero-Inline, внешние CSS/JS, WebCrypto)"
+echo -e "  2) ${GREEN}Stealth Hardened Nginx Front${NC} (Эталонный лендинг обслуживания кластера с эшелонированной защитой)"
 prompt_default "Ваш выбор" "1" DECOY_MODE
 
 echo
@@ -643,7 +694,7 @@ fi
 
 log "Установка системного набора утилит..."
 CORE_PKGS=(
-    curl wget bash sudo systemd openssl gawk lsb-release gnupg dnsutils bind9-dnsutils
+    curl wget bash sudo systemd openssl gawk lsb-release gnupg bind9-dnsutils
     socat cron ufw iptables iproute2 tar apache2-utils fail2ban python3 python3-systemd
     python3-bcrypt ca-certificates build-essential jq tmux net-tools bc xxd unzip sqlite3 bsdextrautils
 )
@@ -655,10 +706,11 @@ if [ "${INSTALL_EXTRA_UTILS:-0}" -eq 1 ]; then
 fi
 ok "Системные утилиты установлены."
 
-log "Настройка TCP BBR, fq, сокетов somaxconn и отключение IPv6..."
-modprobe tcp_bbr 2>/dev/null || true
-mkdir -p /etc/sysctl.d/
-cat << 'EOF' > /etc/sysctl.d/99-hardened-network.conf
+if [ "${ENABLE_BBR_IPV6:-0}" -eq 1 ]; then
+    log "Настройка TCP BBR, fq, сокетов somaxconn и отключение IPv6..."
+    modprobe tcp_bbr 2>/dev/null || true
+    mkdir -p /etc/sysctl.d/
+    cat << 'EOF' > /etc/sysctl.d/99-hardened-network.conf
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 net.ipv4.ip_forward = 1
@@ -692,14 +744,7 @@ vm.swappiness = 10
 fs.file-max = 2097152
 net.ipv4.tcp_notsent_lowat = 16384
 EOF
-sysctl --system >/dev/null 2>&1 || true
-
-IS_LXC=$(systemd-detect-virt 2>/dev/null | grep -q "lxc" && echo "1" || echo "0")
-if [ "$IS_LXC" -eq 0 ] && [ -f /etc/default/grub ] && ! grep -q "ipv6.disable=1" /etc/default/grub; then
-    cp /etc/default/grub /etc/default/grub.bak 2>/dev/null || true
-    sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="ipv6.disable=1 /' /etc/default/grub
-    sed -i 's/GRUB_CMDLINE_LINUX="/GRUB_CMDLINE_LINUX="ipv6.disable=1 /' /etc/default/grub
-    update-grub >/dev/null 2>&1 || grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 || true
+    sysctl --system >/dev/null 2>&1 || true
 fi
 
 cat << 'EOF' > /etc/security/limits.d/99-proxy-limits.conf
@@ -778,12 +823,14 @@ AddressFamily inet
 PubkeyAuthentication yes
 EOF
 
-if [ "$KEYS_APPLIED" -eq 1 ] && prompt_yes_no "Отключить вход по паролю SSH?" "n"; then
-    cat << 'EOF' >> /etc/ssh/sshd_config.d/99-hardening.conf
+if [ "$KEYS_APPLIED" -eq 1 ]; then
+    if prompt_yes_no "Отключить вход по паролю SSH?" "n"; then
+        cat << 'EOF' >> /etc/ssh/sshd_config.d/99-hardening.conf
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 UsePAM yes
 EOF
+    fi
 fi
 
 mkdir -p /run/sshd
@@ -810,7 +857,7 @@ systemctl restart fail2ban || true
 ok "Служба Fail2ban активна."
 
 # =============================================================
-#  ФАЗА 2: ВНЕШНИЙ ШЛЮЗ, SSL И МАСКИРОВКА (NGINX MAINLINE + ADGUARD HOME DOH)
+#  ФАЗА 2: ВНЕШНИЙ ШЛЮЗ, SSL И МАСКИРОВКА (NGINX MAINLINE + AGH)
 # =============================================================
 echo
 echo -e "${CYAN}=====================================================================${NC}"
@@ -846,7 +893,13 @@ curl -fsSL --connect-timeout 5 https://nginx.org/keys/nginx_signing.key | gpg --
 
 systemctl stop nginx 2>/dev/null || true
 
-echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/$OS_ID $OS_CODENAME nginx" \
+NGINX_REPO_CODENAME="$OS_CODENAME"
+if ! curl -fsSL -I "https://nginx.org/packages/mainline/$OS_ID/dists/$OS_CODENAME/Release" >/dev/null 2>&1; then
+    warn "Репозиторий nginx mainline для кодового имени $OS_CODENAME не найден, используется стабильная база LTS."
+    [ "$OS_ID" = "ubuntu" ] && NGINX_REPO_CODENAME="noble" || NGINX_REPO_CODENAME="bookworm"
+fi
+
+echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/$OS_ID $NGINX_REPO_CODENAME nginx" \
     | tee /etc/apt/sources.list.d/nginx.list
 
 cat << EOF > /etc/apt/preferences.d/99nginx
@@ -866,6 +919,7 @@ id -u nginx >/dev/null 2>&1 || NGINX_USER="www-data"
 
 WEBROOT="/var/www/html"
 mkdir -p "$WEBROOT/.well-known/acme-challenge"
+mkdir -p "$WEBROOT/assets/css" "$WEBROOT/assets/js" "$WEBROOT/assets/img"
 mkdir -p /var/cache/nginx /var/www/mirror /var/www/proxy_temp /etc/nginx/stream.d /etc/nginx/conf.d
 
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT" /var/cache/nginx /var/www/mirror /var/www/proxy_temp
@@ -911,10 +965,12 @@ EOF
         fi
 
         log "Выпуск сертификата для $dom..."
-        certbot_email_flag="--register-unsafely-without-email"
-        [ -n "$LE_EMAIL" ] && certbot_email_flag="--email $LE_EMAIL"
+        certbot_email_args=("--register-unsafely-without-email")
+        if [ -n "$LE_EMAIL" ]; then
+            certbot_email_args=("--email" "$LE_EMAIL")
+        fi
 
-        if certbot certonly --webroot -w "$WEBROOT" --cert-name "$dom" --expand --non-interactive --agree-tos $certbot_email_flag -d "$dom"; then
+        if certbot certonly --webroot -w "$WEBROOT" --cert-name "$dom" --expand --non-interactive --agree-tos "${certbot_email_args[@]}" -d "$dom"; then
             ok "Сертификат для $dom получен: /etc/letsencrypt/live/$dom/"
         else
             warn "Ошибка выпуска SSL для $dom."
@@ -958,29 +1014,15 @@ fi
 chmod 755 /etc/letsencrypt /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
 chmod 644 /etc/letsencrypt/live/*/* 2>/dev/null || true
 
-# Установка AdGuard Home DoH
+# Установка AdGuard Home DoH (с изоляцией сокета 127.0.0.1 и освобождением 53 порта)
 if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
     log "Установка AdGuard Home (DoH + Split-DNS)..."
-    apt-get install -y systemd-resolved -q >/dev/null 2>&1 || true
     mkdir -p /etc/systemd/resolved.conf.d
-    
-    if [ "$GEO_PROFILE" = "1" ]; then
-        cat << 'EOF' > /etc/systemd/resolved.conf.d/adguard.conf
+    cat << 'EOF' > /etc/systemd/resolved.conf.d/adguard-disable-stub.conf
 [Resolve]
-DNS=77.88.8.8 77.88.8.1 8.8.8.8
-FallbackDNS=77.88.8.8
 DNSStubListener=no
 EOF
-    else
-        cat << 'EOF' > /etc/systemd/resolved.conf.d/adguard.conf
-[Resolve]
-DNS=1.1.1.1 8.8.8.8 9.9.9.9
-FallbackDNS=1.1.1.1
-DNSStubListener=no
-EOF
-    fi
-    systemctl restart systemd-resolved || true
-    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null || true
+    systemctl restart systemd-resolved 2>/dev/null || true
 
     ARCH=$(uname -m)
     case "$ARCH" in
@@ -1042,6 +1084,8 @@ dns:
   port: 53
   trusted_proxies:
     - 127.0.0.1
+    - 10.8.1.0/24
+    - 10.8.2.0/24
     - ::1
   upstream_dns:
 ${AGH_UPSTREAMS}
@@ -1057,6 +1101,9 @@ clients:
 access:
   allowed_clients:
     - ${AGH_CLIENT_ID}
+    - "10.8.1.0/24"
+    - "10.8.2.0/24"
+    - "127.0.0.1"
   disallowed_clients: []
   blocked_hosts: []
 tls:
@@ -1070,22 +1117,23 @@ EOF
 
     /opt/AdGuardHome/AdGuardHome -s install >/dev/null 2>&1 || true
     systemctl restart AdGuardHome || true
-    ok "AdGuard Home DoH активен на 127.0.0.1:53 (Панель: 127.0.0.1:3000)."
+    ok "AdGuard Home DoH активен на 127.0.0.1:53 (Веб-панель: 127.0.0.1:3000)."
 fi
 
 # =============================================================
-#  ВЕБ-МАСКИРОВКА И MOCK REST API
+#  ВЕБ-МАСКИРОВКА (Zero-Inline, Модульный CSS/JS, WebCrypto)
 # =============================================================
-log "Генерация выбранной веб-маскировки и Mock REST API..."
+log "Генерация модульной веб-маскировки (DataSphere Enterprise Shield)..."
 
-cat << 'EOF' > /var/www/html/favicon.svg
+cat << 'EOF' > /var/www/html/assets/img/favicon.svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <circle cx="50" cy="50" r="48" fill="#1e1f20" stroke="#a8c7fa" stroke-width="4"/>
   <polygon points="50,15 85,35 85,65 50,85 15,65 15,35" fill="#66a88f"/>
   <polygon points="50,30 70,42 70,58 50,70 30,58 30,42" fill="#e7ab21"/>
 </svg>
 EOF
-ln -sf /var/www/html/favicon.svg /var/www/html/favicon.ico
+ln -sf /var/www/html/assets/img/favicon.svg /var/www/html/favicon.svg
+ln -sf /var/www/html/assets/img/favicon.svg /var/www/html/favicon.ico
 
 if [ "$DECOY_MODE" = "1" ]; then
     cat << 'EOF' > /var/www/html/robots.txt
@@ -1094,6 +1142,365 @@ Disallow: /api/
 Disallow: /console/
 Disallow: /telemetry/
 Allow: /
+EOF
+
+    cat << 'EOF' > /var/www/html/assets/css/datasphere.css
+:root {
+    --bg: #131314;
+    --surface: #1e1f20;
+    --surface-card: #1e1f20;
+    --border: rgba(255, 255, 255, 0.08);
+    --accent: #a8c7fa;
+    --accent-purple: #c58af9;
+    --text: #e3e3e3;
+    --text-muted: #9aa0a6;
+    --success: #81c995;
+    --warning: #fdd663;
+    --error: #f28b82;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Google Sans", sans-serif;
+    background-color: var(--bg);
+    background-image: 
+        radial-gradient(circle at 50% -10%, rgba(66, 133, 244, 0.18) 0%, rgba(155, 114, 207, 0.1) 40%, rgba(217, 101, 112, 0.04) 65%, transparent 80%),
+        var(--bg);
+    color: var(--text); line-height: 1.6; overflow-x: hidden; min-height: 100vh;
+}
+header {
+    display: flex; justify-content: space-between; align-items: center; padding: 18px 6%;
+    border-bottom: 1px solid var(--border); backdrop-filter: blur(20px);
+    position: sticky; top: 0; z-index: 50; background: rgba(19, 19, 20, 0.85);
+}
+.logo { font-size: 21px; font-weight: 700; display: flex; align-items: center; gap: 10px; color: #fff; letter-spacing: -0.5px; }
+.btn {
+    background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2); user-select: none;
+}
+.btn:hover { 
+    transform: translateY(-1px); border-color: rgba(168, 199, 250, 0.4); 
+    background: #242628; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); 
+}
+.btn:active { transform: translateY(0); }
+.btn-outline {
+    background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
+    box-shadow: none; border-radius: 999px;
+}
+.btn-outline:hover { background: #242628; border-color: rgba(168, 199, 250, 0.4); }
+.hero { text-align: center; padding: 90px 20px 70px; max-width: 900px; margin: 0 auto; }
+.badge {
+    display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px;
+    background: var(--surface-card); border: 1px solid var(--border);
+    border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--accent); margin-bottom: 24px;
+}
+.badge-dot { width: 7px; height: 7px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); }
+.hero h1 {
+    font-size: clamp(34px, 5vw, 54px); font-weight: 700; line-height: 1.18; margin-bottom: 22px;
+    letter-spacing: -0.8px; color: #d1d5db; 
+}
+.hero p { font-size: clamp(16px, 2vw, 18px); color: var(--text-muted); margin: 0 auto 36px; line-height: 1.65; max-width: 720px; }
+.hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+.stats-bar { display: flex; justify-content: center; gap: 40px; margin-top: 60px; padding-top: 40px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.stat-item h4 { font-size: 28px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+.stat-item p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; max-width: 1100px; margin: 40px auto 90px; padding: 0 6%; }
+.feature-card {
+    background: var(--surface-card); padding: 32px 28px; border-radius: 24px; border: 1px solid var(--border);
+    backdrop-filter: blur(12px); transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer;
+    user-select: none; display: flex; flex-direction: column; justify-content: space-between;
+}
+.feature-card:hover {
+    transform: translateY(-4px); border-color: rgba(168, 199, 250, 0.4); background: #242628;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 20px rgba(155, 114, 207, 0.12);
+}
+.feature-card:active { transform: scale(0.98); }
+.feature-card .icon-box {
+    width: 44px; height: 44px; background: rgba(168, 199, 250, 0.08); border: 1px solid rgba(168, 199, 250, 0.18);
+    border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--accent); margin-bottom: 20px;
+}
+.feature-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 10px; color: #fff; }
+.feature-card p { color: var(--text-muted); line-height: 1.55; font-size: 14px; margin-bottom: 16px; }
+.card-action {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+    color: var(--accent); transition: gap 0.2s ease;
+}
+.feature-card:hover .card-action { gap: 10px; color: #d3e3fd; }
+
+.modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(5, 7, 10, 0.85);
+    backdrop-filter: blur(16px); display: flex; align-items: center; justify-content: center;
+    padding: 20px; z-index: 100; opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.modal-overlay.active { opacity: 1; visibility: visible; }
+.modal-card {
+    background: var(--surface); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 28px;
+    width: 100%; max-width: 480px; padding: 36px 32px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+    transform: translateY(20px); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.modal-overlay.active .modal-card { transform: translateY(0); }
+.modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+.modal-header h2 { font-size: 21px; font-weight: 700; color: #fff; }
+.modal-header p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.modal-close { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; display: flex; }
+.modal-close:hover { color: #fff; }
+.form-group { margin-bottom: 18px; text-align: left; }
+.form-group label { display: block; font-size: 13px; font-weight: 500; color: #c4c7c5; margin-bottom: 6px; }
+.form-control {
+    width: 100%; padding: 13px 16px; background: #131314; border: 1px solid var(--border);
+    border-radius: 14px; color: #fff; font-size: 14px; outline: none; transition: all 0.2s ease;
+}
+.form-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(168, 199, 250, 0.2); }
+.alert-box {
+    background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5;
+    padding: 12px 14px; border-radius: 12px; font-size: 13px; margin-bottom: 20px; display: none; align-items: center; gap: 10px;
+}
+.spinner { width: 18px; height: 18px; border: 2px solid rgba(255, 255, 255, 0.3); border-top: 2px solid #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+
+.toast-hud {
+    position: fixed; bottom: 30px; right: 30px; background: #1e1f20; border: 1px solid rgba(168, 199, 250, 0.3);
+    border-radius: 16px; padding: 16px 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    display: flex; align-items: flex-start; gap: 14px; z-index: 200; max-width: 380px;
+    transform: translateY(100px); opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.toast-hud.active { transform: translateY(0); opacity: 1; visibility: visible; }
+.toast-icon { flex-shrink: 0; color: var(--success); margin-top: 2px; }
+.toast-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+.toast-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; }
+
+footer { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; border-top: 1px solid var(--border); }
+@keyframes spin { 100% { transform: rotate(360deg); } }
+EOF
+
+    cat << 'EOF' > /var/www/html/assets/js/datasphere.js
+"use strict";
+
+function getCryptoEntropy() {
+    const arr = new Uint32Array(1);
+    window.crypto.getRandomValues(arr);
+    return arr[0] / (0xffffffff + 1);
+}
+
+function randVarCrypto(base, pct, dec) {
+    pct = pct || 10;
+    dec = dec || 0;
+    const delta = base * (pct / 100);
+    const val = base + (getCryptoEntropy() * 2 - 1) * delta;
+    return dec > 0 ? parseFloat(val.toFixed(dec)) : Math.round(val);
+}
+
+function getDynamicData() {
+    const nodes = randVarCrypto(148, 10, 0);
+    const rtt = randVarCrypto(1.15, 10, 1);
+    const bus = randVarCrypto(0.048, 15, 3);
+    const sla = (99.995 + getCryptoEntropy() * 0.004).toFixed(3);
+
+    return {
+        crypto: {
+            title: "Сквозное квантовое шифрование (Data-in-Transit)",
+            subtitle: "Корпоративный криптографический аудит",
+            content: `
+                <div style="background: rgba(168, 199, 250, 0.08); border: 1px solid rgba(168, 199, 250, 0.2); padding: 14px; border-radius: 14px; margin-bottom: 16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-weight:600; color:#fff;">Статус криптомодуля:</span>
+                        <span style="color:#81c995; font-size:12px; font-weight:700;">● CERTIFIED</span>
+                    </div>
+                    <p style="font-size:13px; color:#9aa0a6; margin:0;">Аппаратная терминация сессий с защитой от компрометации закрытых ключей.</p>
+                </div>
+                <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;">
+                    <li style="display:flex; gap:10px; align-items:flex-start;">
+                        <span style="color:#81c995; font-weight:bold;">✔</span>
+                        <span><strong>Протоколы шифрования:</strong> TLS 1.3 (RFC 8446) / ML-KEM-768 Post-Quantum Key Exchange.</span>
+                    </li>
+                    <li style="display:flex; gap:10px; align-items:flex-start;">
+                        <span style="color:#81c995; font-weight:bold;">✔</span>
+                        <span><strong>Perfect Forward Secrecy:</strong> Ротация сессионных ключей на базе эллиптических кривых X25519.</span>
+                    </li>
+                    <li style="display:flex; gap:10px; align-items:flex-start;">
+                        <span style="color:#81c995; font-weight:bold;">✔</span>
+                        <span><strong>Комплаенс:</strong> Соответствие отраслевым стандартам SOC 2 Type II, ISO/IEC 27001 и GDPR.</span>
+                    </li>
+                </ul>
+            `
+        },
+        telemetry: {
+            title: "Распределённая телеметрия Anycast",
+            subtitle: "Мониторинг магистральной сети и доступность SLA",
+            content: `
+                <div style="background: rgba(129, 201, 149, 0.08); border: 1px solid rgba(129, 201, 149, 0.2); padding: 14px; border-radius: 14px; margin-bottom: 16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-weight:600; color:#fff;">Доступность SLA:</span>
+                        <span style="color:#81c995; font-size:12px; font-weight:700;">` + sla + `% ACTIVE</span>
+                    </div>
+                    <p style="font-size:13px; color:#9aa0a6; margin:0;">Многопоточный Anycast-конвейер маршрутизации трафика к ближайшему POP-узлу.</p>
+                </div>
+                <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;">
+                    <li style="display:flex; gap:10px; align-items:flex-start;">
+                        <span style="color:#81c995; font-weight:bold;">✔</span>
+                        <span><strong>Глобальная связность:</strong> ` + nodes + ` активных пограничных узлов Anycast (Европа, Северная Америка, Азия).</span>
+                    </li>
+                    <li style="display:flex; gap:10px; align-items:flex-start;">
+                        <span style="color:#81c995; font-weight:bold;">✔</span>
+                        <span><strong>Потери пакетов:</strong> 0.00% благодаря динамической балансировке перегрузок ядра.</span>
+                    </li>
+                    <li style="display:flex; gap:10px; align-items:flex-start;">
+                        <span style="color:#81c995; font-weight:bold;">✔</span>
+                        <span><strong>RTT задержка:</strong> Маршрутизация на границе датацентра с откликом &lt; ` + rtt + ` ms.</span>
+                    </li>
+                </ul>
+            `
+        },
+        ipc: {
+            title: "Высокоскоростная IPC-обработка",
+            subtitle: "In-Memory конвейер и архитектура Zero-Copy",
+            content: `
+                <div style="background: rgba(197, 138, 249, 0.08); border: 1px solid rgba(197, 138, 249, 0.2); padding: 14px; border-radius: 14px; margin-bottom: 16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-weight:600; color:#fff;">Подсистема ввода-вывода:</span>
+                        <span style="color:#c58af9; font-size:12px; font-weight:700;">● ZERO-COPY RAM</span>
+                    </div>
+                    <p style="font-size:13px; color:#9aa0a6; margin:0;">Изолированные очереди процессов в памяти без блокировок файлового хранилища.</p>
+                </div>
+                <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;">
+                    <li style="display:flex; gap:10px; align-items:flex-start;">
+                        <span style="color:#81c995; font-weight:bold;">✔</span>
+                        <span><strong>Изоляция процессов:</strong> Раздельные сегменты оперативной памяти с прямым межпроцессным обменом.</span>
+                    </li>
+                    <li style="display:flex; gap:10px; align-items:flex-start;">
+                        <span style="color:#81c995; font-weight:bold;">✔</span>
+                        <span><strong>Задержка шины:</strong> Около ` + bus + ` ms при мультиплексировании полнодуплексных стримов.</span>
+                    </li>
+                    <li style="display:flex; gap:10px; align-items:flex-start;">
+                        <span style="color:#81c995; font-weight:bold;">✔</span>
+                        <span><strong>Буферизация:</strong> Аппаратное масштабирование приёма пакетов сокетов somaxconn.</span>
+                    </li>
+                </ul>
+            `
+        }
+    };
+}
+
+let toastTimer = null;
+function showToast(title, desc) {
+    const toast = document.getElementById("toastHud");
+    if (!toast) return;
+    document.getElementById("toastTitle").innerText = title;
+    document.getElementById("toastDesc").innerText = desc;
+    toast.classList.add("active");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.classList.remove("active"); }, 4500);
+}
+
+function openDetailModal(type) {
+    const data = getDynamicData()[type];
+    if (!data) return;
+    document.getElementById("detailTitle").innerText = data.title;
+    document.getElementById("detailSubtitle").innerText = data.subtitle;
+    document.getElementById("detailContent").innerHTML = data.content;
+    document.getElementById("detailModal").classList.add("active");
+}
+
+function closeDetailModal() {
+    const modal = document.getElementById("detailModal");
+    if (modal) modal.classList.remove("active");
+}
+
+function openAuthModal(title) {
+    const modalTitle = document.getElementById("modalTitle");
+    const errAlert = document.getElementById("errorAlert");
+    const authModal = document.getElementById("authModal");
+    if (!authModal) return;
+    modalTitle.innerText = title || "Авторизация в DataSphere";
+    errAlert.style.display = "none";
+    authModal.classList.add("active");
+    setTimeout(() => { document.getElementById("dsUser").focus(); }, 100);
+}
+
+function closeAuthModal() {
+    const authModal = document.getElementById("authModal");
+    if (authModal) authModal.classList.remove("active");
+}
+
+async function fetchClusterStatus() {
+    try {
+        const res = await fetch("/api/v1/datasphere/status");
+        const data = await res.json();
+        const curNodes = randVarCrypto(data.nodes_active || 148, 10, 0);
+        const curSla = (99.995 + getCryptoEntropy() * 0.004).toFixed(3);
+        showToast("Статус кластера: " + (data.status || "online").toUpperCase(), `Активно Anycast-узлов: ${curNodes} | SLA: ${curSla}% | Среда: ${data.cluster || "Core"}`);
+    } catch(e) {
+        openAuthModal("Мониторинг кластера (Требуется ключ)");
+    }
+}
+
+async function handleDataSphereAuth(e) {
+    e.preventDefault();
+    const btn = document.getElementById("submitBtn");
+    const errBox = document.getElementById("errorAlert");
+    const errText = document.getElementById("errorMsg");
+    
+    errBox.style.display = "none";
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div>';
+
+    try {
+        const response = await fetch("/api/v1/datasphere/auth", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                principal: document.getElementById("dsUser").value,
+                secret: document.getElementById("dsKey").value
+            })
+        });
+        const result = await response.json();
+        errText.innerText = result.error || "Недействительный токен кластера или ключ авторизации узла. Доступ запрещен.";
+        errBox.style.display = "flex";
+    } catch (err) {
+        errText.innerText = "Ошибка защищенного соединения с контроллером кластера.";
+        errBox.style.display = "flex";
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = "Подключиться к кластеру";
+    }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+    const dynLat = randVarCrypto(1.18, 10, 1);
+    const dynBw = randVarCrypto(99.4, 8, 1);
+    const dynSla = (99.995 + getCryptoEntropy() * 0.004).toFixed(3);
+    
+    document.getElementById("heroLatency").innerText = "< " + dynLat + " ms";
+    document.getElementById("heroBandwidth").innerText = dynBw + " Gbps";
+    document.getElementById("heroSla").innerText = dynSla + "%";
+
+    document.getElementById("headerConsoleBtn").addEventListener("click", () => openAuthModal("Вход в Консоль"));
+    document.getElementById("connectNodeBtn").addEventListener("click", () => openAuthModal("Подключение вычислительного узла"));
+    document.getElementById("netStatusBtn").addEventListener("click", fetchClusterStatus);
+    
+    document.getElementById("cardCrypto").addEventListener("click", () => openDetailModal("crypto"));
+    document.getElementById("cardTelemetry").addEventListener("click", () => openDetailModal("telemetry"));
+    document.getElementById("cardIpc").addEventListener("click", () => openDetailModal("ipc"));
+    
+    document.getElementById("authModalClose").addEventListener("click", closeAuthModal);
+    document.getElementById("detailModalClose").addEventListener("click", closeDetailModal);
+    document.getElementById("detailModalOk").addEventListener("click", closeDetailModal);
+    
+    document.getElementById("authForm").addEventListener("submit", handleDataSphereAuth);
+
+    const sessionEntropy = new Uint8Array(16);
+    window.crypto.getRandomValues(sessionEntropy);
+    const tokenHex = Array.from(sessionEntropy, b => b.toString(16).padStart(2, '0')).join('');
+    document.cookie = "datasphere_session=" + tokenHex + "; path=/; max-age=86400; Secure; SameSite=Strict";
+});
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === "Escape") {
+        closeAuthModal();
+        closeDetailModal();
+    }
+});
 EOF
 
     cat << 'EOF' > /var/www/html/index.html
@@ -1111,167 +1518,21 @@ EOF
     <meta property="og:type" content="website">
     <meta property="og:title" content="DataSphere Analytics — Платформа распределенных данных">
     <meta property="og:description" content="Инфраструктура аналитики и передачи данных корпоративного уровня.">
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-
-    <style>
-        :root {
-            --bg: #131314;
-            --surface: #1e1f20;
-            --surface-card: #1e1f20;
-            --border: rgba(255, 255, 255, 0.08);
-            --accent: #a8c7fa;
-            --accent-purple: #c58af9;
-            --text: #e3e3e3;
-            --text-muted: #9aa0a6;
-            --success: #81c995;
-            --warning: #fdd663;
-            --error: #f28b82;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Google Sans", "Product Sans", sans-serif;
-            background-color: var(--bg);
-            background-image: 
-                radial-gradient(circle at 50% -10%, rgba(66, 133, 244, 0.18) 0%, rgba(155, 114, 207, 0.1) 40%, rgba(217, 101, 112, 0.04) 65%, transparent 80%),
-                var(--bg);
-            color: var(--text); line-height: 1.6; overflow-x: hidden; min-height: 100vh;
-        }
-        header {
-            display: flex; justify-content: space-between; align-items: center; padding: 18px 6%;
-            border-bottom: 1px solid var(--border); backdrop-filter: blur(20px);
-            position: sticky; top: 0; z-index: 50; background: rgba(19, 19, 20, 0.85);
-        }
-        .logo { font-size: 21px; font-weight: 700; display: flex; align-items: center; gap: 10px; color: #fff; letter-spacing: -0.5px; }
-        .btn {
-            background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
-            padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2); user-select: none;
-        }
-        .btn:hover { 
-            transform: translateY(-1px); border-color: rgba(168, 199, 250, 0.4); 
-            background: #242628; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); 
-        }
-        .btn:active { transform: translateY(0); }
-        .btn-outline {
-            background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
-            box-shadow: none; border-radius: 999px;
-        }
-        .btn-outline:hover { background: #242628; border-color: rgba(168, 199, 250, 0.4); }
-        .hero { text-align: center; padding: 90px 20px 70px; max-width: 900px; margin: 0 auto; }
-        .badge {
-            display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px;
-            background: var(--surface-card); border: 1px solid var(--border);
-            border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--accent); margin-bottom: 24px;
-        }
-        .badge-dot { width: 7px; height: 7px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); }
-        .hero h1 {
-            font-size: clamp(34px, 5vw, 54px); font-weight: 700; line-height: 1.18; margin-bottom: 22px;
-            letter-spacing: -0.8px; color: #d1d5db; 
-        }
-        .hero p { font-size: clamp(16px, 2vw, 18px); color: var(--text-muted); margin: 0 auto 36px; line-height: 1.65; max-width: 720px; }
-        .hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
-        .stats-bar { display: flex; justify-content: center; gap: 40px; margin-top: 60px; padding-top: 40px; border-top: 1px solid var(--border); flex-wrap: wrap; }
-        .stat-item h4 { font-size: 28px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
-        .stat-item p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
-        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; max-width: 1100px; margin: 40px auto 90px; padding: 0 6%; }
-        .feature-card {
-            background: var(--surface-card); padding: 32px 28px; border-radius: 24px; border: 1px solid var(--border);
-            backdrop-filter: blur(12px); transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer;
-            user-select: none; display: flex; flex-direction: column; justify-content: space-between;
-        }
-        .feature-card:hover {
-            transform: translateY(-4px); border-color: rgba(168, 199, 250, 0.4); background: #242628;
-            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 20px rgba(155, 114, 207, 0.12);
-        }
-        .feature-card:active { transform: scale(0.98); }
-        .feature-card .icon-box {
-            width: 44px; height: 44px; background: rgba(168, 199, 250, 0.08); border: 1px solid rgba(168, 199, 250, 0.18);
-            border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--accent); margin-bottom: 20px;
-        }
-        .feature-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 10px; color: #fff; }
-        .feature-card p { color: var(--text-muted); line-height: 1.55; font-size: 14px; margin-bottom: 16px; }
-        .card-action {
-            display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
-            color: var(--accent); transition: gap 0.2s ease;
-        }
-        .feature-card:hover .card-action { gap: 10px; color: #d3e3fd; }
-        
-        .modal-overlay {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(5, 7, 10, 0.85);
-            backdrop-filter: blur(16px); display: flex; align-items: center; justify-content: center;
-            padding: 20px; z-index: 100; opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .modal-overlay.active { opacity: 1; visibility: visible; }
-        .modal-card {
-            background: var(--surface); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 28px;
-            width: 100%; max-width: 480px; padding: 36px 32px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
-            transform: translateY(20px); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .modal-overlay.active .modal-card { transform: translateY(0); }
-        .modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
-        .modal-header h2 { font-size: 21px; font-weight: 700; color: #fff; }
-        .modal-header p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
-        .modal-close { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; display: flex; }
-        .modal-close:hover { color: #fff; }
-        .form-group { margin-bottom: 18px; text-align: left; }
-        .form-group label { display: block; font-size: 13px; font-weight: 500; color: #c4c7c5; margin-bottom: 6px; }
-        .form-control {
-            width: 100%; padding: 13px 16px; background: #131314; border: 1px solid var(--border);
-            border-radius: 14px; color: #fff; font-size: 14px; outline: none; transition: all 0.2s ease;
-        }
-        .form-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(168, 199, 250, 0.2); }
-        .alert-box {
-            background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5;
-            padding: 12px 14px; border-radius: 12px; font-size: 13px; margin-bottom: 20px; display: none; align-items: center; gap: 10px;
-        }
-        .spinner { width: 18px; height: 18px; border: 2px solid rgba(255, 255, 255, 0.3); border-top: 2px solid #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
-        
-        .toast-hud {
-            position: fixed; bottom: 30px; right: 30px; background: #1e1f20; border: 1px solid rgba(168, 199, 250, 0.3);
-            border-radius: 16px; padding: 16px 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
-            display: flex; align-items: flex-start; gap: 14px; z-index: 200; max-width: 380px;
-            transform: translateY(100px); opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .toast-hud.active { transform: translateY(0); opacity: 1; visibility: visible; }
-        .toast-icon { flex-shrink: 0; color: var(--success); margin-top: 2px; }
-        .toast-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 4px; }
-        .toast-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; }
-
-        footer { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; border-top: 1px solid var(--border); }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-    </style>
+    <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
+    <link rel="stylesheet" href="/assets/css/datasphere.css">
+    <script defer src="/assets/js/datasphere.js"></script>
 </head>
 <body>
     <header>
         <div class="logo">
             <svg viewBox="0 0 100 100" width="26" height="26" xmlns="http://www.w3.org/2000/svg" aria-label="DataSphere Logo">
-                <clipPath id="circleMask"><circle cx="50" cy="50" r="48"/></clipPath>
-                <g clip-path="url(#circleMask)">
-                    <rect x="0" y="0" width="100" height="100" fill="#008dd5"/>
-                    <polygon points="50,-8 100,21 100,79 50,108 0,79 0,21" fill="#ffffff"/>
-                    <polygon points="50,6.7 87.5,28.35 87.5,71.65 50,93.3 12.5,71.65 12.5,28.35" fill="#66a88f"/>
-                    <polygon points="50,28.35 68.75,39.17 68.75,60.83 50,71.65 31.25,60.83 31.25,39.17" fill="#e7ab21"/>
-                    <g stroke="#000000" stroke-width="4" stroke-linecap="round">
-                        <line x1="-10" y1="6.7" x2="110" y2="6.7"/>
-                        <line x1="-10" y1="28.35" x2="110" y2="28.35"/>
-                        <line x1="-10" y1="50" x2="110" y2="50"/>
-                        <line x1="-10" y1="71.65" x2="110" y2="71.65"/>
-                        <line x1="-10" y1="93.3" x2="110" y2="93.3"/>
-                        <line x1="15.36" y1="-10" x2="84.64" y2="110"/>
-                        <line x1="40.36" y1="-10" x2="109.64" y2="110"/>
-                        <line x1="-9.64" y1="-10" x2="59.64" y2="110"/>
-                        <line x1="84.64" y1="-10" x2="15.36" y2="110"/>
-                        <line x1="109.64" y1="-10" x2="40.36" y2="110"/>
-                        <line x1="59.64" y1="-10" x2="-9.64" y2="110"/>
-                    </g>
-                </g>
-                <circle cx="50" cy="50" r="48" fill="none" stroke="#000000" stroke-width="5"/>
+                <circle cx="50" cy="50" r="48" fill="#1e1f20" stroke="#a8c7fa" stroke-width="4"/>
+                <polygon points="50,15 85,35 85,65 50,85 15,65 15,35" fill="#66a88f"/>
+                <polygon points="50,30 70,42 70,58 50,70 30,58 30,42" fill="#e7ab21"/>
             </svg>
             <span>DataSphere</span>
         </div>
-        <button type="button" class="btn" onclick="openAuthModal('Вход в Консоль')">Консоль</button>
+        <button type="button" id="headerConsoleBtn" class="btn">Консоль</button>
     </header>
 
     <main>
@@ -1280,11 +1541,11 @@ EOF
             <h1>Инфраструктура распределения данных нового поколения</h1>
             <p>Корпоративная аналитическая среда с аппаратным ускорением сетевого стека, сквозным TLS 1.3 / H2 шифрованием и Anycast-маршрутизацией узлов.</p>
             <div class="hero-actions">
-                <button type="button" class="btn" style="padding: 13px 28px; font-size: 15px;" onclick="openAuthModal('Подключение вычислительного узла')">
+                <button type="button" id="connectNodeBtn" class="btn">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                     Подключить узел
                 </button>
-                <button type="button" class="btn btn-outline" style="padding: 13px 28px; font-size: 15px;" onclick="fetchClusterStatus()">
+                <button type="button" id="netStatusBtn" class="btn btn-outline">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                     Статус сети
                 </button>
@@ -1297,19 +1558,19 @@ EOF
         </section>
 
         <section class="features">
-            <div class="feature-card" onclick="openDetailModal('crypto')">
+            <div class="feature-card" id="cardCrypto">
                 <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
                 <h3>Сквозное квантовое шифрование</h3>
                 <p>Передача пакетов осуществляется с аппаратным криптоускорением TLS 1.3 и защитой от перехвата на пограничных маршрутизаторах.</p>
                 <span class="card-action">Аудит протоколов &rarr;</span>
             </div>
-            <div class="feature-card" onclick="openDetailModal('telemetry')">
+            <div class="feature-card" id="cardTelemetry">
                 <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
                 <h3>Распределённая телеметрия</h3>
                 <p>Многопоточный конвейер аналитики агрегирует метрики узлов в реальном времени с нулевой деградацией пропускной способности.</p>
                 <span class="card-action">Anycast-магистраль &rarr;</span>
             </div>
-            <div class="feature-card" onclick="openDetailModal('ipc')">
+            <div class="feature-card" id="cardIpc">
                 <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6"/></svg></div>
                 <h3>Изоляция сокетов IPC</h3>
                 <p>Все процессы ввода-вывода распределяются по энергонезависимым сегментам оперативной памяти с прямой маршрутизацией через Unix-сокеты.</p>
@@ -1318,14 +1579,14 @@ EOF
         </section>
     </main>
 
-    <div id="authModal" class="modal-overlay" onclick="if(event.target===this)closeAuthModal()">
+    <div id="authModal" class="modal-overlay">
         <div class="modal-card">
             <div class="modal-header">
                 <div>
                     <h2 id="modalTitle">Авторизация в DataSphere</h2>
                     <p>Введите учётные данные для доступа к консоли</p>
                 </div>
-                <button type="button" class="modal-close" onclick="closeAuthModal()" aria-label="Закрыть">
+                <button type="button" id="authModalClose" class="modal-close" aria-label="Закрыть">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
@@ -1333,7 +1594,7 @@ EOF
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg>
                 <span id="errorMsg">Ошибка аутентификации</span>
             </div>
-            <form id="authForm" onsubmit="handleDataSphereAuth(event)">
+            <form id="authForm">
                 <div class="form-group">
                     <label for="dsUser">Идентификатор узла / Email</label>
                     <input type="text" id="dsUser" class="form-control" placeholder="cluster-admin@datasphere.cloud" required autocomplete="username">
@@ -1342,24 +1603,24 @@ EOF
                     <label for="dsKey">API Token / Ключ</label>
                     <input type="password" id="dsKey" class="form-control" placeholder="••••••••••••••••" required autocomplete="current-password">
                 </div>
-                <button type="submit" id="submitBtn" class="btn" style="width: 100%; height: 46px; margin-top: 10px;">Подключиться к кластеру</button>
+                <button type="submit" id="submitBtn" class="btn">Подключиться к кластеру</button>
             </form>
         </div>
     </div>
 
-    <div id="detailModal" class="modal-overlay" onclick="if(event.target===this)closeDetailModal()">
-        <div class="modal-card" style="max-width: 500px;">
+    <div id="detailModal" class="modal-overlay">
+        <div class="modal-card">
             <div class="modal-header">
                 <div>
-                    <h2 id="detailTitle" style="font-size: 20px; color: #fff;">Архитектурный узел</h2>
-                    <p id="detailSubtitle" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Спецификация и статус безопасности подсистемы</p>
+                    <h2 id="detailTitle">Архитектурный узел</h2>
+                    <p id="detailSubtitle">Спецификация и статус безопасности подсистемы</p>
                 </div>
-                <button type="button" class="modal-close" onclick="closeDetailModal()" aria-label="Закрыть">
+                <button type="button" id="detailModalClose" class="modal-close" aria-label="Закрыть">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
-            <div id="detailContent" style="font-size: 14px; line-height: 1.6; color: #cbd5e1;"></div>
-            <button type="button" class="btn" style="width: 100%; height: 44px; margin-top: 24px;" onclick="closeDetailModal()">Понятно</button>
+            <div id="detailContent"></div>
+            <button type="button" id="detailModalOk" class="btn">Понятно</button>
         </div>
     </div>
 
@@ -1374,201 +1635,6 @@ EOF
     </div>
 
     <footer>&copy; 2026 DataSphere Cloud Systems Inc. Платформа распределенной аналитики и защиты данных.</footer>
-
-    <script>
-        function randVar(base, pct = 10, dec = 0) {
-            const delta = base * (pct / 100);
-            const val = base + (Math.random() * 2 - 1) * delta;
-            return dec > 0 ? parseFloat(val.toFixed(dec)) : Math.round(val);
-        }
-
-        window.addEventListener('DOMContentLoaded', () => {
-            const dynLat = randVar(1.18, 10, 1);
-            const dynBw = randVar(99.4, 8, 1);
-            const dynSla = (99.995 + Math.random() * 0.004).toFixed(3);
-            
-            document.getElementById("heroLatency").innerText = "< " + dynLat + " ms";
-            document.getElementById("heroBandwidth").innerText = dynBw + " Gbps";
-            document.getElementById("heroSla").innerText = dynSla + "%";
-        });
-
-        window.addEventListener('keydown', (e) => {
-            if (e.key === "Escape") {
-                closeAuthModal();
-                closeDetailModal();
-            }
-        });
-
-        function getDynamicData() {
-            const nodes = randVar(148, 10, 0);
-            const rtt = randVar(1.15, 10, 1);
-            const bus = randVar(0.048, 15, 3);
-            const sla = (99.995 + Math.random() * 0.004).toFixed(3);
-
-            return {
-                crypto: {
-                    title: "Сквозное шифрование (Data-in-Transit)",
-                    subtitle: "Корпоративный криптографический аудит",
-                    content: `
-                        <div style="background: rgba(168, 199, 250, 0.08); border: 1px solid rgba(168, 199, 250, 0.2); padding: 14px; border-radius: 14px; margin-bottom: 16px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                                <span style="font-weight:600; color:#fff;">Статус криптомодуля:</span>
-                                <span style="color:#81c995; font-size:12px; font-weight:700;">● CERTIFIED</span>
-                            </div>
-                            <p style="font-size:13px; color:#9aa0a6; margin:0;">Аппаратная терминация сессий с защитой от компрометации закрытых ключей.</p>
-                        </div>
-                        <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;">
-                            <li style="display:flex; gap:10px; align-items:flex-start;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span><strong>Протоколы шифрования:</strong> TLS 1.3 (RFC 8446) / ChaCha20-Poly1305 & AES-256-GCM.</span>
-                            </li>
-                            <li style="display:flex; gap:10px; align-items:flex-start;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span><strong>Perfect Forward Secrecy:</strong> Ротация сессионных ключей на базе эллиптических кривых X25519.</span>
-                            </li>
-                            <li style="display:flex; gap:10px; align-items:flex-start;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span><strong>Комплаенс:</strong> Соответствие отраслевым стандартам SOC 2 Type II, ISO/IEC 27001 и GDPR.</span>
-                            </li>
-                        </ul>
-                    `
-                },
-                telemetry: {
-                    title: "Распределённая телеметрия Anycast",
-                    subtitle: "Мониторинг магистральной сети и доступность SLA",
-                    content: `
-                        <div style="background: rgba(129, 201, 149, 0.08); border: 1px solid rgba(129, 201, 149, 0.2); padding: 14px; border-radius: 14px; margin-bottom: 16px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                                <span style="font-weight:600; color:#fff;">Доступность SLA:</span>
-                                <span style="color:#81c995; font-size:12px; font-weight:700;">` + sla + `% ACTIVE</span>
-                            </div>
-                            <p style="font-size:13px; color:#9aa0a6; margin:0;">Многопоточный Anycast-конвейер маршрутизации трафика к ближайшему POP-узлу.</p>
-                        </div>
-                        <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;">
-                            <li style="display:flex; gap:10px; align-items:flex-start;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span><strong>Глобальная связность:</strong> ` + nodes + ` активных пограничных узлов Anycast (Европа, Северная Америка, Азия).</span>
-                            </li>
-                            <li style="display:flex; gap:10px; align-items:flex-start;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span><strong>Потери пакетов:</strong> 0.00% благодаря динамической балансировке перегрузок ядра.</span>
-                            </li>
-                            <li style="display:flex; gap:10px; align-items:flex-start;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span><strong>RTT задержка:</strong> Маршрутизация на границе датацентра с откликом &lt; ` + rtt + ` ms.</span>
-                            </li>
-                        </ul>
-                    `
-                },
-                ipc: {
-                    title: "Высокоскоростная IPC-обработка",
-                    subtitle: "In-Memory конвейер и архитектура Zero-Copy",
-                    content: `
-                        <div style="background: rgba(197, 138, 249, 0.08); border: 1px solid rgba(197, 138, 249, 0.2); padding: 14px; border-radius: 14px; margin-bottom: 16px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                                <span style="font-weight:600; color:#fff;">Подсистема ввода-вывода:</span>
-                                <span style="color:#c58af9; font-size:12px; font-weight:700;">● ZERO-COPY RAM</span>
-                            </div>
-                            <p style="font-size:13px; color:#9aa0a6; margin:0;">Изолированные очереди процессов в памяти без блокировок файлового хранилища.</p>
-                        </div>
-                        <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;">
-                            <li style="display:flex; gap:10px; align-items:flex-start;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span><strong>Изоляция процессов:</strong> Раздельные сегменты оперативной памяти с прямым межпроцессным обменом.</span>
-                            </li>
-                            <li style="display:flex; gap:10px; align-items:flex-start;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span><strong>Задержка шины:</strong> Около ` + bus + ` ms при мультиплексировании полнодуплексных стримов.</span>
-                            </li>
-                            <li style="display:flex; gap:10px; align-items:flex-start;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#81c995" stroke-width="2.5" width="18" height="18" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span><strong>Буферизация:</strong> Аппаратное масштабирование приёма пакетов сокетов somaxconn.</span>
-                            </li>
-                        </ul>
-                    `
-                }
-            };
-        }
-
-        function openDetailModal(type) {
-            const data = getDynamicData()[type];
-            if (!data) return;
-            document.getElementById("detailTitle").innerText = data.title;
-            document.getElementById("detailSubtitle").innerText = data.subtitle;
-            document.getElementById("detailContent").innerHTML = data.content;
-            document.getElementById("detailModal").classList.add("active");
-        }
-
-        function closeDetailModal() {
-            document.getElementById("detailModal").classList.remove("active");
-        }
-
-        function openAuthModal(title) {
-            document.getElementById("modalTitle").innerText = title || "Авторизация в DataSphere";
-            document.getElementById("errorAlert").style.display = "none";
-            document.getElementById("authModal").classList.add("active");
-            setTimeout(() => { document.getElementById("dsUser").focus(); }, 100);
-        }
-
-        function closeAuthModal() {
-            document.getElementById("authModal").classList.remove("active");
-        }
-
-        let toastTimer = null;
-        function showToast(title, desc) {
-            const toast = document.getElementById("toastHud");
-            document.getElementById("toastTitle").innerText = title;
-            document.getElementById("toastDesc").innerText = desc;
-            toast.classList.add("active");
-            clearTimeout(toastTimer);
-            toastTimer = setTimeout(() => { toast.classList.remove("active"); }, 4500);
-        }
-
-        async function fetchClusterStatus() {
-            try {
-                const res = await fetch("/api/v1/datasphere/status");
-                const data = await res.json();
-                const curNodes = randVar(data.nodes_active || 148, 10, 0);
-                const curSla = (99.995 + Math.random() * 0.004).toFixed(3);
-                showToast("Статус кластера: " + (data.status || "online").toUpperCase(), `Активно Anycast-узлов: ${curNodes} | SLA: ${curSla}% | Среда: ${data.cluster || "Core"}`);
-            } catch(e) {
-                openAuthModal("Мониторинг кластера (Требуется ключ)");
-            }
-        }
-
-        async function handleDataSphereAuth(e) {
-            e.preventDefault();
-            const btn = document.getElementById("submitBtn");
-            const errBox = document.getElementById("errorAlert");
-            const errText = document.getElementById("errorMsg");
-            
-            errBox.style.display = "none";
-            btn.disabled = true;
-            btn.innerHTML = '<div class="spinner"></div>';
-
-            try {
-                const response = await fetch("/api/v1/datasphere/auth", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        principal: document.getElementById("dsUser").value,
-                        secret: document.getElementById("dsKey").value
-                    })
-                });
-                const result = await response.json();
-                errText.innerText = result.error || "Недействительный токен кластера или ключ авторизации узла. Доступ запрещен.";
-                errBox.style.display = "flex";
-            } catch (err) {
-                errText.innerText = "Ошибка защищенного соединения с контроллером кластера.";
-                errBox.style.display = "flex";
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = "Подключиться к кластеру";
-            }
-        }
-
-        document.cookie = "datasphere_session=" + Math.random().toString(36).substring(2) + "; path=/; max-age=86400; Secure; SameSite=Lax";
-    </script>
 </body>
 </html>
 EOF
@@ -1623,23 +1689,28 @@ Disallow: /status/
 Allow: /
 EOF
 
+    cat << 'EOF' > /var/www/html/assets/css/maintenance.css
+body { width: 38em; margin: 5em auto; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #cbd5e1; line-height: 1.6; padding: 0 1em; }
+h1 { color: #f8fafc; font-size: 1.75em; border-bottom: 1px solid #334155; padding-bottom: 0.5em; margin-bottom: 0.75em; }
+p { margin-bottom: 1em; }
+a { color: #38bdf8; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.badge { display: inline-block; background: #1e293b; border: 1px solid #334155; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8; }
+EOF
+
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Welcome to nginx!</title>
-    <style>
-        html { color-scheme: light dark; }
-        body { width: 35em; margin: 0 auto; font-family: Tahoma, Verdana, Arial, sans-serif; }
-    </style>
+    <title>Cluster Network Gateway</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
+    <link rel="stylesheet" href="/assets/css/maintenance.css">
 </head>
 <body>
-<h1>Welcome to nginx!</h1>
-<p>If you see this page, the nginx web server is successfully installed and working. Further configuration is required.</p>
-<p>For online documentation and support please refer to <a href="http://nginx.org/">nginx.org</a>.<br/>
-Commercial support is available at <a href="http://nginx.com/">nginx.com</a>.</p>
-<p><em>Thank you for using nginx.</em></p>
+<h1>Cluster Edge Router <span class="badge">Active</span></h1>
+<p>The edge gateway node is operating normally. Ingress stream routing and TLS termination are fully synchronized with cluster control planes.</p>
+<p>For technical inquiries or status reports, refer to cluster infrastructure administration.</p>
 </body>
 </html>
 EOF
@@ -1647,7 +1718,7 @@ EOF
     DECOY_LOCATION_BLOCKS="
         location ~ ^/(status|api/v1/health)\$ {
             default_type application/json;
-            return 200 '{\"status\":\"UP\",\"services\":{\"web\":\"active\"}}';
+            return 200 '{\"status\":\"UP\",\"services\":{\"edge_router\":\"active\"}}';
         }
 
         location = /robots.txt {
@@ -1680,12 +1751,12 @@ cat << 'EOF' > /var/www/html/404.html
 <!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>
 EOF
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT"
-chmod 644 "$WEBROOT"/*
+chmod -R 755 "$WEBROOT"
 
 # -------------------------------------------------------------
-# КОНФИГУРАЦИЯ NGINX MAINLINE (L4 STREAM + H2/H3 NATIVE ENGINE)
+# КОНФИГУРАЦИЯ NGINX MAINLINE (L4 STREAM + ZONAL CSP ENGINE)
 # -------------------------------------------------------------
-log "Сборка конфигурации Nginx Mainline (Stream L4 + H2/H3 Native Engine)..."
+log "Сборка конфигурации Nginx Mainline (Stream L4 + Zonal CSP Architecture)..."
 rm -f /etc/nginx/conf.d/00-acme.conf
 
 cat << EOF > /etc/nginx/nginx.conf
@@ -1760,6 +1831,7 @@ http {
         ~^.*:/robots\.txt(\?|\$) 0;
         ~^.*:/.well-known/ 0;
         ~^1:[01]:/favicon\.(ico|svg)\$ 0;
+        ~^1:[01]:/assets/ 0;
         ~^1:[01]:/dns-query 0;
         ~^1:[01]:${PANEL_PATH} 0;
         ~^1:[01]:${SUB_PATH} 0;
@@ -1887,11 +1959,21 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 4h;
 
+    # Строгие заголовки безопасности публичной зоны (Zero-Inline Decoy Shield)
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" always;
+
     if (\$badbot) { return 404; }
 
-    # ПАНЕЛЬ УПРАВЛЕНИЯ 3X-UI (ДИНАМИЧЕСКИЙ ПУТЬ)
+    # ПАНЕЛЬ УПРАВЛЕНИЯ 3X-UI (Специализированный профиль CSP для Vue.js & WebSockets)
     location = ${PANEL_PATH%/} { return 301 ${PANEL_PATH}; }
     location ^~ ${PANEL_PATH} {
+        proxy_hide_header Content-Security-Policy;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'self';" always;
+
         limit_req zone=panel burst=40 delay=20;
         proxy_pass http://panel_3xui;
         proxy_http_version 1.1;
@@ -1902,9 +1984,10 @@ server {
         proxy_set_header Connection \$connection_upgrade;
     }
 
-    # СЕРВЕР ПОДПИСОК (ДОСТУПЕН ДЛЯ ВСЕХ МОБИЛЬНЫХ КЛИЕНТОВ)
+    # СЕРВЕР ПОДПИСОК
     location = ${SUB_PATH%/} { return 301 ${SUB_PATH}; }
     location ^~ ${SUB_PATH} {
+        proxy_hide_header Content-Security-Policy;
         limit_req zone=subs burst=60 nodelay;
         proxy_pass http://sub_backend;
         proxy_http_version 1.1;
@@ -1912,6 +1995,7 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
     location ~* ^/(sub|json|clash)/ {
+        proxy_hide_header Content-Security-Policy;
         limit_req zone=subs burst=60 nodelay;
         proxy_pass http://sub_backend;
         proxy_http_version 1.1;
@@ -1976,6 +2060,9 @@ server {
     }
 
     location / {
+        proxy_hide_header Content-Security-Policy;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'self';" always;
+
         limit_req zone=panel burst=60 delay=30;
         proxy_pass http://adguard_backend;
         proxy_http_version 1.1;
@@ -2000,7 +2087,6 @@ echo -e "${CYAN}================================================================
 echo -e "${GREEN}  ФАЗА 3: Оркестрация 3X-UI и закрепление Xray Core v26.7.28         ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
-# Предохранитель службы x-ui
 trap 'systemctl start x-ui 2>/dev/null || true' ERR
 
 DB_PATH="/etc/x-ui/x-ui.db"
@@ -2073,7 +2159,6 @@ fi
 
 download_asset "$XRAY_ZIP" "${XRAY_URLS[@]}" || die "Не удалось загрузить бинарник Xray-core ${TARGET_XRAY_VERSION}!"
 
-# Нативная автономная распаковка через встроенный Python zipfile (нулевая зависимость от unzip)
 XRAY_EXTRACT_DIR="/tmp/xray_unpack"
 rm -rf "$XRAY_EXTRACT_DIR"
 python3 - << 'EOF_ZIP'
@@ -2117,34 +2202,26 @@ if [[ ! "$VLESS_DECRYPTION" =~ ^mlkem768 ]] || [ -z "$VLESS_ENCRYPTION" ]; then
 fi
 ok "Квантово-устойчивый ключ ML-KEM-768 успешно сгенерирован!"
 
-STEAL_JSON="{"
-first_p=1
+STEAL_CONFIG_DATA=""
 for p in "${STEAL_PORTS_LIST[@]:-}"; do
     [ -n "$p" ] || continue
-    doms_arr=(${STEAL_PORT_DOMAINS[$p]:-})
-    doms_json=$(printf '%s\n' "${doms_arr[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[\"${doms_arr[0]:-cdn.$PRIMARY_DOMAIN}\"]")
-    [ $first_p -eq 0 ] && STEAL_JSON="${STEAL_JSON},"
-    STEAL_JSON="${STEAL_JSON}\"${p}\":${doms_json}"
-    first_p=0
+    read -r -a doms_arr <<< "${STEAL_PORT_DOMAINS[$p]:-}"
+    doms_joined=$(IFS=,; echo "${doms_arr[*]}")
+    STEAL_CONFIG_DATA="${STEAL_CONFIG_DATA}${p}=${doms_joined};"
 done
-STEAL_JSON="${STEAL_JSON}}"
 
-CLASSIC_JSON="{"
-first_cp=1
+CLASSIC_CONFIG_DATA=""
 for cp in "${CLASSIC_PORTS_LIST[@]:-}"; do
     [ -n "$cp" ] || continue
-    snis_arr=(${CLASSIC_PORT_SNIS[$cp]:-})
-    snis_json=$(printf '%s\n' "${snis_arr[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[\"${snis_arr[0]:-tbank.ru}\"]")
-    [ $first_cp -eq 0 ] && CLASSIC_JSON="${CLASSIC_JSON},"
-    CLASSIC_JSON="${CLASSIC_JSON}\"${cp}\":${snis_json}"
-    first_cp=0
+    read -r -a snis_arr <<< "${CLASSIC_PORT_SNIS[$cp]:-}"
+    snis_joined=$(IFS=,; echo "${snis_arr[*]}")
+    CLASSIC_CONFIG_DATA="${CLASSIC_CONFIG_DATA}${cp}=${snis_joined};"
 done
-CLASSIC_JSON="${CLASSIC_JSON}}"
 
 STEAL_DOMAINS_STR="${STEAL_DOMAINS[*]:-}"
 export DB_PATH PRIMARY_DOMAIN PANEL_PORT PANEL_PATH SUB_PORT SUB_PATH
-export XHTTP_STREAM_PORT XHTTP_STREAM_PATH ENABLE_STEAL STEAL_JSON
-export ENABLE_CLASSIC CLASSIC_JSON ENABLE_HY2 HY2_PORT ENABLE_AWG_V3 AWG_V3_PORT
+export XHTTP_STREAM_PORT XHTTP_STREAM_PATH ENABLE_STEAL STEAL_CONFIG_DATA
+export ENABLE_CLASSIC CLASSIC_CONFIG_DATA ENABLE_HY2 HY2_PORT ENABLE_AWG_V3 AWG_V3_PORT
 export ENABLE_AWG_V2 AWG_V2_PORT ADMIN_USER ADMIN_PASS SSL_BASE_DIR VLESS_DECRYPTION VLESS_ENCRYPTION STEAL_DOMAINS_STR INSTALL_MODE ENABLE_AGH GEO_PROFILE
 
 # -------------------------------------------------------------
@@ -2211,6 +2288,7 @@ vless_dekey = os.environ["VLESS_DECRYPTION"]
 vless_enkey = os.environ["VLESS_ENCRYPTION"]
 install_mode = os.environ.get("INSTALL_MODE", "1")
 enable_agh = os.environ.get("ENABLE_AGH") == "1"
+geo_profile = os.environ.get("GEO_PROFILE", "2")
 
 cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
 tables = set(r[0] for r in cur.fetchall())
@@ -2268,7 +2346,7 @@ settings_data = {
     "timeLocation": "Europe/Moscow",
     "trafficResetDay": "1",
     "sessionMaxAge": "3600",
-    "trustedProxyCIDRs": "127.0.0.1/32",
+    "trustedProxyCIDRs": "127.0.0.1/32,10.8.1.0/24,10.8.2.0/24",
     "realityScanCandidates": "www.cloudflare.com:443,www.microsoft.com:443,www.amazon.com:443,aws.amazon.com:443,www.samsung.com:443,www.nvidia.com:443,www.amd.com:443,www.intel.com:443,www.sony.com:443,dl.google.com:443",
     "restartXrayOnClientDisable": "true",
     "xrayOutboundTestUrl": "https://www.google.com/generate_204",
@@ -2287,6 +2365,7 @@ for k, v in settings_data.items():
 freedom_final_rules = []
 if enable_agh:
     freedom_final_rules.append({"action": "allow", "ip": ["127.0.0.1"], "port": "53"})
+freedom_final_rules.append({"action": "allow", "ip": ["10.8.1.0/24", "10.8.2.0/24"]})
 freedom_final_rules.append({"action": "block", "ip": ["geoip:private"]})
 freedom_final_rules.append({"action": "allow"})
 
@@ -2295,6 +2374,7 @@ routing_rules = [
 ]
 if enable_agh:
     routing_rules.append({"ip": ["127.0.0.1"], "outboundTag": "direct", "port": "53", "ruleTag": "xui-dns-allow", "type": "field"})
+routing_rules.append({"ip": ["10.8.1.0/24", "10.8.2.0/24"], "outboundTag": "direct", "type": "field"})
 routing_rules.append({"ip": ["geoip:private"], "outboundTag": "blocked", "type": "field"})
 routing_rules.append({"outboundTag": "blocked", "protocol": ["bittorrent"], "type": "field"})
 
@@ -2419,7 +2499,14 @@ ib1_id = ib2_id = ib3_id = ib4_id = ib5_id = ib6_id = None
 
 # 1. Steal Reality
 if os.environ.get("ENABLE_STEAL") == "1":
-    steal_dict = json.loads(os.environ.get("STEAL_JSON", "{}"))
+    steal_dict = {}
+    raw_steal = os.environ.get("STEAL_CONFIG_DATA", "").strip(";")
+    if raw_steal:
+        for item in raw_steal.split(";"):
+            if "=" in item:
+                p_part, doms_csv = item.split("=", 1)
+                steal_dict[p_part] = [d.strip() for d in doms_csv.split(",") if d.strip()]
+
     for p_str, doms in steal_dict.items():
         p = int(p_str)
         tag = f"in-steal-reality-{p}" if p != 45443 else "in-steal-reality"
@@ -2440,7 +2527,14 @@ if os.environ.get("ENABLE_STEAL") == "1":
 
 # 2. Classic Reality
 if os.environ.get("ENABLE_CLASSIC") == "1":
-    classic_dict = json.loads(os.environ.get("CLASSIC_JSON", "{}"))
+    classic_dict = {}
+    raw_classic = os.environ.get("CLASSIC_CONFIG_DATA", "").strip(";")
+    if raw_classic:
+        for item in raw_classic.split(";"):
+            if "=" in item:
+                cp_part, snis_csv = item.split("=", 1)
+                classic_dict[cp_part] = [s.strip() for s in snis_csv.split(",") if s.strip()]
+
     for p_str, snis in classic_dict.items():
         p = int(p_str)
         primary_sni = snis[0] if snis else "tbank.ru"
@@ -2499,6 +2593,18 @@ if os.environ.get("ENABLE_HY2") == "1":
     }
     ib4_id = upsert_inbound(hp, "hysteria", "in-hysteria2", "Hysteria 2", h_obj, ht_obj, listen="0.0.0.0")
 
+# Выбор DNS серверов для клиентов AmneziaWG
+if enable_agh:
+    awg3_dns_prim = "77.88.8.8" if geo_profile == "1" else "1.1.1.1"
+    awg3_dns_sec = "77.88.8.1" if geo_profile == "1" else "8.8.8.8"
+    awg2_dns_prim = awg3_dns_prim
+    awg2_dns_sec = awg3_dns_sec
+else:
+    awg3_dns_prim = "77.88.8.8" if geo_profile == "1" else "1.1.1.1"
+    awg3_dns_sec = "77.88.8.1" if geo_profile == "1" else "8.8.8.8"
+    awg2_dns_prim = awg3_dns_prim
+    awg2_dns_sec = awg3_dns_sec
+
 # 5. AmneziaWG v3.1 (Подсеть 10.8.1.0/24, MTU 1320)
 if os.environ.get("ENABLE_AWG_V3") == "1":
     a3p = int(os.environ["AWG_V3_PORT"])
@@ -2509,7 +2615,7 @@ if os.environ.get("ENABLE_AWG_V3") == "1":
         "clients": [a3_client],
         "server": {
             "h1": "", "h2": "", "h3": "", "h4": "", "jc": 4, "jmin": 50, "jmax": 160, "s1": 45, "s2": 60, "s3": 24, "s4": 16,
-            "mtu": 1320, "primaryDns": "8.8.8.8", "secondaryDns": "8.8.4.4",
+            "mtu": 1320, "primaryDns": awg3_dns_prim, "secondaryDns": awg3_dns_sec,
             "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
             "randomTrailers": False, "disableCookies": True, "contentPaddingAddition": "3-16",
             "keepaliveTimeout": "8-10", "rekeyAfterTime": "107-135", "rekeyTimeout": "3-4", "rejectAfterTime": "178-211", "maxHandshakeAttempts": "21-26",
@@ -2530,7 +2636,7 @@ if os.environ.get("ENABLE_AWG_V2") == "1":
         "server": {
             "h1": "149419586", "h2": "878791997", "h3": "1251051976", "h4": "1657628296",
             "jc": 4, "jmin": 50, "jmax": 160, "s1": 45, "s2": 60, "s3": 24, "s4": 16, "mtu": 1360,
-            "primaryDns": "8.8.8.8", "secondaryDns": "8.8.4.4",
+            "primaryDns": awg2_dns_prim, "secondaryDns": awg2_dns_sec,
             "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
             "subnetCidr": 24, "subnetIp": "10.8.2.0"
         }
@@ -2665,26 +2771,33 @@ fi
 UNIFIED_SUB_ID="SUB_Test"
 TEST_EMAIL="Test"
 if [ -f "/tmp/vpn_unified_creds.txt" ]; then
+    # shellcheck source=/dev/null
     . /tmp/vpn_unified_creds.txt
     rm -f /tmp/vpn_unified_creds.txt
 fi
 
 # =============================================================
-#  ФАЗА 4: ФИНАЛЬНЫЙ ЗАМОК (NAT ДЛЯ AWG, MSS CLAMPING, PORT HOPPING, UFW)
+#  ФАЗА 4: ФИНАЛЬНЫЙ ЗАМОК (L3 FORWARD, NAT, MSS CLAMPING, UFW)
 # =============================================================
 echo
 echo -e "${CYAN}=====================================================================${NC}"
 echo -e "${GREEN}  ФАЗА 4: Сетевой шлюз NAT, TCP MSS Clamping и изоляция UFW          ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
-DEFAULT_IF=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -n1 || echo "")
-[ -z "$DEFAULT_IF" ] && DEFAULT_IF=$(ip link | grep 'state UP' | awk -F: '{print $2}' | tr -d ' ' | head -n1 || echo "eth0")
+DEFAULT_IF=$(ip -4 route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -n1 || echo "")
+if [ -z "$DEFAULT_IF" ]; then
+    DEFAULT_IF=$(ip -4 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -n1 || echo "")
+fi
+[ -z "$DEFAULT_IF" ] && DEFAULT_IF="eth0"
 ok "Основной сетевой интерфейс: ${GREEN}${DEFAULT_IF}${NC}"
 
-if grep -q "^IPV6=" /etc/default/ufw 2>/dev/null; then
-    sed -i 's/^IPV6=.*/IPV6=no/' /etc/default/ufw
-else
-    echo "IPV6=no" >> /etc/default/ufw
+if [ -f /etc/default/ufw ]; then
+    sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+    if grep -q "^IPV6=" /etc/default/ufw; then
+        sed -i 's/^IPV6=.*/IPV6=no/' /etc/default/ufw
+    else
+        echo "IPV6=no" >> /etc/default/ufw
+    fi
 fi
 
 ufw default deny incoming >/dev/null 2>&1 || true
@@ -2695,9 +2808,17 @@ ufw allow 80/tcp comment 'HTTP ACME' >/dev/null 2>&1 || true
 ufw allow 443/tcp comment 'HTTPS L4 Router' >/dev/null 2>&1 || true
 ufw allow 8443/tcp comment 'HTTPS L4 Stream' >/dev/null 2>&1 || true
 
-[ "${ENABLE_HY2:-0}" -eq 1 ] && ufw allow "${HY2_PORT}/udp" comment 'Hysteria 2' >/dev/null 2>&1 || true
-[ "${ENABLE_AWG_V3:-0}" -eq 1 ] && ufw allow "${AWG_V3_PORT}/udp" comment 'AmneziaWG v3' >/dev/null 2>&1 || true
-[ "${ENABLE_AWG_V2:-0}" -eq 1 ] && ufw allow "${AWG_V2_PORT}/udp" comment 'AmneziaWG v2' >/dev/null 2>&1 || true
+if [ "${ENABLE_HY2:-0}" -eq 1 ]; then
+    ufw allow "${HY2_PORT}/udp" comment 'Hysteria 2' >/dev/null 2>&1 || true
+fi
+
+if [ "${ENABLE_AWG_V3:-0}" -eq 1 ]; then
+    ufw allow "${AWG_V3_PORT}/udp" comment 'AmneziaWG v3' >/dev/null 2>&1 || true
+fi
+
+if [ "${ENABLE_AWG_V2:-0}" -eq 1 ]; then
+    ufw allow "${AWG_V2_PORT}/udp" comment 'AmneziaWG v2' >/dev/null 2>&1 || true
+fi
 
 export ENABLE_HY2_HOP HY2_PORT ENABLE_AWG_V3 ENABLE_AWG_V2 DEFAULT_IF
 python3 - << 'EOF_UFW_PYTHON'
@@ -2713,6 +2834,7 @@ with open(rules_file, "r") as f:
 
 content = re.sub(r'# START HARDENED NAT[\s\S]*?# END HARDENED NAT\n?', '', content)
 content = re.sub(r'# START HARDENED MANGLE[\s\S]*?# END HARDENED MANGLE\n?', '', content)
+content = re.sub(r'# START HARDENED FORWARD[\s\S]*?# END HARDENED FORWARD\n?', '', content)
 content = content.strip() + "\n"
 
 enable_hop = os.environ.get("ENABLE_HY2_HOP") == "1"
@@ -2732,6 +2854,24 @@ nat_rules.append("COMMIT\n")
 
 nat_part = "# START HARDENED NAT\n" + "\n".join(nat_rules) + "\n# END HARDENED NAT\n\n"
 
+forward_rules = ["# START HARDENED FORWARD"]
+if awg3:
+    forward_rules.append("-A ufw-before-forward -s 10.8.1.0/24 -j ACCEPT")
+    forward_rules.append(f"-A ufw-before-forward -i {default_if} -d 10.8.1.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
+if awg2:
+    forward_rules.append("-A ufw-before-forward -s 10.8.2.0/24 -j ACCEPT")
+    forward_rules.append(f"-A ufw-before-forward -i {default_if} -d 10.8.2.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
+forward_rules.append("# END HARDENED FORWARD\n")
+forward_block = "\n".join(forward_rules)
+
+if "-A ufw-before-forward -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" in content:
+    content = content.replace(
+        "-A ufw-before-forward -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+        "-A ufw-before-forward -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n" + forward_block
+    )
+else:
+    content = content.replace("*filter", "*filter\n" + forward_block)
+
 mangle_part = """# START HARDENED MANGLE
 *mangle
 :PREROUTING ACCEPT [0:0]
@@ -2744,32 +2884,11 @@ COMMIT
 # END HARDENED MANGLE
 """
 
-final_body = nat_part + content + mangle_part + "\n"
+final_body = nat_part + content + "\n" + mangle_part + "\n"
 
 with open(rules_file, "w") as f:
     f.write(final_body)
 EOF_UFW_PYTHON
-
-if [ "${ENABLE_HY2:-0}" -eq 1 ] && [ "${ENABLE_HY2_HOP:-0}" -eq 1 ]; then
-    log "Активация Port Hopping для Hysteria 2 (UDP 20000:50000 -> $HY2_PORT)..."
-    ufw allow 20000:50000/udp comment 'Hy2 Port Hopping' >/dev/null 2>&1 || true
-    iptables -t nat -C PREROUTING -p udp --dport 20000:50000 -j REDIRECT --to-ports "$HY2_PORT" 2>/dev/null || \
-        iptables -t nat -A PREROUTING -p udp --dport 20000:50000 -j REDIRECT --to-ports "$HY2_PORT"
-fi
-
-if [ "${ENABLE_AWG_V3:-0}" -eq 1 ]; then
-    iptables -t nat -C POSTROUTING -s 10.8.1.0/24 -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null || \
-        iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o "$DEFAULT_IF" -j MASQUERADE
-fi
-
-if [ "${ENABLE_AWG_V2:-0}" -eq 1 ]; then
-    iptables -t nat -C POSTROUTING -s 10.8.2.0/24 -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null || \
-        iptables -t nat -A POSTROUTING -s 10.8.2.0/24 -o "$DEFAULT_IF" -j MASQUERADE
-fi
-
-log "Активация TCP MSS Clamping (--clamp-mss-to-pmtu)..."
-iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
-    iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
 DENIED_PORTS=(10443 55443 50443 9443 3000)
 for p in "${ALL_REALITY_PORTS[@]:-}"; do
@@ -2786,18 +2905,20 @@ fi
 
 ufw --force enable >/dev/null 2>&1 || true
 ufw reload >/dev/null 2>&1 || true
-ok "Фаервол UFW настроен. NAT для AWG, Port Hopping и TCP MSS Clamping активны."
+ok "Фаервол UFW настроен. NAT для AWG, L3 Forwarding, Port Hopping и TCP MSS Clamping активны."
 
 # =============================================================
 #  ФИНАЛ: СОХРАНЕНИЕ УЧЕТНЫХ ДАННЫХ И ДАШБОРД
 # =============================================================
 HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT}"
-[ "${ENABLE_HY2_HOP:-0}" -eq 1 ] && HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT},20000-50000"
+if [ "${ENABLE_HY2_HOP:-0}" -eq 1 ]; then
+    HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT},20000-50000"
+fi
 
 CRED_FILE="/root/vpn_credentials.txt"
 cat << EOF > "$CRED_FILE"
 =====================================================================
-  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Monoscript v3.0 Universal)
+  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Monoscript v3.1 Universal)
   ОС: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
   Ядро Xray-core: ${DETECTED_XRAY_VER} (Pinned)
   Режим развертывания: $([ "$INSTALL_MODE" = "2" ] && echo "Safe Migration (Существующие клиенты сохранены)" || echo "Clean Setup (С нуля)")
@@ -2839,7 +2960,7 @@ $([ "${ENABLE_HY2:-0}" -eq 1 ] && echo "[ HYSTERIA 2 ]
 [ СЕТЕВЫЕ ПАРАМЕТРЫ ]
 SSH порт:              ${TARGET_SSH_PORT}
 Основной домен:        ${PRIMARY_DOMAIN}
-Сайт-маскировка:       https://${PRIMARY_DOMAIN}/
+Сайт-маскировка:       https://${PRIMARY_DOMAIN}/ (DataSphere Enterprise)
 
 [ ВАЖНОЕ ДЕЙСТВИЕ ДЛЯ ПЕРВОГО ВХОДА В ПАНЕЛЬ ]
 1. Откройте НОВОЕ окно консоли и проверьте доступ по SSH (порт ${TARGET_SSH_PORT}).
@@ -2851,7 +2972,7 @@ chmod 600 "$CRED_FILE"
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА И ГОТОВА К РАБОТЕ (v3.0)!                ${NC}"
+echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА И ГОТОВА К РАБОТЕ (v3.1)!                ${NC}"
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Панель управления 3X-UI:     ${CYAN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 if [ "$INSTALL_MODE" = "1" ]; then
@@ -2883,15 +3004,17 @@ echo -e "  ${WHITE}Ядро Xray-core:${NC}              ${GREEN}${DETECTED_XRAY
 echo -e "  ${WHITE}VLESS xHTTP:${NC}                 ${GREEN}Native H2C + ML-KEM-768 + XTLS Vision${NC}"
 echo -e "  ${WHITE}VLESS Steal REALITY:${NC}         ${GREEN}target/dest 127.0.0.1:9443, xver 1, spiderX /${NC}"
 echo -e "  ${WHITE}VLESS Classic REALITY:${NC}       ${GREEN}target/dest external:443, xver 0, spiderX /${NC}"
+echo -e "  ${WHITE}AmneziaWG Маршрутизация:${NC}     ${GREEN}L3 Forwarding ACCEPT + DNS Leak Shield${NC}"
 echo -e "  ${WHITE}AmneziaWG NAT:${NC}               ${GREEN}IPv4 MASQUERADE для 10.8.1.0/24 и 10.8.2.0/24${NC}"
 echo -e "  ${WHITE}TCP MSS Clamping:${NC}            ${GREEN}Персистентно в mangle (--clamp-mss-to-pmtu)${NC}"
+echo -e "  ${WHITE}Архитектура CSP:${NC}             ${GREEN}Зональная изоляция (Strict Decoy + Vue Compat)${NC}"
 echo
 echo -e "  Все доступы сохранены в файл: ${CYAN}${CRED_FILE}${NC} (chmod 600)"
 echo -e "${YELLOW}---------------------------------------------------------------------${NC}"
-echo -e "  ${YELLOW}${BOLD}ОБЯЗАТЕЛЬНОЕ ДЕЙСТВИЕ ДЛЯ ВХОДА В ПАНЕЛЬ 3X-UI:${NC}"
-echo -e "  ${WHITE}1. Откройте ${BOLD}НОВОЕ${NC} окно консоли и проверьте вход по SSH (порт ${TARGET_SSH_PORT}).${NC}"
-echo -e "  ${WHITE}2. Выполните команду: ${GREEN}${BOLD}reboot${NC}"
-echo -e "  ${DIM}После перезапуска сервера веб-панель сразу откроется по указанной ссылке.${NC}"
+echo -e "${YELLOW}${BOLD}ОБЯЗАТЕЛЬНОЕ ДЕЙСТВИЕ ДЛЯ ВХОДА В ПАНЕЛЬ 3X-UI:${NC}"
+echo -e "${WHITE}1. Откройте ${BOLD}НОВОЕ${NC} окно консоли и проверьте вход по SSH (порт ${TARGET_SSH_PORT}).${NC}"
+echo -e "${WHITE}2. Выполните команду: ${GREEN}${BOLD}reboot${NC}"
+echo -e "${DIM}После перезапуска сервера веб-панель сразу откроется по указанной ссылке.${NC}"
 echo -e "${GREEN}=====================================================================${NC}"
 
 exit 0
