@@ -77,39 +77,39 @@
 ```mermaid
 flowchart TD
     ClientTCP["Клиентский трафик: TCP 443 / 8443"] --> NginxStream["Nginx L4 Stream Router (Dual Ingress)"]
-    ClientUDP["Клиентский трафик: UDP 443 / 20000-50000 / 8443 / 8444"] --> UFW_Engine{"UFW Stateful Engine & NAT"}
+    ClientUDP["Клиентский трафик: UDP 443 / 20000-50000 / 8443 / 8444"] --> UFW_Router{"UFW Stateful Engine & NAT"}
 
-    subgraph UFW_Engine ["Фильтрация, трансляция и MSS Clamping"]
+    subgraph SG_UFW ["Фильтрация, трансляция и MSS Clamping"]
         direction TB
         MangleClamping["Таблица *mangle: TCPMSS --clamp-mss-to-pmtu"]
         NatForwarding["Таблица *nat: MASQUERADE 10.8.1.0/24 & 10.8.2.0/24"]
         PortHopping["Таблица *nat: PREROUTING UDP 20000-50000 -> :443"]
-        UFW_Engine --> PortHopping --> XrayHy2["Hysteria 2 UDP :443"]
-        UFW_Engine --> NatForwarding --> XrayAWG3["AmneziaWG v3.1 UDP :8443 (MTU 1320)"]
-        UFW_Engine --> NatForwarding --> XrayAWG2["AmneziaWG v2.0 UDP :8444 (MTU 1360)"]
+        UFW_Router --> PortHopping --> XrayHy2["Hysteria 2 UDP :443"]
+        UFW_Router --> NatForwarding --> XrayAWG3["AmneziaWG v3.1 UDP :8443 (MTU 1320)"]
+        UFW_Router --> NatForwarding --> XrayAWG2["AmneziaWG v2.0 UDP :8444 (MTU 1360)"]
     end
 
     NginxStream -->|"SNI: yourdomain.online / Доп. SSL"| NginxSock["RAM Unix-Socket: /dev/shm/nginx-http.sock"]
     NginxStream -->|"SNI: dns.yourdomain.online (DoH)"| NginxSock
     NginxStream -->|"SNI: cdn.yourdomain.online (Steal)"| XraySteal["Xray Steal REALITY :45443"]
-    NginxStream -.->|"Failover Backup при остановке Xray"| NginxSock
+    NginxStream -.->|"Резерв при остановке Xray"| NginxSock
     NginxStream -->|"SNI: Внешний доверенный SNI (tbank.ru)"| XrayClassic["Xray Classic REALITY :46443"]
 
     XraySteal -->|"Fallback не-REALITY / xver=1"| NginxAntiLoop["Nginx HTTP Anti-Loop :9443 (PROXY proto)"]
     XrayClassic -->|"Fallback Direct / xver=0"| ExtTarget["Внешний легитимный сервер :443"]
 
-    NginxSock --> NginxL7["Nginx Mainline L7 Core Engine"]
-    NginxAntiLoop --> NginxL7
+    NginxSock --> NginxL7Core["Nginx Mainline L7 Core Engine"]
+    NginxAntiLoop --> NginxL7Core
 
-    subgraph NginxL7 ["Nginx L7 Shield & Routing"]
+    subgraph SG_NginxL7 ["Nginx L7 Shield & Routing"]
         direction TB
         BadbotFilter{"Badbot & Scanner Filter"}
-        NginxL7 --> BadbotFilter
+        NginxL7Core --> BadbotFilter
         BadbotFilter -->|"Совпадение со сканером / .env / .git"| Drop404["HTTP 404 Not Found"]
         BadbotFilter -->|"Легитимный запрос"| ZonalRouter{"Зональный маршрутизатор CSP"}
     end
 
-    subgraph Internal_Daemons ["Изолированные локальные службы (127.0.0.1)"]
+    subgraph SG_Internal_Daemons ["Изолированные локальные службы (127.0.0.1)"]
         ZonalRouter -->|"URI: / (Zero-Inline CSP)"| DecoySPA["DataSphere Enterprise Decoy SPA"]
         ZonalRouter -->|"URI: /my-3x-panel/ (Vue CSP)"| CorePanel["3X-UI Панель управления :10443"]
         ZonalRouter -->|"URI: /my-post-key/ (No CSP)"| SubDaemon["3X-UI Сервер подписок :55443"]
