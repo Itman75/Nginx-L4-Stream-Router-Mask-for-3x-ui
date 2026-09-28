@@ -129,6 +129,8 @@ flowchart TD
 * **Поддерживаемые ОС:**
   * **Ubuntu:** 22.04 LTS, 24.04 LTS, 26.04.
   * **Debian:** 12 (Bookworm), 13 (Trixie).
+  * **Домены:** Минимум **1 основной домен** (yourdomain.online) и **2 поддомена** (cdn.yourdomain.online для Steal REALITY и dns.yourdomain.online для AdGuard Home DoH).
+
 
 > [!CAUTION]
 > ### ⚠️ Критическое требование к Cloudflare DNS
