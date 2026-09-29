@@ -13,7 +13,7 @@
 
 set -Eeuo pipefail
 IFS=$'\n\t'
-umask 077
+umask 022
 
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
@@ -52,6 +52,10 @@ if [ "$EUID" -ne 0 ]; then
   die "Пожалуйста, запустите установщик с правами суперпользователя root (через sudo)."
 fi
 
+# Pre-flight санитарная очистка остаточных файлов от незавершенных прошлых запусков
+rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx /usr/share/keyrings/nginx-archive-keyring.gpg.tmp 2>/dev/null || true
+[ -f /usr/share/keyrings/nginx-archive-keyring.gpg ] && [ ! -s /usr/share/keyrings/nginx-archive-keyring.gpg ] && rm -f /usr/share/keyrings/nginx-archive-keyring.gpg 2>/dev/null || true
+
 # Превентивное блокирование интерактивных диалогов needrestart
 mkdir -p /etc/needrestart/conf.d
 echo "\$nrconf{restart} = 'a';" > /etc/needrestart/conf.d/99-disable-auto-restart.conf 2>/dev/null || true
@@ -87,9 +91,9 @@ else
     die "Не удалось определить параметры текущего дистрибутива ОС."
 fi
 
-log "Первичная подготовка системных утилит (включая unzip и sqlite3 CLI)..."
+log "Первичная подготовка системных утилит (включая gnupg, dirmngr, unzip и sqlite3)..."
 apt-get update -q >/dev/null 2>&1 || true
-apt-get install -y curl bc bind9-dnsutils iproute2 openssl gawk python3 python3-bcrypt xxd unzip jq sqlite3 bsdextrautils -q >/dev/null 2>&1 || true
+apt-get install -y curl bc bind9-dnsutils iproute2 openssl gawk python3 python3-bcrypt xxd unzip jq sqlite3 bsdextrautils gnupg dirmngr -q >/dev/null 2>&1 || true
 ok "Базовые утилиты готовы к работе."
 
 validate_port() {
@@ -157,7 +161,7 @@ download_asset() {
     local urls=("$@")
     for u in "${urls[@]}"; do
         log "Попытка загрузки: $u"
-        if curl -fsSL --connect-timeout 5 -m 120 --retry 1 "$u" -o "$target_file" 2>/dev/null; then
+        if curl -fsSL --connect-timeout 8 -m 120 --retry 2 "$u" -o "$target_file" 2>/dev/null; then
             if [ -s "$target_file" ]; then
                 ok "Успешно загружено из: $u"
                 return 0
@@ -683,6 +687,9 @@ echo -e "${CYAN}================================================================
 echo -e "${GREEN}  ФАЗА 1: Системный Hardening ОС, TCP BBR и защита SSH               ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
+# Предотвращение сбоев APT: изоляция от недопустимых сторонних репозиториев
+rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx 2>/dev/null || true
+
 log "Обновление пакетных репозиториев..."
 apt-get update -q
 
@@ -697,7 +704,7 @@ log "Установка системного набора утилит..."
 CORE_PKGS=(
     curl wget bash sudo systemd openssl gawk lsb-release gnupg bind9-dnsutils
     socat cron ufw iptables iproute2 tar apache2-utils fail2ban python3 python3-systemd
-    python3-bcrypt ca-certificates build-essential jq tmux net-tools bc xxd unzip sqlite3 bsdextrautils
+    python3-bcrypt ca-certificates build-essential jq tmux net-tools bc xxd unzip sqlite3 bsdextrautils dirmngr
 )
 apt-get install -y "${CORE_PKGS[@]}" -q || true
 
@@ -868,6 +875,7 @@ echo -e "${CYAN}================================================================
 log "Превентивное открытие портов HTTP/HTTPS в UFW..."
 ufw allow 80/tcp comment 'HTTP ACME' >/dev/null 2>&1 || true
 ufw allow 443/tcp comment 'HTTPS L4 Router' >/dev/null 2>&1 || true
+ufw allow 8443/tcp comment 'HTTPS L4 Stream' >/dev/null 2>&1 || true
 
 log "Pre-flight проверка DNS A-записей для всех собственных доменов..."
 WAN_IP=$(curl -s4 --connect-timeout 4 icanhazip.com || curl -s4 --connect-timeout 4 ifconfig.me || echo "")
@@ -888,29 +896,83 @@ if [ -n "$WAN_IP" ]; then
     done
 fi
 
-log "Подключение официального Nginx Mainline для $OS_ID ($OS_CODENAME)..."
-mkdir -p /usr/share/keyrings
-curl -fsSL --connect-timeout 5 https://nginx.org/keys/nginx_signing.key | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg --yes 2>/dev/null || true
-
+# --- ОТКАЗОУСТОЙЧИВАЯ ДОСТАВКА И ИНТЕГРАЦИЯ GPG КЛЮЧЕЙ NGINX ---
+log "Оркестрация защищенного репозитория Nginx для $OS_ID ($OS_CODENAME)..."
 systemctl stop nginx 2>/dev/null || true
 
-NGINX_REPO_CODENAME="$OS_CODENAME"
-if ! curl -fsSL -I "https://nginx.org/packages/mainline/$OS_ID/dists/$OS_CODENAME/Release" >/dev/null 2>&1; then
-    warn "Репозиторий nginx mainline для кодового имени $OS_CODENAME не найден, используется стабильная база LTS."
-    [ "$OS_ID" = "ubuntu" ] && NGINX_REPO_CODENAME="noble" || NGINX_REPO_CODENAME="bookworm"
+NGINX_KEYRING="/usr/share/keyrings/nginx-archive-keyring.gpg"
+mkdir -p /usr/share/keyrings
+rm -f "$NGINX_KEYRING" "${NGINX_KEYRING}.tmp" /tmp/nginx_signing.key.tmp
+
+NGINX_KEY_OK=0
+
+# Уровень 1: Прямая загрузка во временный файл и деарморинг (защита от broken pipe curl:23)
+for key_url in "https://nginx.org/keys/nginx_signing.key" "http://nginx.org/keys/nginx_signing.key"; do
+    log "Запрос ключа Nginx: $key_url"
+    if curl -fsSL --connect-timeout 12 -m 30 --retry 2 "$key_url" -o /tmp/nginx_signing.key.tmp 2>/dev/null; then
+        if [ -s /tmp/nginx_signing.key.tmp ] && gpg --dearmor -o "${NGINX_KEYRING}.tmp" < /tmp/nginx_signing.key.tmp 2>/dev/null; then
+            if [ -s "${NGINX_KEYRING}.tmp" ]; then
+                mv -f "${NGINX_KEYRING}.tmp" "$NGINX_KEYRING"
+                chmod 644 "$NGINX_KEYRING"
+                NGINX_KEY_OK=1
+                ok "Ключ Nginx успешно загружен и деарморирован."
+                break
+            fi
+        fi
+    fi
+done
+rm -f /tmp/nginx_signing.key.tmp
+
+# Уровень 2: Синхронизация недостающих ключей подписи через Keyserver (включая noble ID 2FD21310B49F6B46)
+if [ "$NGINX_KEY_OK" -eq 0 ] || ! gpg --no-default-keyring --keyring "$NGINX_KEYRING" --list-keys 2FD21310B49F6B46 &>/dev/null; then
+    log "Синхронизация актуальных ключей Nginx через публичные Keyserver пулы..."
+    KEYSERVERS=("hkp://keyserver.ubuntu.com:80" "hkps://keys.openpgp.org" "hkp://pgp.mit.edu:80")
+    for ks in "${KEYSERVERS[@]}"; do
+        if gpg --no-default-keyring --keyring "$NGINX_KEYRING" --keyserver "$ks" \
+               --recv-keys 2FD21310B49F6B46 573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3 2>/dev/null; then
+            chmod 644 "$NGINX_KEYRING"
+            NGINX_KEY_OK=1
+            ok "Ключи Nginx успешно импортированы из серверов ключей: $ks"
+            break
+        fi
+    done
 fi
 
-echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/$OS_ID $NGINX_REPO_CODENAME nginx" \
-    | tee /etc/apt/sources.list.d/nginx.list
+USE_OFFICIAL_NGINX_REPO=0
+if [ "$NGINX_KEY_OK" -eq 1 ] && [ -s "$NGINX_KEYRING" ]; then
+    NGINX_REPO_CODENAME="$OS_CODENAME"
+    if ! curl -fsSL -I --connect-timeout 5 "https://nginx.org/packages/mainline/$OS_ID/dists/$OS_CODENAME/Release" >/dev/null 2>&1; then
+        [ "$OS_ID" = "ubuntu" ] && NGINX_REPO_CODENAME="noble" || NGINX_REPO_CODENAME="bookworm"
+    fi
 
-cat << EOF > /etc/apt/preferences.d/99nginx
+    echo "deb [signed-by=$NGINX_KEYRING] https://nginx.org/packages/mainline/$OS_ID $NGINX_REPO_CODENAME nginx" \
+        | tee /etc/apt/sources.list.d/nginx.list >/dev/null
+
+    cat << EOF > /etc/apt/preferences.d/99nginx
 Package: nginx*
 Pin: origin nginx.org
 Pin-Priority: 900
 EOF
 
-apt-get update -q
-apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
+    # Предварительная атомарная проверка репозитория Nginx
+    if apt-get update -q -o Dir::Etc::sourcelist="sources.list.d/nginx.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1; then
+        USE_OFFICIAL_NGINX_REPO=1
+        ok "Репозиторий Nginx Mainline ($NGINX_REPO_CODENAME) верифицирован."
+    else
+        warn "Сбой верификации внешнего репозитория nginx.org. Активирован автоматический Fallback на системный пакет ОС..."
+        rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx
+    fi
+fi
+
+if [ "$USE_OFFICIAL_NGINX_REPO" -eq 0 ]; then
+    log "Установка и настройка Nginx из официального системного репозитория $OS_ID..."
+    rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx
+    apt-get update -q
+    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx libnginx-mod-stream 2>/dev/null || apt-get install -y -q nginx
+else
+    apt-get update -q
+    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
+fi
 
 systemctl daemon-reload
 systemctl reset-failed nginx.service 2>/dev/null || true
@@ -921,7 +983,7 @@ id -u nginx >/dev/null 2>&1 || NGINX_USER="www-data"
 WEBROOT="/var/www/html"
 mkdir -p "$WEBROOT/.well-known/acme-challenge"
 mkdir -p "$WEBROOT/assets/css" "$WEBROOT/assets/js" "$WEBROOT/assets/img"
-mkdir -p /var/cache/nginx /var/www/mirror /var/www/proxy_temp /etc/nginx/stream.d /etc/nginx/conf.d
+mkdir -p /var/cache/nginx /var/www/mirror /var/www/proxy_temp /etc/nginx/stream.d /etc/nginx/conf.d /etc/nginx/modules-enabled
 
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT" /var/cache/nginx /var/www/mirror /var/www/proxy_temp
 chmod 755 "$WEBROOT" /var/cache/nginx /var/www/mirror /var/www/proxy_temp
@@ -1046,7 +1108,6 @@ EOF
         AGH_URLS=(
             "https://static.adguard.com/adguardhome/release/AdGuardHome_linux_${AGH_ARCH}.tar.gz"
             "https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${AGH_ARCH}.tar.gz"
-            "https://ghfast.top/https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${AGH_ARCH}.tar.gz"
         )
     fi
 
@@ -1522,160 +1583,6 @@ window.addEventListener('keydown', (e) => {
 });
 EOF
 
-    cat << 'EOF' > /var/www/html/index.html
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DataSphere Analytics — Платформа распределенных данных</title>
-    
-    <meta name="description" content="Корпоративная аналитическая среда распределенной обработки данных с аппаратным сетевым ускорением, шифрованием TLS 1.3 и Anycast-маршрутизацией узлов.">
-    <meta name="keywords" content="datasphere, analytics, anycast, edge cloud, tls 1.3, distributed storage, zero-copy">
-    <meta name="author" content="DataSphere Cloud Systems Inc.">
-    <meta name="theme-color" content="#131314">
-    <meta property="og:type" content="website">
-    <meta property="og:title" content="DataSphere Analytics — Платформа распределенных данных">
-    <meta property="og:description" content="Инфраструктура аналитики и передачи данных корпоративного уровня.">
-    <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
-    <link rel="stylesheet" href="/assets/css/datasphere.css">
-    <script defer src="/assets/js/datasphere.js"></script>
-</head>
-<body>
-    <header>
-        <div class="logo">
-            <svg viewBox="0 0 100 100" width="26" height="26" xmlns="http://www.w3.org/2000/svg">
-                <clipPath id="circleMask"><circle cx="50" cy="50" r="48"/></clipPath>
-                <g clip-path="url(#circleMask)">
-                    <rect x="0" y="0" width="100" height="100" fill="#008dd5"/>
-                    <polygon points="50,-8 100,21 100,79 50,108 0,79 0,21" fill="#ffffff"/>
-                    <polygon points="50,6.7 87.5,28.35 87.5,71.65 50,93.3 12.5,71.65 12.5,28.35" fill="#66a88f"/>
-                    <polygon points="50,28.35 68.75,39.17 68.75,60.83 50,71.65 31.25,60.83 31.25,39.17" fill="#e7ab21"/>
-                    <g stroke="#000000" stroke-width="4" stroke-linecap="round">
-                        <line x1="-10" y1="6.7" x2="110" y2="6.7"/>
-                        <line x1="-10" y1="28.35" x2="110" y2="28.35"/>
-                        <line x1="-10" y1="50" x2="110" y2="50"/>
-                        <line x1="-10" y1="71.65" x2="110" y2="71.65"/>
-                        <line x1="-10" y1="93.3" x2="110" y2="93.3"/>
-                        <line x1="15.36" y1="-10" x2="84.64" y2="110"/>
-                        <line x1="40.36" y1="-10" x2="109.64" y2="110"/>
-                        <line x1="-9.64" y1="-10" x2="59.64" y2="110"/>
-                        <line x1="84.64" y1="-10" x2="15.36" y2="110"/>
-                        <line x1="109.64" y1="-10" x2="40.36" y2="110"/>
-                        <line x1="59.64" y1="-10" x2="-9.64" y2="110"/>
-                    </g>
-                </g>
-                <circle cx="50" cy="50" r="48" fill="none" stroke="#000000" stroke-width="5"/>
-            </svg>
-            DataSphere Analytics
-        </div>
-        <button type="button" id="headerConsoleBtn" class="btn">Консоль</button>
-    </header>
-
-    <main>
-        <section class="hero">
-            <div class="badge"><span class="badge-dot"></span><span>DataSphere Cloud Engine v3.14 — Доступность <span id="heroSla">99.998%</span></span></div>
-            <h1>Инфраструктура распределения данных нового поколения</h1>
-            <p>Корпоративная аналитическая среда с аппаратным ускорением сетевого стека, сквозным TLS 1.3 / H2 шифрованием и Anycast-маршрутизацией узлов.</p>
-            <div class="hero-actions">
-                <button type="button" id="connectNodeBtn" class="btn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                    Подключить узел
-                </button>
-                <button type="button" id="netStatusBtn" class="btn btn-outline">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                    Статус сети
-                </button>
-            </div>
-            <div class="stats-bar">
-                <div class="stat-item"><h4 id="heroLatency">&lt; 1.2 ms</h4><p>Средняя задержка ядра</p></div>
-                <div class="stat-item"><h4 id="heroBandwidth">100 Gbps</h4><p>Пропускная способность</p></div>
-                <div class="stat-item"><h4>TLS 1.3 / H2</h4><p>Аппаратное шифрование</p></div>
-            </div>
-        </section>
-
-        <section class="features">
-            <div class="feature-card" id="cardCrypto">
-                <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
-                <h3>Сквозное квантовое шифрование</h3>
-                <p>Передача пакетов осуществляется с аппаратным криптоускорением TLS 1.3 и защитой от перехвата на пограничных маршрутизаторах.</p>
-                <span class="card-action">Аудит протоколов &rarr;</span>
-            </div>
-            <div class="feature-card" id="cardTelemetry">
-                <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
-                <h3>Распределённая телеметрия</h3>
-                <p>Многопоточный конвейер аналитики агрегирует метрики узлов в реальном времени с нулевой деградацией пропускной способности.</p>
-                <span class="card-action">Anycast-магистраль &rarr;</span>
-            </div>
-            <div class="feature-card" id="cardIpc">
-                <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6"/></svg></div>
-                <h3>Изоляция сокетов IPC</h3>
-                <p>Все процессы ввода-вывода распределяются по энергонезависимым сегментам оперативной памяти с прямой маршрутизацией через Unix-сокеты.</p>
-                <span class="card-action">In-Memory конвейер &rarr;</span>
-            </div>
-        </section>
-    </main>
-
-    <div id="authModal" class="modal-overlay">
-        <div class="modal-card">
-            <div class="modal-header">
-                <div>
-                    <h2 id="modalTitle">Авторизация в DataSphere</h2>
-                    <p>Введите учётные данные для доступа к консоли</p>
-                </div>
-                <button type="button" id="authModalClose" class="modal-close" aria-label="Закрыть">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                </button>
-            </div>
-            <div id="errorAlert" class="alert-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg>
-                <span id="errorMsg">Ошибка аутентификации</span>
-            </div>
-            <form id="authForm">
-                <div class="form-group">
-                    <label for="dsUser">Идентификатор узла / Email</label>
-                    <input type="text" id="dsUser" class="form-control" placeholder="cluster-admin@datasphere.cloud" required autocomplete="username">
-                </div>
-                <div class="form-group">
-                    <label for="dsKey">API Token / Ключ</label>
-                    <input type="password" id="dsKey" class="form-control" placeholder="••••••••••••••••" required autocomplete="current-password">
-                </div>
-                <button type="submit" id="submitBtn" class="btn">Подключиться к кластеру</button>
-            </form>
-        </div>
-    </div>
-
-    <div id="detailModal" class="modal-overlay">
-        <div class="modal-card">
-            <div class="modal-header">
-                <div>
-                    <h2 id="detailTitle">Архитектурный узел</h2>
-                    <p id="detailSubtitle">Спецификация и статус безопасности подсистемы</p>
-                </div>
-                <button type="button" id="detailModalClose" class="modal-close" aria-label="Закрыть">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                </button>
-            </div>
-            <div id="detailContent"></div>
-            <button type="button" id="detailModalOk" class="btn">Понятно</button>
-        </div>
-    </div>
-
-    <div id="toastHud" class="toast-hud">
-        <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
-            <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-        </svg>
-        <div>
-            <div class="toast-title" id="toastTitle">Телеметрия сети DataSphere</div>
-            <div class="toast-desc" id="toastDesc">Кластер функционирует штатно.</div>
-        </div>
-    </div>
-
-    <footer>&copy; 2026 DataSphere Cloud Systems Inc. Платформа распределенной аналитики и защиты данных.</footer>
-</body>
-</html>
-EOF
-
     DECOY_LOCATION_BLOCKS="
         add_header X-DataSphere-Engine \"v3.14.8-enterprise\" always;
 
@@ -1796,12 +1703,19 @@ chmod -R 755 "$WEBROOT"
 log "Сборка конфигурации Nginx Mainline (Stream L4 + Zonal CSP Architecture)..."
 rm -f /etc/nginx/conf.d/00-acme.conf
 
+MODULE_LOAD_LINE=""
+if [ "$USE_OFFICIAL_NGINX_REPO" -eq 0 ] && [ -d /etc/nginx/modules-enabled ]; then
+    MODULE_LOAD_LINE="include /etc/nginx/modules-enabled/*.conf;"
+fi
+
 cat << EOF > /etc/nginx/nginx.conf
 user $NGINX_USER;
 worker_processes auto;
 pid /run/nginx.pid;
 worker_rlimit_nofile 524288;
 error_log /var/log/nginx/error.log warn;
+
+$MODULE_LOAD_LINE
 
 events {
     worker_connections 65535;
@@ -3068,7 +2982,7 @@ echo -e "  ${WHITE}VLESS Steal REALITY:${NC}         ${GREEN}target/dest 127.0.0
 echo -e "  ${WHITE}VLESS Classic REALITY:${NC}       ${GREEN}target/dest external:443, xver 0, spiderX /${NC}"
 echo -e "  ${WHITE}AmneziaWG Маршрутизация:${NC}     ${GREEN}L3 Forwarding ACCEPT + DNS Leak Shield${NC}"
 echo -e "  ${WHITE}AmneziaWG NAT:${NC}               ${GREEN}IPv4 MASQUERADE для 10.8.1.0/24 и 10.8.2.0/24${NC}"
-echo -e "  ${WHITE}TCP MSS Clamping:${NC}            ${GREEN}Персистентно в mangle (--set-mss 1280)${NC}"
+echo -e "  ${WHITE}TCP MSS Clamping:${NC}            ${GREEN}Персистентно в mangle (--set-mss 1320)${NC}"
 echo -e "  ${WHITE}Архитектура CSP:${NC}             ${GREEN}Зональная изоляция (Strict Decoy + Vue Compat)${NC}"
 echo
 echo -e "  Все доступы сохранены в файл: ${CYAN}${CRED_FILE}${NC} (chmod 600)"
