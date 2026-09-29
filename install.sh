@@ -13,6 +13,7 @@
 
 set -Eeuo pipefail
 IFS=$'\n\t'
+umask 077
 
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
@@ -1121,15 +1122,33 @@ EOF
 fi
 
 # =============================================================
-#  ВЕБ-МАСКИРОВКА (Zero-Inline, Модульный CSS/JS, WebCrypto)
+#  ВЕБ-МАСКИРОВКА (DataSphere Enterprise Shield — Финальная сфера)
 # =============================================================
-log "Генерация модульной веб-маскировки (DataSphere Enterprise Shield)..."
+log "Генерация модульной веб-маскировки (DataSphere Enterprise Shield с эталонной сферой)..."
 
 cat << 'EOF' > /var/www/html/assets/img/favicon.svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <circle cx="50" cy="50" r="48" fill="#1e1f20" stroke="#a8c7fa" stroke-width="4"/>
-  <polygon points="50,15 85,35 85,65 50,85 15,65 15,35" fill="#66a88f"/>
-  <polygon points="50,30 70,42 70,58 50,70 30,58 30,42" fill="#e7ab21"/>
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <clipPath id="circleMask"><circle cx="50" cy="50" r="48"/></clipPath>
+  <g clip-path="url(#circleMask)">
+    <rect x="0" y="0" width="100" height="100" fill="#008dd5"/>
+    <polygon points="50,-8 100,21 100,79 50,108 0,79 0,21" fill="#ffffff"/>
+    <polygon points="50,6.7 87.5,28.35 87.5,71.65 50,93.3 12.5,71.65 12.5,28.35" fill="#66a88f"/>
+    <polygon points="50,28.35 68.75,39.17 68.75,60.83 50,71.65 31.25,60.83 31.25,39.17" fill="#e7ab21"/>
+    <g stroke="#000000" stroke-width="4" stroke-linecap="round">
+      <line x1="-10" y1="6.7" x2="110" y2="6.7"/>
+      <line x1="-10" y1="28.35" x2="110" y2="28.35"/>
+      <line x1="-10" y1="50" x2="110" y2="50"/>
+      <line x1="-10" y1="71.65" x2="110" y2="71.65"/>
+      <line x1="-10" y1="93.3" x2="110" y2="93.3"/>
+      <line x1="15.36" y1="-10" x2="84.64" y2="110"/>
+      <line x1="40.36" y1="-10" x2="109.64" y2="110"/>
+      <line x1="-9.64" y1="-10" x2="59.64" y2="110"/>
+      <line x1="84.64" y1="-10" x2="15.36" y2="110"/>
+      <line x1="109.64" y1="-10" x2="40.36" y2="110"/>
+      <line x1="59.64" y1="-10" x2="-9.64" y2="110"/>
+    </g>
+  </g>
+  <circle cx="50" cy="50" r="48" fill="none" stroke="#000000" stroke-width="5"/>
 </svg>
 EOF
 ln -sf /var/www/html/assets/img/favicon.svg /var/www/html/favicon.svg
@@ -1525,12 +1544,30 @@ EOF
 <body>
     <header>
         <div class="logo">
-            <svg viewBox="0 0 100 100" width="26" height="26" xmlns="http://www.w3.org/2000/svg" aria-label="DataSphere Logo">
-                <circle cx="50" cy="50" r="48" fill="#1e1f20" stroke="#a8c7fa" stroke-width="4"/>
-                <polygon points="50,15 85,35 85,65 50,85 15,65 15,35" fill="#66a88f"/>
-                <polygon points="50,30 70,42 70,58 50,70 30,58 30,42" fill="#e7ab21"/>
+            <svg viewBox="0 0 100 100" width="26" height="26" xmlns="http://www.w3.org/2000/svg">
+                <clipPath id="circleMask"><circle cx="50" cy="50" r="48"/></clipPath>
+                <g clip-path="url(#circleMask)">
+                    <rect x="0" y="0" width="100" height="100" fill="#008dd5"/>
+                    <polygon points="50,-8 100,21 100,79 50,108 0,79 0,21" fill="#ffffff"/>
+                    <polygon points="50,6.7 87.5,28.35 87.5,71.65 50,93.3 12.5,71.65 12.5,28.35" fill="#66a88f"/>
+                    <polygon points="50,28.35 68.75,39.17 68.75,60.83 50,71.65 31.25,60.83 31.25,39.17" fill="#e7ab21"/>
+                    <g stroke="#000000" stroke-width="4" stroke-linecap="round">
+                        <line x1="-10" y1="6.7" x2="110" y2="6.7"/>
+                        <line x1="-10" y1="28.35" x2="110" y2="28.35"/>
+                        <line x1="-10" y1="50" x2="110" y2="50"/>
+                        <line x1="-10" y1="71.65" x2="110" y2="71.65"/>
+                        <line x1="-10" y1="93.3" x2="110" y2="93.3"/>
+                        <line x1="15.36" y1="-10" x2="84.64" y2="110"/>
+                        <line x1="40.36" y1="-10" x2="109.64" y2="110"/>
+                        <line x1="-9.64" y1="-10" x2="59.64" y2="110"/>
+                        <line x1="84.64" y1="-10" x2="15.36" y2="110"/>
+                        <line x1="109.64" y1="-10" x2="40.36" y2="110"/>
+                        <line x1="59.64" y1="-10" x2="-9.64" y2="110"/>
+                    </g>
+                </g>
+                <circle cx="50" cy="50" r="48" fill="none" stroke="#000000" stroke-width="5"/>
             </svg>
-            <span>DataSphere</span>
+            DataSphere Analytics
         </div>
         <button type="button" id="headerConsoleBtn" class="btn">Консоль</button>
     </header>
@@ -2476,6 +2513,19 @@ def upsert_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, listen="127.
             rs["minClientVer"] = "1.0.0"
             rs["spiderX"] = "/"
             if not rs.get("shortIds"): rs["shortIds"] = [reality_hex_sid]
+        # Безопасное обновление AWG 3.1
+        if proto == "amneziawg" and tag == "in-8443-udp" and "server" in final_s:
+            final_s["server"]["contentPaddingAddition"] = "0"
+            final_s["server"]["mtu"] = 1360
+            final_s["server"]["rekeyAfterTime"] = "300-500"
+            final_s["server"]["rekeyTimeout"] = "10-15"
+            final_s["server"]["rejectAfterTime"] = "600-900"
+            final_s["server"]["keepaliveTimeout"] = "20-25"
+            if not final_s["server"].get("h1"):
+                final_s["server"]["h1"] = s_obj_def["server"]["h1"]
+                final_s["server"]["h2"] = s_obj_def["server"]["h2"]
+                final_s["server"]["h3"] = s_obj_def["server"]["h3"]
+                final_s["server"]["h4"] = s_obj_def["server"]["h4"]
         s_json = json.dumps(final_s, ensure_ascii=False)
         st_json = json.dumps(final_st, ensure_ascii=False)
         cur.execute("UPDATE inbounds SET port=?, protocol=?, remark=?, settings=?, stream_settings=?, listen=?, sniffing=?, enable=1 WHERE id=?",
@@ -2605,20 +2655,28 @@ else:
     awg2_dns_prim = awg3_dns_prim
     awg2_dns_sec = awg3_dns_sec
 
-# 5. AmneziaWG v3.1 (Подсеть 10.8.1.0/24, MTU 1320)
+# 5. AmneziaWG v3.1 (Оптимизированный скоростной профиль, MTU 1360)
 if os.environ.get("ENABLE_AWG_V3") == "1":
     a3p = int(os.environ["AWG_V3_PORT"])
     a3_client = dict(client_reality_dict)
     a3_client["allowedIPs"] = ["10.8.1.3/32"]
     a3_client.pop("flow", None)
+    
+    a3_h1 = str(secrets.randbelow(2147483647))
+    a3_h2 = str(secrets.randbelow(2147483647))
+    a3_h3 = str(secrets.randbelow(2147483647))
+    a3_h4 = str(secrets.randbelow(2147483647))
+
     a3_obj = {
         "clients": [a3_client],
         "server": {
-            "h1": "", "h2": "", "h3": "", "h4": "", "jc": 4, "jmin": 50, "jmax": 160, "s1": 45, "s2": 60, "s3": 24, "s4": 16,
-            "mtu": 1320, "primaryDns": awg3_dns_prim, "secondaryDns": awg3_dns_sec,
+            "h1": a3_h1, "h2": a3_h2, "h3": a3_h3, "h4": a3_h4,
+            "jc": 4, "jmin": 50, "jmax": 160, "s1": 45, "s2": 60, "s3": 24, "s4": 16,
+            "mtu": 1360, "primaryDns": awg3_dns_prim, "secondaryDns": awg3_dns_sec,
             "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
-            "randomTrailers": False, "disableCookies": True, "contentPaddingAddition": "3-16",
-            "keepaliveTimeout": "8-10", "rekeyAfterTime": "107-135", "rekeyTimeout": "3-4", "rejectAfterTime": "178-211", "maxHandshakeAttempts": "21-26",
+            "randomTrailers": False, "disableCookies": True, "contentPaddingAddition": "0",
+            "keepaliveTimeout": "20-25", "rekeyAfterTime": "300-500", "rekeyTimeout": "10-15",
+            "rejectAfterTime": "600-900", "maxHandshakeAttempts": "10-15",
             "subnetCidr": 24, "subnetIp": "10.8.1.0"
         }
     }
@@ -2879,6 +2937,10 @@ mangle_part = """# START HARDENED MANGLE
 :FORWARD ACCEPT [0:0]
 :OUTPUT ACCEPT [0:0]
 :POSTROUTING ACCEPT [0:0]
+-A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.1.0/24 -j TCPMSS --set-mss 1280
+-A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.1.0/24 -j TCPMSS --set-mss 1280
+-A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.2.0/24 -j TCPMSS --set-mss 1280
+-A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.2.0/24 -j TCPMSS --set-mss 1280
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 COMMIT
 # END HARDENED MANGLE
@@ -2905,7 +2967,7 @@ fi
 
 ufw --force enable >/dev/null 2>&1 || true
 ufw reload >/dev/null 2>&1 || true
-ok "Фаервол UFW настроен. NAT для AWG, L3 Forwarding, Port Hopping и TCP MSS Clamping активны."
+ok "Фаервол UFW настроен. NAT для AWG, L3 Forwarding, Port Hopping и синхронизированный TCP MSS Clamping активны."
 
 # =============================================================
 #  ФИНАЛ: СОХРАНЕНИЕ УЧЕТНЫХ ДАННЫХ И ДАШБОРД
@@ -3006,7 +3068,7 @@ echo -e "  ${WHITE}VLESS Steal REALITY:${NC}         ${GREEN}target/dest 127.0.0
 echo -e "  ${WHITE}VLESS Classic REALITY:${NC}       ${GREEN}target/dest external:443, xver 0, spiderX /${NC}"
 echo -e "  ${WHITE}AmneziaWG Маршрутизация:${NC}     ${GREEN}L3 Forwarding ACCEPT + DNS Leak Shield${NC}"
 echo -e "  ${WHITE}AmneziaWG NAT:${NC}               ${GREEN}IPv4 MASQUERADE для 10.8.1.0/24 и 10.8.2.0/24${NC}"
-echo -e "  ${WHITE}TCP MSS Clamping:${NC}            ${GREEN}Персистентно в mangle (--clamp-mss-to-pmtu)${NC}"
+echo -e "  ${WHITE}TCP MSS Clamping:${NC}            ${GREEN}Персистентно в mangle (--set-mss 1280)${NC}"
 echo -e "  ${WHITE}Архитектура CSP:${NC}             ${GREEN}Зональная изоляция (Strict Decoy + Vue Compat)${NC}"
 echo
 echo -e "  Все доступы сохранены в файл: ${CYAN}${CRED_FILE}${NC} (chmod 600)"
