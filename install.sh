@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup Monoscript: Hardened Master Engine v3.2 (Single-IP Edition)
+# Production AutoSetup Monoscript: Hardened Master Engine v3.2.2 (Single-IP Ultra)
 # OS Hardening + BBR + Nginx L4 Stream + 3X-UI + Zero-Touch (Production Release)
 # Xray v26.7.28 Pinned + Native H2C xHTTP + ML-KEM-768 + XTLS Vision + AGH DoH
-# Multi-Tunnel UDP Engine: Hysteria 2 + AWG v3.2 + AWG v2.0 + Native WireGuard RFC
+# Multi-Tunnel UDP Engine: Hysteria 2 + AWG v3.2 + AWG v2.0 + Native WireGuard
 # Full Decoy Shield v4.0 Ultra (3D Canvas Sphere + Live Telemetry + Cluster CLI)
-# Pre-flight APT Sanitizer + Smoke Test ACME + Loose rp_filter + umask 022
+# Pre-flight APT Lock Polling + Smoke Test ACME + Loose rp_filter + Zonal CSP Fix
+# Autonomous prompt_port + Nounset Hardening + Hosts xHTTP Path Rectification
+# Base-10 IPv4 Normalization + Debian 13 / Trixie Resilient OS Identification
 # ==============================================================================
 # Совместимость: Ubuntu 22.04 / 24.04 / 26.04 & Debian 12 / 13
 # Режимы: Чистая установка (Clean Install) & Безопасное обновление (Safe Migration)
@@ -40,17 +42,33 @@ trap 'die "Скрипт аварийно прерван на строке $LINEN
 
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN}  Hardened Master Engine v3.2 Universal (Single-IP Ultra Edition)      ${NC}"
+echo -e "${GREEN}  Hardened Master Engine v3.2.2 Universal (Single-IP Ultra Edition)    ${NC}"
 echo -e "${CYAN}  Dual-Mode: Clean Setup / Safe Migration + Nginx L4 Native + 3X-UI  ${NC}"
 echo -e "${WHITE}  Xray Core v26.7.28 Pinned + Native H2C xHTTP + ML-KEM-768 + Vision  ${NC}"
 echo -e "${WHITE}  UDP Stack: Hysteria 2 + AWG v3.2 + AWG v2.0 + Native WireGuard RFC ${NC}"
 echo -e "${WHITE}  Decoy Shield v4.0 Ultra: 3D Geodesic Canvas + Sparklines + Web CLI ${NC}"
+echo -e "${WHITE}  APT Lock Polling + Base-10 IPv4 Normalization + Zonal CSP Fix      ${NC}"
 echo -e "${WHITE}  Поддержка: Ubuntu 22.04/24.04/26.04 & Debian 12/13                  ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 if [ "$EUID" -ne 0 ]; then
   die "Пожалуйста, запустите установщик с правами суперпользователя root (через sudo)."
 fi
+
+# Предварительная инициализация опциональных переменных для защиты от nounset (set -u)
+LE_EMAIL=""
+TARGET_SSH_PORT="22"
+ROOT_PASSWORD=""
+NEW_USERNAME=""
+NEW_USER_PASS=""
+HY2_PORT="443"
+AWG_V3_PORT="8443"
+AWG_V2_PORT="8444"
+WG_NATIVE_PORT="47443"
+AGH_DOMAIN=""
+AGH_USER="admin"
+AGH_PASS=""
+AGH_CLIENT_ID=""
 
 rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx /usr/share/keyrings/nginx-archive-keyring.gpg.tmp 2>/dev/null || true
 [ -f /usr/share/keyrings/nginx-archive-keyring.gpg ] && [ ! -s /usr/share/keyrings/nginx-archive-keyring.gpg ] && rm -f /usr/share/keyrings/nginx-archive-keyring.gpg 2>/dev/null || true
@@ -78,6 +96,8 @@ if [ -f /etc/os-release ]; then
         MAJOR_VER=$(echo "$OS_VER_ID" | cut -d. -f1)
         if [[ "$MAJOR_VER" =~ ^[0-9]+$ ]] && [ "$MAJOR_VER" -ge 12 ]; then
             OS_COMPATIBLE=1
+        elif [[ "$OS_CODENAME" =~ ^(bookworm|trixie|forky|sid)$ ]]; then
+            OS_COMPATIBLE=1
         fi
     fi
 
@@ -89,23 +109,42 @@ else
     die "Не удалось определить параметры текущего дистрибутива ОС."
 fi
 
+# Поллинг снятия блокировок пакетного менеджера фоновыми процессами ОС
+wait_for_apt_lock() {
+    local max_wait=120
+    local count=0
+    while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+        if [ "$count" -ge "$max_wait" ]; then
+            warn "Блокировка APT удерживается более ${max_wait}с. Попытка продолжить..."
+            break
+        fi
+        [ "$count" -eq 0 ] && log "Ожидание завершения фонового обновления пакетов ОС..."
+        sleep 2
+        count=$((count + 2))
+    done
+}
+
 log "Первичная подготовка системных утилит..."
+wait_for_apt_lock
 apt-get update -q >/dev/null 2>&1 || true
-apt-get install -y curl bc bind9-dnsutils iproute2 openssl gawk python3 python3-bcrypt xxd unzip jq sqlite3 bsdextrautils gnupg dirmngr -q >/dev/null 2>&1 || true
+wait_for_apt_lock
+apt-get install -y curl bc bind9-dnsutils iproute2 openssl gawk python3 python3-bcrypt xxd unzip jq sqlite3 bsdextrautils gnupg dirmngr psmisc -q >/dev/null 2>&1 || true
 ok "Базовые утилиты готовы к работе."
 
 validate_port() {
-    [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 22 ] && [ "$1" -le 65535 ]
+    local p="${1:-}"
+    [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -ge 22 ] && [ "$p" -le 65535 ]
 }
 
+# Валидация IPv4 с нормализацией десятичной базы октетов
 validate_ipv4() {
-    local ip="$1"
+    local ip="${1:-}"
     local rx='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
     if [[ "$ip" =~ $rx ]]; then
         local IFS='.'
         read -r -a octets <<< "$ip"
-        [ "${octets[0]}" -le 255 ] && [ "${octets[1]}" -le 255 ] && \
-        [ "${octets[2]}" -le 255 ] && [ "${octets[3]}" -le 255 ]
+        [ "$((10#${octets[0]}))" -le 255 ] && [ "$((10#${octets[1]}))" -le 255 ] && \
+        [ "$((10#${octets[2]}))" -le 255 ] && [ "$((10#${octets[3]}))" -le 255 ]
     else
         return 1
     fi
@@ -120,26 +159,49 @@ if [ -z "$SSH_ACTIVE_PORT" ] || ! validate_port "$SSH_ACTIVE_PORT"; then
     SSH_ACTIVE_PORT=$(ss -tlnp 2>/dev/null | grep -E 'sshd|ssh' | grep -vE '127\.0\.0\.1|::1' | awk '{print $4}' | awk -F: '{print $NF}' | grep -vE '^60[0-9]{2}$' | sort -n | tail -n1 || echo "")
 fi
 SSH_ACTIVE_PORT="${SSH_ACTIVE_PORT:-22}"
+TARGET_SSH_PORT="$SSH_ACTIVE_PORT"
 
 prompt_default() {
     local prompt_text="$1"
     local default_val="$2"
     local var_name="$3"
-    local input_val
-    read -rp "$(echo -e "${prompt_text} [${GREEN}${default_val}${NC}]: ")" input_val
+    local input_val=""
+    echo -en "${prompt_text} [${GREEN}${default_val}${NC}]: "
+    read -r input_val
     declare -g "$var_name=${input_val:-$default_val}"
+}
+
+prompt_port() {
+    local prompt_text="$1"
+    local default_val="$2"
+    local var_name="$3"
+    local input_val=""
+    local p_val=""
+    while true; do
+        echo -en "${prompt_text} [${GREEN}${default_val}${NC}]: "
+        read -r input_val
+        p_val="${input_val:-$default_val}"
+        p_val=$(echo "$p_val" | tr -d '[:space:]')
+        if validate_port "$p_val"; then
+            declare -g "$var_name=$p_val"
+            break
+        fi
+        warn "Недопустимый номер порта: '$p_val'. Введите целое число от 22 до 65535."
+    done
 }
 
 prompt_yes_no() {
     local prompt_text="$1"
     local default_ans="${2:-y}"
-    local ans
+    local ans=""
     while true; do
         if [ "$default_ans" = "y" ]; then
-            read -rp "$(echo -e "${prompt_text} [${GREEN}Y/n${NC}]: ")" ans
+            echo -en "${prompt_text} [${GREEN}Y/n${NC}]: "
+            read -r ans
             ans="${ans:-y}"
         else
-            read -rp "$(echo -e "${prompt_text} [${YELLOW}y/N${NC}]: ")" ans
+            echo -en "${prompt_text} [${YELLOW}y/N${NC}]: "
+            read -r ans
             ans="${ans:-n}"
         fi
         case "${ans,,}" in
@@ -151,8 +213,8 @@ prompt_yes_no() {
 }
 
 validate_path_segment() {
-    local val="$1"
-    local name="$2"
+    local val="${1:-}"
+    local name="${2:-}"
     if [[ ! "$val" =~ ^[a-zA-Z0-9_/-]+$ ]]; then
         die "Параметр $name ('$val') содержит недопустимые символы. Используйте латиницу, цифры, дефис и слэши."
     fi
@@ -322,7 +384,8 @@ EXT_SNI_LIST=()
 REALITY_FALLBACK_PORT="9443"
 
 while true; do
-    read -rp "Введите контактный Email (для Let's Encrypt SSL): " LE_EMAIL
+    echo -en "Введите контактный Email (для Let's Encrypt SSL): "
+    read -r LE_EMAIL
     LE_EMAIL=$(echo "$LE_EMAIL" | tr -d '[:space:]')
     if [[ -z "$LE_EMAIL" ]] || [[ "$LE_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
         break
@@ -339,20 +402,12 @@ prompt_yes_no "Блокировать входящие ICMP (Ping) запрос�
 
 echo -e "Текущий активный порт SSH: ${GREEN}${SSH_ACTIVE_PORT}${NC}"
 if prompt_yes_no "Сменить порт SSH на нестандартный?" "n"; then
-    while true; do
-        read -rp "Введите новый порт SSH (1024-65535): " CUSTOM_SSH
-        if validate_port "$CUSTOM_SSH"; then
-            TARGET_SSH_PORT="$CUSTOM_SSH"
-            break
-        fi
-        warn "Недопустимый порт."
-    done
+    prompt_port "Введите новый порт SSH (1024-65535)" "2222" TARGET_SSH_PORT
 else
     TARGET_SSH_PORT="$SSH_ACTIVE_PORT"
 fi
 
 CHANGE_ROOT_PASS=0
-ROOT_PASSWORD=""
 if [ "$INSTALL_MODE" = "1" ]; then
     if prompt_yes_no "Сменить пароль root?" "n"; then
         CHANGE_ROOT_PASS=1
@@ -361,8 +416,6 @@ if [ "$INSTALL_MODE" = "1" ]; then
 fi
 
 CREATE_USER=0
-NEW_USERNAME=""
-NEW_USER_PASS=""
 if [ "$INSTALL_MODE" = "1" ]; then
     if prompt_yes_no "Создать непривилегированного пользователя с sudo?" "n"; then
         CREATE_USER=1
@@ -392,13 +445,13 @@ if [ -n "$EXISTING_DB_PATH" ]; then
     DETECTED_SUB_PATH="${DETECTED_SUB_PATH%/}"
 fi
 
-prompt_default "Внутренний локальный порт панели 3X-UI" "${DETECTED_PANEL_PORT:-10443}" PANEL_PORT
+prompt_port "Внутренний локальный порт панели 3X-UI" "${DETECTED_PANEL_PORT:-10443}" PANEL_PORT
 prompt_default "Секретный URI-путь к веб-панели (без слэшей)" "${DETECTED_PANEL_PATH:-my-3x-panel}" RAW_PATH
 validate_path_segment "$RAW_PATH" "URI панели"
 PANEL_PATH="/${RAW_PATH#/}"
 PANEL_PATH="${PANEL_PATH%/}/"
 
-prompt_default "Внутренний порт сервера подписок 3X-UI" "${DETECTED_SUB_PORT:-55443}" SUB_PORT
+prompt_port "Внутренний порт сервера подписок 3X-UI" "${DETECTED_SUB_PORT:-55443}" SUB_PORT
 prompt_default "Секретный URI-путь подписок (без слэшей)" "${DETECTED_SUB_PATH:-my-post-key}" RAW_SUB_PATH
 validate_path_segment "$RAW_SUB_PATH" "URI подписок"
 SUB_PATH="/${RAW_SUB_PATH#/}"
@@ -407,7 +460,7 @@ SUB_PATH="${SUB_PATH%/}/"
 SUB_JSON_PATH="${SUB_PATH}sub-json/"
 SUB_CLASH_PATH="/sub-clash/"
 
-prompt_default "Внутренний порт инбаунда VLESS xHTTP (Native H2 Stream-One)" "50443" XHTTP_STREAM_PORT
+prompt_port "Внутренний порт инбаунда VLESS xHTTP (Native H2 Stream-One)" "50443" XHTTP_STREAM_PORT
 prompt_default "Секретный URI-путь для xHTTP" "Stream-One-Path" RAW_XHTTP_STREAM_PATH
 validate_path_segment "$RAW_XHTTP_STREAM_PATH" "URI xHTTP"
 XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
@@ -431,11 +484,7 @@ prompt_yes_no "Включить Steal-Oneself REALITY (Кража у своег�
 declare -A STEAL_PORT_DOMAINS
 if [ "$ENABLE_STEAL" -eq 1 ]; then
     while true; do
-        prompt_default "  Локальный порт Xray для Steal-Oneself" "45443" PORT_VAL
-        while [[ ! "$PORT_VAL" =~ ^[0-9]+$ ]] || [ "$PORT_VAL" -le 0 ] || [ "$PORT_VAL" -gt 65535 ]; do
-            warn "  Некорректный номер порта."
-            prompt_default "  Локальный порт Xray для Steal-Oneself" "45443" PORT_VAL
-        done
+        prompt_port "  Локальный порт Xray для Steal-Oneself" "45443" PORT_VAL
 
         if [[ ! " ${STEAL_PORTS_LIST[*]:-} " == *" ${PORT_VAL} "* ]]; then
             STEAL_PORTS_LIST+=("$PORT_VAL")
@@ -451,7 +500,8 @@ if [ "$ENABLE_STEAL" -eq 1 ]; then
             if [ -n "$local_def" ]; then
                 prompt_default "    Собственный поддомен для порта $PORT_VAL" "$local_def" S_DOM
             else
-                read -rp "    Собственный поддомен для порта $PORT_VAL (Enter для завершения): " S_DOM
+                echo -en "    Собственный поддомен для порта $PORT_VAL (Enter для завершения): "
+                read -r S_DOM
             fi
             S_DOM=$(echo "$S_DOM" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
 
@@ -491,11 +541,7 @@ prompt_yes_no "Включить Classic External REALITY (Сторонний д�
 declare -A CLASSIC_PORT_SNIS
 if [ "$ENABLE_CLASSIC" -eq 1 ]; then
     while true; do
-        prompt_default "  Локальный порт Xray для Classic REALITY" "46443" PORT_VAL
-        while [[ ! "$PORT_VAL" =~ ^[0-9]+$ ]] || [ "$PORT_VAL" -le 0 ] || [ "$PORT_VAL" -gt 65535 ]; do
-            warn "  Некорректный номер порта."
-            prompt_default "  Локальный порт Xray для Classic REALITY" "46443" PORT_VAL
-        done
+        prompt_port "  Локальный порт Xray для Classic REALITY" "46443" PORT_VAL
 
         if [[ ! " ${CLASSIC_PORTS_LIST[*]:-} " == *" ${PORT_VAL} "* ]]; then
             CLASSIC_PORTS_LIST+=("$PORT_VAL")
@@ -512,7 +558,8 @@ if [ "$ENABLE_CLASSIC" -eq 1 ]; then
             if [ -n "$local_def" ]; then
                 prompt_default "    Внешний SNI маскировки" "$local_def" C_SNI
             else
-                read -rp "    Внешний SNI маскировки (Enter для завершения): " C_SNI
+                echo -en "    Внешний SNI маскировки (Enter для завершения): "
+                read -r C_SNI
             fi
             C_SNI=$(echo "$C_SNI" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
 
@@ -544,7 +591,8 @@ fi
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 5: Дополнительные SSL-домены ---${NC}"
 while true; do
-    read -rp "Добавить собственный домен для выпуска SSL-сертификата? (Enter для завершения): " EXTRA_DOM
+    echo -en "Добавить собственный домен для выпуска SSL-сертификата? (Enter для завершения): "
+    read -r EXTRA_DOM
     EXTRA_DOM=$(echo "$EXTRA_DOM" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
     if [ -z "$EXTRA_DOM" ]; then
         break
@@ -567,7 +615,7 @@ prompt_yes_no "Установить Hysteria 2 (UDP)?" "y" && ENABLE_HY2=1 || EN
 
 ENABLE_HY2_HOP=0
 if [ "$ENABLE_HY2" -eq 1 ]; then
-    prompt_default "  Внешний UDP-порт для Hysteria 2" "443" HY2_PORT
+    prompt_port "  Внешний UDP-порт для Hysteria 2" "443" HY2_PORT
     echo -e "  ${WHITE}Режим работы портов Hysteria 2:${NC}"
     echo -e "    1) ${GREEN}Одиночный порт :${HY2_PORT}/udp${NC}"
     echo -e "    2) ${GREEN}Port Hopping :${HY2_PORT} + диапазон 20000-50000/udp${NC}"
@@ -583,17 +631,17 @@ fi
 
 prompt_yes_no "Установить AmneziaWG v3.2 (UDP)?" "y" && ENABLE_AWG_V3=1 || ENABLE_AWG_V3=0
 if [ "$ENABLE_AWG_V3" -eq 1 ]; then
-    prompt_default "  Внешний UDP-порт для AmneziaWG v3.2" "8443" AWG_V3_PORT
+    prompt_port "  Внешний UDP-порт для AmneziaWG v3.2" "8443" AWG_V3_PORT
 fi
 
 prompt_yes_no "Установить AmneziaWG v2.0 / Legacy (UDP)?" "y" && ENABLE_AWG_V2=1 || ENABLE_AWG_V2=0
 if [ "$ENABLE_AWG_V2" -eq 1 ]; then
-    prompt_default "  Внешний UDP-порт для AmneziaWG v2.0" "8444" AWG_V2_PORT
+    prompt_port "  Внешний UDP-порт для AmneziaWG v2.0" "8444" AWG_V2_PORT
 fi
 
 prompt_yes_no "Установить чистый Native WireGuard RFC (UDP, MTU 1420 / MSS 1380)?" "y" && ENABLE_WG_NATIVE=1 || ENABLE_WG_NATIVE=0
 if [ "$ENABLE_WG_NATIVE" -eq 1 ]; then
-    prompt_default "  Внешний UDP-порт для Native WireGuard RFC" "47443" WG_NATIVE_PORT
+    prompt_port "  Внешний UDP-порт для Native WireGuard RFC" "47443" WG_NATIVE_PORT
 fi
 
 echo
@@ -643,24 +691,28 @@ echo -e "${CYAN}================================================================
 rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx 2>/dev/null || true
 
 log "Обновление пакетных репозиториев..."
+wait_for_apt_lock
 apt-get update -q
 
 if [ "${DO_SYS_UPGRADE:-0}" -eq 1 ]; then
     log "Полное обновление пакетов системы..."
+    wait_for_apt_lock
     apt-get upgrade -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
     apt-get autoremove -y -q
     apt-get autoclean -y -q
 fi
 
 log "Установка системного набора утилит..."
+wait_for_apt_lock
 CORE_PKGS=(
     curl wget bash sudo systemd openssl gawk lsb-release gnupg bind9-dnsutils
     socat cron ufw iptables iproute2 tar apache2-utils fail2ban python3 python3-systemd
-    python3-bcrypt ca-certificates build-essential jq tmux net-tools bc xxd unzip sqlite3 bsdextrautils dirmngr
+    python3-bcrypt ca-certificates build-essential jq tmux net-tools bc xxd unzip sqlite3 bsdextrautils dirmngr psmisc
 )
 apt-get install -y "${CORE_PKGS[@]}" -q || true
 
 if [ "${INSTALL_EXTRA_UTILS:-0}" -eq 1 ]; then
+    wait_for_apt_lock
     apt-get install -y htop iperf3 iftop tcpdump mtr-tiny ncdu vnstat openssh-client -q || true
     apt-get install -y btop -q 2>/dev/null || true
 fi
@@ -898,6 +950,7 @@ Pin: origin nginx.org
 Pin-Priority: 900
 EOF
 
+    wait_for_apt_lock
     if apt-get update -q -o Dir::Etc::sourcelist="sources.list.d/nginx.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1; then
         USE_OFFICIAL_NGINX_REPO=1
         ok "Репозиторий Nginx Mainline ($NGINX_REPO_CODENAME) верифицирован."
@@ -910,10 +963,14 @@ fi
 if [ "$USE_OFFICIAL_NGINX_REPO" -eq 0 ]; then
     log "Установка Nginx из системного репозитория $OS_ID..."
     rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx
+    wait_for_apt_lock
     apt-get update -q
+    wait_for_apt_lock
     apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx libnginx-mod-stream 2>/dev/null || apt-get install -y -q nginx
 else
+    wait_for_apt_lock
     apt-get update -q
+    wait_for_apt_lock
     apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
 fi
 
@@ -969,6 +1026,7 @@ ok "Pre-flight Loopback Smoke Test успешно пройден: Nginx отда
 
 if [ "$SSL_ENGINE_CHOICE" = "1" ]; then
     log "Настройка Certbot через системный APT..."
+    wait_for_apt_lock
     apt-get install -y certbot -q
 
     mkdir -p /etc/letsencrypt
@@ -1329,9 +1387,6 @@ cat << 'EOF' > /var/www/html/assets/js/datasphere.js
 "use strict";
 
 document.addEventListener("DOMContentLoaded", () => {
-    // -------------------------------------------------------------
-    // 1. 3D TOPOLOGICAL GEODESIC SPHERE CANVAS ENGINE
-    // -------------------------------------------------------------
     const sCanvas = document.getElementById("sphereCanvas");
     if (sCanvas) {
         const ctx = sCanvas.getContext("2d");
@@ -1447,9 +1502,6 @@ document.addEventListener("DOMContentLoaded", () => {
         requestAnimationFrame(renderSphere);
     }
 
-    // -------------------------------------------------------------
-    // 2. LIVE THROUGHPUT CANVAS CHART ENGINE (100 Gbps SPARKLINE)
-    // -------------------------------------------------------------
     const cCanvas = document.getElementById("chartCanvas");
     if (cCanvas) {
         const cCtx = cCanvas.getContext("2d");
@@ -1516,9 +1568,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }, 1200);
     }
 
-    // -------------------------------------------------------------
-    // 3. WEB CLI TERMINAL & MODAL DIALOGS
-    // -------------------------------------------------------------
     const termLogs = document.getElementById("terminalLogs");
     const cliInput = document.getElementById("cliInput");
     const authModal = document.getElementById("authModal");
@@ -1574,7 +1623,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("connectNodeBtn")?.addEventListener("click", openAuth);
     document.getElementById("authModalClose")?.addEventListener("click", closeModals);
     document.getElementById("detailModalClose")?.addEventListener("click", closeModals);
-    document.getElementById("detailModalOk")?.addEventListener("click", closeModals);
+    document.getElementById("detailModalOk")?.addEventListener("click", closeDetailModal);
 
     document.getElementById("netStatusBtn")?.addEventListener("click", () => {
         showToast("Сетевой кластер DataSphere", "Anycast-маршрутизация активна: RTT < 1.2 ms.");
@@ -1806,6 +1855,14 @@ if [ "$USE_OFFICIAL_NGINX_REPO" -eq 0 ] && [ -d /etc/nginx/modules-enabled ]; th
     MODULE_LOAD_LINE="include /etc/nginx/modules-enabled/*.conf;"
 fi
 
+# Fail-Safe санитайзер портов перед генерацией nginx.conf
+PANEL_PORT="${PANEL_PORT//[!0-9]/}"
+SUB_PORT="${SUB_PORT//[!0-9]/}"
+XHTTP_STREAM_PORT="${XHTTP_STREAM_PORT//[!0-9]/}"
+: "${PANEL_PORT:=10443}"
+: "${SUB_PORT:=55443}"
+: "${XHTTP_STREAM_PORT:=50443}"
+
 cat << EOF > /etc/nginx/nginx.conf
 user $NGINX_USER;
 worker_processes auto;
@@ -2029,10 +2086,12 @@ server {
         proxy_set_header Connection \$connection_upgrade;
     }
 
-    # СЕРВЕР ПОДПИСОК
+    # СЕРВЕР ПОДПИСОК (С РАЗРЕШЕНИЕМ INLINE-SCRIPTS ДЛЯ SUBPAGE)
     location = ${SUB_PATH%/} { return 301 ${SUB_PATH}; }
     location ^~ ${SUB_PATH} {
         proxy_hide_header Content-Security-Policy;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'self';" always;
+
         limit_req zone=subs burst=60 nodelay;
         proxy_pass http://sub_backend;
         proxy_http_version 1.1;
@@ -2041,6 +2100,8 @@ server {
     }
     location ~* ^/(sub|json|clash)/ {
         proxy_hide_header Content-Security-Policy;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'self';" always;
+
         limit_req zone=subs burst=60 nodelay;
         proxy_pass http://sub_backend;
         proxy_http_version 1.1;
@@ -2415,7 +2476,7 @@ settings_data = {
     "subKeyFile": "",
     "subUpdates": "12",
     "subEncrypt": "true",
-    "subShowInfo": "false",
+    "subShowInfo": "true",
     "subJsonEnable": "true",
     "subClashEnable": "true",
     "subRemarkModel": "{{INBOUND}}-{{EMAIL}}|\U0001F4CA{{TRAFFIC}}|\u23F3{{EXP_TIME}}",
@@ -2433,7 +2494,7 @@ settings_data = {
 for k, v in settings_data.items():
     cur.execute("SELECT id FROM settings WHERE key = ?", (k,))
     if cur.fetchone():
-        if install_mode == "1" or k in ["webListen", "subListen", "subPath", "subURI", "subJsonPath", "subJsonURI", "subClashPath", "subClashURI", "trustedProxyCIDRs", "subJsonAlwaysArray", "subClashAutoDetect"]:
+        if install_mode == "1" or k in ["webListen", "subListen", "subPath", "subURI", "subJsonPath", "subJsonURI", "subClashPath", "subClashURI", "trustedProxyCIDRs", "subJsonAlwaysArray", "subClashAutoDetect", "subShowInfo", "subEnable"]:
             cur.execute("UPDATE settings SET value = ? WHERE key = ?", (str(v), k))
     else:
         cur.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
@@ -2503,8 +2564,7 @@ tpl_config = {
 
 cur.execute("SELECT id FROM settings WHERE key = 'xrayTemplateConfig'")
 if cur.fetchone():
-    if install_mode == "1":
-        cur.execute("UPDATE settings SET value = ? WHERE key = 'xrayTemplateConfig'", (json.dumps(tpl_config),))
+    cur.execute("UPDATE settings SET value = ? WHERE key = 'xrayTemplateConfig'", (json.dumps(tpl_config),))
 else:
     cur.execute("INSERT INTO settings (key, value) VALUES ('xrayTemplateConfig', ?)", (json.dumps(tpl_config),))
 
@@ -2512,7 +2572,7 @@ test_email = "Test"
 test_sub_id = "SUB_Test"
 test_uuid = str(uuid.uuid4())
 test_password = secrets.token_hex(8)
-test_auth = secrets.token_hex(8)
+test_auth = test_password
 reality_hex_sid = secrets.token_hex(8)
 
 def_r_priv, def_r_pub = gen_reality_keypair()
@@ -2547,6 +2607,11 @@ def upsert_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, listen="127.
         final_st = json.loads(row[2]) if row[2] else {}
         if not final_s.get("clients") and "clients" in s_obj_def:
             final_s["clients"] = s_obj_def.get("clients", [])
+        if "clients" in final_s and isinstance(final_s["clients"], list):
+            for c in final_s["clients"]:
+                pwd = c.get("password")
+                if pwd and c.get("auth") != pwd:
+                    c["auth"] = pwd
         if proto == "vless" and "decryption" in s_obj_def:
             final_s["decryption"] = s_obj_def["decryption"]
             final_s["encryption"] = s_obj_def.get("encryption", "")
@@ -2670,6 +2735,8 @@ if os.environ.get("ENABLE_HY2") == "1":
     ssl_dir = os.environ["SSL_BASE_DIR"]
     hy_client = dict(client_reality_dict)
     hy_client.pop("flow", None)
+    hy_client["auth"] = test_password
+    hy_client["password"] = test_password
     h_obj = {"clients": [hy_client], "version": 2}
     ht_obj = {
         "network": "hysteria",
@@ -2782,7 +2849,7 @@ if "clients" in tables:
     if not cl_row and install_mode == "1":
         client_data_map = {
             "email": test_email, "sub_id": test_sub_id, "uuid": test_uuid, "password": test_password,
-            "auth": test_auth, "flow": "xtls-rprx-vision", "security": "auto", "reverse": "",
+            "auth": test_password, "flow": "xtls-rprx-vision", "security": "auto", "reverse": "",
             "wg_private_key": def_wg_c_priv, "wg_public_key": def_wg_c_pub, "wg_allowed_ips": "10.8.1.3/32, 10.8.2.3/32, 10.8.3.3/32",
             "wg_pre_shared_key": "", "wg_keep_alive": 25, "wg_forwarded_ports": "", "secret": "",
             "ad_tag": "", "limit_ip": 0, "limit_hwid": 0, "total_gb": 0, "expiry_time": 0,
@@ -2847,13 +2914,13 @@ cur.execute("""
 cur.execute("PRAGMA table_info(hosts)")
 active_cols = {r[1] for r in cur.fetchall()}
 
-def add_host_entry(gid, ib_id, remark, addr, port, sec, sni="", alpn="", fp="", sort_order=0):
+def add_host_entry(gid, ib_id, remark, addr, port, sec, sni="", path="", alpn="", fp="", sort_order=0):
     col_candidates = {
         "group_id": gid, "groupId": gid,
         "inbound_id": ib_id, "inboundId": ib_id,
         "sort_order": sort_order, "sortOrder": sort_order,
         "remark": remark, "address": addr, "port": port, "security": sec,
-        "sni": sni, "host_header": "", "hostHeader": "", "path": "",
+        "sni": sni, "host_header": "", "hostHeader": "", "path": path,
         "alpn": alpn, "fingerprint": fp, "allow_insecure": 0, "allowInsecure": 0,
         "is_disabled": 0, "isDisabled": 0, "is_hidden": 0, "isHidden": 0,
         "tags": "", "ech_config_list": "", "mux_params": "", "sockopt_params": "",
@@ -2876,7 +2943,11 @@ if install_mode == "1":
 
     if ib3_id is not None:
         alpn_str = json.dumps(["h2"])
-        add_host_entry(group_xhttp_uuid, ib3_id, "xHTTP_H2", domain, 443, "tls", sni=domain, alpn=alpn_str, fp="firefox", sort_order=2)
+        add_host_entry(group_xhttp_uuid, ib3_id, "xHTTP_H2", domain, 443, "tls", sni=domain, path=xhttp_path, alpn=alpn_str, fp="firefox", sort_order=2)
+elif install_mode == "2":
+    cur.execute("DELETE FROM hosts WHERE inbound_id IN (SELECT id FROM inbounds WHERE protocol IN ('hysteria', 'amneziawg', 'wireguard'))")
+    if ib3_id is not None:
+        cur.execute("UPDATE hosts SET path = ? WHERE inbound_id = ?", (xhttp_path, ib3_id))
 
 conn.commit()
 conn.close()
@@ -3051,15 +3122,15 @@ ok "Фаервол UFW настроен. MSS Clamping (1320/1380) активны
 # =============================================================
 #  ФИНАЛ: СОХРАНЕНИЕ УЧЕТНЫХ ДАННЫХ И ДАШБОРД
 # =============================================================
-HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT}"
+HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT:-443}"
 if [ "${ENABLE_HY2_HOP:-0}" -eq 1 ]; then
-    HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT},20000-50000"
+    HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT:-443},20000-50000"
 fi
 
 CRED_FILE="/root/vpn_credentials.txt"
 cat << EOF > "$CRED_FILE"
 =====================================================================
-  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Monoscript v3.2 Universal Single-IP)
+  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Monoscript v3.2.2 Single-IP Ultra)
   ОС: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
   Ядро Xray-core: ${DETECTED_XRAY_VER} (Pinned)
   Режим:          $([ "$INSTALL_MODE" = "2" ] && echo "Safe Migration" || echo "Clean Setup")
@@ -3096,7 +3167,7 @@ $([ "${ENABLE_HY2:-0}" -eq 1 ] && echo "[ HYSTERIA 2 ]
 Подключение:           ${HY2_REPORT_LINE}
 ")
 $([ "${ENABLE_WG_NATIVE:-0}" -eq 1 ] && echo "[ NATIVE WIREGUARD RFC ]
-Порт / Хост:           ${PRIMARY_DOMAIN}:${WG_NATIVE_PORT}
+Порт / Хост:           ${PRIMARY_DOMAIN}:${WG_NATIVE_PORT:-47443}
 Конфиг файл (.conf):   /root/wireguard-client.conf
 MTU / Clamping:        MTU 1420 | MSS 1380
 ")
@@ -3113,7 +3184,7 @@ chmod 600 "$CRED_FILE"
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА В РЕЖИМЕ SINGLE-IP (v3.2)!               ${NC}"
+echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА В РЕЖИМЕ SINGLE-IP (v3.2.2 ULTRA)!       ${NC}"
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Панель управления 3X-UI:     ${CYAN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 if [ "$INSTALL_MODE" = "1" ]; then
