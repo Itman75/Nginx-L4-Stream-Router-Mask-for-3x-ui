@@ -1,4 +1,4 @@
-# 🛡️ Hardened Master Engine v3.1 Universal (Production Hardened Release)
+# 🛡️ Hardened Master Engine v3.2.2 (Single-IP Ultra)
 ### Монолитный автоустановщик: OS Hardening + BBR + Nginx L4/L7 Stream + 3X-UI + Xray v26.7.28 Pinned + VLESS xHTTP (Native H2C) + ML-KEM-768 + Multi-Port REALITY + Dynamic AGH DoH + Zonal CSP + Hardened AWG L3
 
 [![OS: Ubuntu & Debian](https://img.shields.io/badge/OS-Ubuntu%2022.04--26.04%20%7C%20Debian%2012--13-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://ubuntu.com)
