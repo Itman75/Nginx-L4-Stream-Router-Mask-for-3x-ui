@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup Monoscript: Hardened Master Engine v3.3.5 Universal
+# Production AutoSetup Monoscript: Hardened Master Engine v3.3.4 Universal
 # Architecture: Single-IP Ultra Enhanced + Native Kernel AmneziaWG (Bare-Metal)
 # Zero-Leak Frontend: DataSphere SSO In-Memory Gateway + Stealth Admin Hub
 # OS Hardening + BBR + somaxconn + Nginx L4 Stream + 3X-UI + Xray v26.7.28 Pinned
@@ -56,7 +56,7 @@ trap 'cleanup $LINENO' ERR INT TERM
 
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN}  Hardened Master Engine v3.3.5 (Single-IP Ultra + Native AmneziaWG)  ${NC}"
+echo -e "${GREEN}  Hardened Master Engine v3.3.4 (Single-IP Ultra + Native AmneziaWG)  ${NC}"
 echo -e "${CYAN}  Dual-Mode: Clean Setup / Safe Migration + Nginx L4 Native + 3X-UI  ${NC}"
 echo -e "${WHITE}  Xray Core v26.7.28 Pinned + Native H2C xHTTP + ML-KEM-768 + Vision  ${NC}"
 echo -e "${WHITE}  UDP Stack: Hysteria 2 + AWG v3.2 + AWG v2.0 + 3X WireGuard         ${NC}"
@@ -3185,7 +3185,7 @@ fi
 CRED_FILE="/root/vpn_credentials.txt"
 cat << EOF > "$CRED_FILE"
 =====================================================================
-  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Single-IP Ultra Enhanced v3.3.5)
+  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Single-IP Ultra Enhanced v3.3.4)
   ОС: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
   Ядро Xray-core: ${DETECTED_XRAY_VER} (Pinned)
   Режим:          $([ "$INSTALL_MODE" = "2" ] && echo "Safe Migration" || echo "Clean Setup")
@@ -3265,7 +3265,7 @@ chmod 600 "$CRED_FILE"
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА В РЕЖИМЕ SINGLE-IP (v3.3.5 ULTRA)!       ${NC}"
+echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА В РЕЖИМЕ SINGLE-IP (v3.3.4 ULTRA)!       ${NC}"
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Сайт-маскировка DataSphere:  ${CYAN}https://${PRIMARY_DOMAIN}/${NC}"
 echo -e "  Скрытый SSO Hub:             ${WHITE}Кнопка «Консоль» в шапке сайта${NC}"
