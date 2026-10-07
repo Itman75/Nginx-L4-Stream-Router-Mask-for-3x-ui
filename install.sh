@@ -3413,26 +3413,23 @@ if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
         wait_for_apt_lock
         apt-get install -y amneziawg-dkms amneziawg-tools -q >/dev/null 2>&1 || true
     else
-        log "Сборка DKMS AmneziaWG для Debian 12 ($OS_CODENAME)..."
+       log "Сборка DKMS AmneziaWG для Debian ($OS_CODENAME)..."
         wait_for_apt_lock
-        apt-get install -y "linux-headers-$(uname -r)" git dkms wireguard-tools -q >/dev/null 2>&1 || true
-        
-        AWG_BUILD_DIR="/usr/src/amneziawg-1.0.0"
-        if [ ! -d "$AWG_BUILD_DIR" ]; then
-            git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git "$AWG_BUILD_DIR" 2>/dev/null || true
-            if [ -d "$AWG_BUILD_DIR" ]; then
-                cat << 'EOF_DKMS' > "$AWG_BUILD_DIR/dkms.conf"
-PACKAGE_NAME="amneziawg"
-PACKAGE_VERSION="1.0.0"
-BUILT_MODULE_NAME[0]="amneziawg"
-DEST_MODULE_LOCATION[0]="/kernel/net"
-AUTOINSTALL="yes"
-EOF_DKMS
-                dkms add -m amneziawg -v 1.0.0 2>/dev/null || true
-                dkms build -m amneziawg -v 1.0.0 2>/dev/null || true
-                dkms install -m amneziawg -v 1.0.0 2>/dev/null || true
-            fi
+        apt-get install -y build-essential "linux-headers-$(uname -r)" git dkms wireguard-tools -q >/dev/null 2>&1 || true
+
+        dkms remove amneziawg/1.0.0 --all 2>/dev/null || true
+        rm -rf /usr/src/amneziawg-1.0.0 /var/lib/dkms/amneziawg/1.0.0 /tmp/awg-kmod-src
+
+        git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git /tmp/awg-kmod-src 2>/dev/null || true
+        if [ -d "/tmp/awg-kmod-src/src" ]; then
+            make -C /tmp/awg-kmod-src/src dkms-install >/dev/null 2>&1 || true
+            dkms add -m amneziawg -v 1.0.0 2>/dev/null || true
+            dkms build -m amneziawg -v 1.0.0 >/dev/null 2>&1 || true
+            dkms install -m amneziawg -v 1.0.0 >/dev/null 2>&1 || true
+            rm -rf /tmp/awg-kmod-src
         fi
+        echo "amneziawg" > /etc/modules-load.d/amneziawg.conf
+        modprobe amneziawg 2>/dev/null || true
 
         TOOLS_BUILD_DIR="/tmp/awg-tools-build"
         rm -rf "$TOOLS_BUILD_DIR"
