@@ -6,7 +6,7 @@
 # Zero-Leak Frontend: DataSphere SSO In-Memory Gateway + Stealth Admin Hub
 # OS Hardening + BBR + somaxconn + Nginx L4 Stream + 3X-UI + Xray v26.7.28 Pinned
 # VLESS xHTTP (Native H2C Stream-One) + ML-KEM-768 + Multi-Port REALITY + Stub 11443
-# Multi-Tunnel UDP Engine: Hysteria 2 + AWG v3.2 + AWG v2.0 + 3X WireGuard
+# Multi-Tunnel UDP Engine: Hysteria 2 + AWG v3.2 + AWG v2.0 + 3X WireGuard + Native Kernel AmneziaWG (Bare-Metal)
 # Zero-Placeholder Guarantee: Production-Grade Monolithic Script
 # ==============================================================================
 
