@@ -84,6 +84,7 @@ AGH_DOMAIN=""
 AGH_USER="admin"
 AGH_PASS=""
 AGH_CLIENT_ID=""
+MODULE_LOAD_LINE=""
 
 rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx /usr/share/keyrings/nginx-archive-keyring.gpg.tmp 2>/dev/null || true
 [ -f /usr/share/keyrings/nginx-archive-keyring.gpg ] && [ ! -s /usr/share/keyrings/nginx-archive-keyring.gpg ] && rm -f /usr/share/keyrings/nginx-archive-keyring.gpg 2>/dev/null || true
@@ -1142,7 +1143,7 @@ pid /run/nginx.pid;
 worker_rlimit_nofile 524288;
 error_log /var/log/nginx/error.log warn;
 
-$MODULE_LOAD_LINE
+${MODULE_LOAD_LINE:-}
 
 events {
     worker_connections 65535;
