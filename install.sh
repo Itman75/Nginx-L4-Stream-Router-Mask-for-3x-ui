@@ -1073,12 +1073,49 @@ if [ "$USE_OFFICIAL_NGINX_REPO" -eq 0 ]; then
     wait_for_apt_lock
     apt-get update -q
     wait_for_apt_lock
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx libnginx-mod-stream 2>/dev/null || apt-get install -y -q nginx
+    apt-get install -y -q --reinstall -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confmiss" nginx libnginx-mod-stream 2>/dev/null || apt-get install -y -q --reinstall -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confmiss" nginx
 else
     wait_for_apt_lock
     apt-get update -q
     wait_for_apt_lock
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
+    apt-get install -y -q --reinstall -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confmiss" nginx
+fi
+
+# Гарантированное восстановление mime.types при ручной очистке /etc/nginx
+if [ ! -s /etc/nginx/mime.types ]; then
+    mkdir -p /etc/nginx
+    cat << 'EOF_MIME' > /etc/nginx/mime.types
+types {
+    text/html                             html htm shtml;
+    text/css                              css;
+    text/xml                              xml;
+    image/gif                             gif;
+    image/jpeg                            jpeg jpg;
+    application/javascript                js;
+    application/atom+xml                  atom;
+    application/rss+xml                   rss;
+    text/mathml                           mml;
+    text/plain                            txt;
+    text/vnd.sun.j2me.app-descriptor      jad;
+    text/vnd.wap.wml                      wml;
+    text/x-component                      htc;
+    image/png                             png;
+    image/svg+xml                         svg svgz;
+    image/tiff                            tif tiff;
+    image/vnd.wap.wbmp                    wbmp;
+    image/webp                            webp;
+    image/x-icon                          ico;
+    image/x-jng                           jng;
+    image/x-ms-bmp                        bmp;
+    font/woff                             woff;
+    font/woff2                            woff2;
+    application/java-archive              jar war ear;
+    application/json                      json;
+    application/pdf                       pdf;
+    application/zip                       zip;
+    application/octet-stream              bin exe dll deb dmg iso img msi msp msm;
+}
+EOF_MIME
 fi
 
 NGINX_USER="nginx"
