@@ -23,7 +23,7 @@ export PYTHONUTF8=1
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-LOCK_FILE="/var/run/hardened-master-engine-v335.lock"
+LOCK_FILE="/var/run/hardened-master-engine-v334.lock"
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
     echo -e "\033[0;31m[X] Ошибка: Установщик уже выполняется в параллельном процессе.\033[0m" >&2
@@ -1442,7 +1442,6 @@ server {
         proxy_pass http://xray_xhttp_stream;
     }
 
-    # DATASPHERE CORE API & IN-MEMORY SSO GATEWAY
     location ^~ /api/v1/datasphere/ {
         proxy_pass http://datasphere_core_backend;
         proxy_http_version 1.1;
@@ -1916,7 +1915,13 @@ if enable_agh:
                 "finalQuery": False,
                 "serveStale": False,
                 "serveExpiredTTL": 0,
-                "timeoutMs": 4000,Fallback": False,
+                "timeoutMs": 4000,
+                "port": 53
+            }
+        ],
+        "queryStrategy": "UseIPv4",
+        "disableCache": False,
+        "disableFallback": False,
         "disableFallbackIfMatch": False,
         "enableParallelQuery": False,
         "useSystemHosts": False,
@@ -2251,7 +2256,7 @@ if "clients" in tables:
         client_data_map = {
             "email": test_email, "sub_id": test_sub_id, "uuid": test_uuid, "password": test_password,
             "auth": test_password, "flow": "xtls-rprx-vision", "security": "auto", "reverse": "",
-            "wg_private_key": def_wg_c_priv, "wg_public_key": def_wg_c_pub, "wg_allowed_ips": "10.8.1.3/32, 10.8.2.3/32, 10.8.3.3/32",
+            "wg_private_key": def_wg_c_priv, "wg_public_key": def_wg_c_pub, "wg_allowed_ips": "10.8.1.3/32, 10.8.2.3/32, 10.8.3.3/32, 10.9.0.2/32",
             "wg_pre_shared_key": "", "wg_keep_alive": 25, "wg_forwarded_ports": "", "secret": "",
             "ad_tag": "", "limit_ip": 0, "limit_hwid": 0, "total_gb": 0, "expiry_time": 0,
             "enable": 1, "tg_id": 0, "group_name": "", "comment": "", "reset": 0, "reset_day": 0,
@@ -3311,9 +3316,3 @@ echo -e "${WHITE}2. Выполните команду: ${GREEN}${BOLD}reboot${NC
 echo -e "${GREEN}=====================================================================${NC}"
 
 exit 0
-                "port": 53
-            }
-        ],
-        "queryStrategy": "UseIPv4",
-        "disableCache": False,
-        "disable 
