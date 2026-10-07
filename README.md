@@ -1,4 +1,4 @@
-# 🛡️ Hardened Master Engine v3.3.4 Universal (Single-IP Ultra Enhanced)
+# 🛡️ Hardened Master Engine v3.3.5 Universal (Single-IP Ultra Enhanced)
 ### Монолитный узел сетевой маскировки и туннелирования: OS Hardening + BBR + Nginx L4/L7 Stream Router + 3X-UI Enterprise + Xray v26.7.28 Pinned + VLESS xHTTP (Native H2C Stream-One) + ML-KEM-768 + Multi-Port REALITY + Stub 11443 + Zero-SNI Shield + Zero-Leak DataSphere SSO Hub + 5x UDP Stack (Native Kernel AWG awg0 Golden Standard) + AdGuard Home DoH
 
 [![OS: Ubuntu & Debian](https://img.shields.io/badge/OS-Ubuntu%2022.04--26.04%20%7C%20Debian%2012--13-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://ubuntu.com)
@@ -105,7 +105,7 @@ flowchart TD
 
 ## 👁️ Концепция нулевой видимости: Zero-Leak DataSphere SSO Hub
 
-Классические прокси-серверы компрометируют себя наличием открытых веб-панелей, стандартных страниц входа, специфических favicon или ссылок на подписки в коде страниц. В архитектуре **Hardened Master Engine v3.3.4** реализована концепция абсолютной нулевой видимости (**Strict Zero-Knowledge Frontend**):
+Классические прокси-серверы компрометируют себя наличием открытых веб-панелей, стандартных страниц входа, специфических favicon или ссылок на подписки в коде страниц. В архитектуре **Hardened Master Engine v3.3.5** реализована концепция абсолютной нулевой видимости (**Strict Zero-Knowledge Frontend**):
 
 ### 1. Что фиксирует сетевой цензор, сканер ТСПУ или случайный посетитель
 * При обращении по адресу `https://yourdomain.online/` браузер загружает аутентичный портал распределенной аналитической среды **DataSphere Analytics Enterprise v3.14**.
