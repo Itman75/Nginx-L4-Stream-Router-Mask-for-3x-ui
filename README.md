@@ -1,228 +1,196 @@
-# 🛡️ Hardened Master Engine v3.3.5 Universal (Single-IP Ultra Enhanced)
-### Монолитный узел сетевой маскировки и туннелирования: OS Hardening + BBR + Nginx L4/L7 Stream Router + 3X-UI Enterprise + Xray v26.7.28 Pinned + VLESS xHTTP (Native H2C Stream-One) + ML-KEM-768 + Multi-Port REALITY + Stub 11443 + Zero-SNI Shield + Zero-Leak DataSphere SSO Hub + 5x UDP Stack (Native Kernel AWG awg0 Golden Standard) + AdGuard Home DoH
+# 🛡️ Hardened Master Engine v3.5 DataSphere Ultra
 
-[![OS: Ubuntu & Debian](https://img.shields.io/badge/OS-Ubuntu%2022.04--26.04%20%7C%20Debian%2012--13-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://ubuntu.com)
-[![Xray Core](https://img.shields.io/badge/Xray--core-v26.7.28%20Pinned-2962FF?style=for-the-badge&logo=shield&logoColor=white)](https://github.com/XTLS/Xray-core)
-[![3X-UI](https://img.shields.io/badge/Panel-3X--UI%20Enterprise-009688?style=for-the-badge&logo=awesomelists&logoColor=white)](https://github.com/mhsanaei/3x-ui)
-[![Security: Shield v6.0.4](https://img.shields.io/badge/Security-ML--KEM--768%20%7C%20Zero--SNI%20%7C%20Zero--Leak%20SSO-4CAF50?style=for-the-badge&logo=auth0&logoColor=white)](LICENSE)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
-
-<p align="center">
-  <b>Высокопроизводительный инженерный комплекс автоматизированного развёртывания скрытной, устойчивой к цензуре и криптографически защищенной прокси-инфраструктуры.</b><br>
-  Реализует архитектуру Single-IP Ultra Enhanced, сквозную постквантовую криптографию ML-KEM-768, L4/L7 мультиплексирование Nginx Mainline, защиту от активного зондирования Zero-SNI Shield, выделенный Stub 11443 с PROXY protocol v1 для Steal-Oneself, скрытый административный шлюз Zero-Leak DataSphere SSO Hub, нативный сервер AmneziaWG в ядре Linux (Bare-Metal DKMS, MTU 1360 / MSS 1320 Golden Standard) и приватный DNS AdGuard Home со Split-маршрутизацией.
-</p>
+Техническая документация узла сетевой маскировки и туннелирования трафика: OS Hardening, TCP BBR, Nginx L4 Stream Router, 3X-UI, Xray Core v26.7.28 (Pinned), VLESS xHTTP (Native H2C Stream-One / ML-KEM-768), VLESS REALITY (Steal-Oneself & Classic), Hysteria 2, AdGuard Home DoH, нативный сервер AmneziaWG в ядре Linux (DKMS Bare-Metal, профиль AWG3) и шлюз управления DataSphere SSO Hub.
 
 ---
 
 ## 📑 Содержание
 
-1. [Архитектура и сетевая топология Single-IP Ultra Enhanced](#-архитектура-и-сетевая-топология-single-ip-ultra-enhanced)
-2. [Концепция нулевой видимости: Zero-Leak DataSphere SSO Hub](#-концепция-нулевой-видимости-zero-leak-datasphere-sso-hub)
-3. [Ключевые функциональные и защитные возможности](#-ключевые-функциональные-и-защитные-возможности)
-4. [Системные требования и быстрый старт](#-системные-требования-и-быстрый-старт)
-5. [Параметры мастера установки](#-параметры-мастера-установки)
-6. [Боевые конфигурации инбаундов Xray-core и ядра awg0](#-боевые-конфигурации-инбаундов-xray-core-и-ядра-awg0)
-7. [Подписки, логика назначения DNS и клиентская экосистема](#-подписки-логика-назначения-dns-и-клиентская-экосистема)
-8. [Приватный DNS AdGuard Home (DoH) со Split-маршрутизацией](#-приватный-dns-adguard-home-doh-со-split-маршрутизацией)
-9. [Инженерный аудит, валидация и мониторинг](#-инженерный-аудит-валидация-и-мониторинг)
-10. [Резервное копирование, восстановление и откат](#-резервное-копирование-восстановление-и-откат)
-11. [Лицензия](#-лицензия)
+1. [Сетевая топология и архитектура](#1-сетевая-топология-и-архитектура)
+2. [Матрица сетевых сокетов и портов](#2-матрица-сетевых-сокетов-и-портов)
+3. [Веб-маскировка и административный шлюз (DataSphere SSO)](#3-веб-маскировка-и-административный-шлюз-datasphere-sso)
+4. [Параметры обфускации AmneziaWG (Профиль AWG3)](#4-параметры-обфускации-amneziawg-профиль-awg3)
+5. [Системные требования и развёртывание](#5-системные-требования-и-развёртывание)
+6. [Параметры мастера установки](#6-параметры-мастера-установки)
+7. [Конфигурации инбаундов Xray-core, Nginx и ядра awg0](#7-конфигурации-инбаундов-xray-core-nginx-и-ядра-awg0)
+8. [Клиентские подписки и логика назначения DNS](#8-клиентские-подписки-и-логика-назначения-dns)
+9. [Интеграция приватного DoH AdGuard Home](#9-интеграция-приватного-doh-adguard-home)
+10. [Диагностика, аудит и мониторинг](#10-диагностика-аудит-и-мониторинг)
+11. [Резервное копирование и восстановление](#11-резервное-копирование-и-восстановление)
 
 ---
 
-## 🏗️ Архитектура и сетевая топология Single-IP Ultra Enhanced
+## 1. Сетевая топология и архитектура
 
-Инфраструктура узла оптимизирована для работы на единственном публичном IPv4-адресе с сохранением изоляции между легитимными веб-сервисами, административными интерфейсами и скоростными туннелями:
+Входящий трафик разделен на два изолированных контура:
 
-* **Входная группа TCP (Порты 80 и 443):**
-  * **Порт :80:** Обслуживает исключительно подтверждение прав владения доменом Certbot ACME HTTP-01 (`/.well-known/acme-challenge/`). Любые сторонние сканеры уязвимостей, боты и запросы без валидного заголовка `Host` сбрасываются мгновенным TCP-разрывом соединения (`return 444;`).
-  * **Порт :443:** Терминируется модулем `ngx_stream_core_module` (L4 Stream Router). Анализ SNI без расшифровки трафика (`ssl_preread on;`) распределяет потоки:
-    * Основной домен (`yourdomain.online`) и DNS (`dns.yourdomain.online`) направляются в высокоскоростной Unix-сокет оперативной памяти `/dev/shm/nginx-http.sock`;
-    * Поддомены маскировки Steal-Oneself (`cdn.yourdomain.online`) направляются на локальный инбаунд Xray Steal REALITY `:45443`;
-    * Внешние доверенные SNI (`tbank.ru`) направляются на инбаунд Xray Classic REALITY `:46443`;
-    * При недоступности Xray срабатывает директива `backup`, перенаправляющая трафик обратно в Nginx для предотвращения раскрытия сбоя прокси.
-* **Изолированный контур ядра (RAM Unix-Socket & Localhost):**
-  * Сервер на сокете `/dev/shm/nginx-http.sock` и локальном порту `:9443` применяет директиву `ssl_reject_handshake on;` для любых обращений по прямому IP-адресу или неизвестным доменам (**Zero-SNI Shield**).
-  * Авторизованный TLS-трафик основного домена обрабатывается L7-движком Nginx:
-    * Корень `/` отдает статическую маскировку корпоративной аналитической платформы DataSphere Analytics Enterprise v3.14 (строгий CSP без инлайн-скриптов);
-    * Путь `/api/v1/datasphere/` проксируется на многопоточный Python-демон управления `datasphere-core.service` (`127.0.0.1:20443`);
-    * Секретный URI панели управления проксируется на 3X-UI (`127.0.0.1:10443`);
-    * Секретные URI подписок направляются на встроенный сервер подписок (`127.0.0.1:55443`);
-    * Секретный путь VLESS xHTTP обслуживается в полнодуплексном режиме HTTP/2 Stream-One на инбаунде Xray (`127.0.0.1:50443`).
-* **Пятимодульный UDP-стек (Multi-Tunnel UDP Engine):**
-  * **Hysteria 2:** Транспорт QUIC на порту `:443/udp` с опциональным пулом ротации **Port Hopping 20000-50000/udp** в таблице `*nat` UFW.
-  * **AmneziaWG v3.2 (User-Space 3X-UI):** Порт `:8443/udp`, подсеть `10.8.1.0/24`, Golden MTU 1360 / MSS 1320.
-  * **AmneziaWG v2.0 Legacy (User-Space 3X-UI):** Порт `:8444/udp`, подсеть `10.8.2.0/24`, MTU 1360 / MSS 1320 (совместимость с KeeneticOS и OpenWrt).
-  * **3X WireGuard (User-Space 3X-UI):** Порт `:47443/udp`, подсеть `10.8.3.0/24`, MTU 1420 / MSS 1380.
-  * **Native Kernel AmneziaWG (Bare-Metal):** Выделенный интерфейс ядра **`awg0`** на порту `:51820/udp`, подсеть `10.9.0.0/24`, Golden MTU 1360 / MSS 1320, параметры обфускации $J_c=4, J_{min}=40, J_{max}=70, S_1=64, S_2=56, S_3=32, S_4=16$.
+1. **TCP-контур:**
+   * **Порт 80:** Обслуживает исключительно верификацию доменов Certbot ACME HTTP-01 (`/.well-known/acme-challenge/`). Запросы без валидного заголовка `Host` и сканеры сбрасываются директивой `return 444`.
+   * **Порт 443:** Модуль `ngx_stream_core_module` выполняет L4-маршрутизацию без расшифровки на основе `ssl_preread`:
+     * Запросы с основным доменом (`yourdomain.online`) и DNS (`dns.yourdomain.online`) передаются во внутренний Unix-сокет `/dev/shm/nginx-http.sock`;
+     * Запросы с поддоменом самокражи (`cdn.yourdomain.online`) направляются на локальный инбаунд Xray Steal REALITY (`127.0.0.1:45443`);
+     * Запросы с внешним SNI (`gateway.icloud.com`) направляются на инбаунд Xray Classic REALITY (`127.0.0.1:46443`);
+     * Обращения по прямому IP-адресу или неизвестным SNI сбрасываются директивой `ssl_reject_handshake on` (Zero-SNI Shield).
+   * **Anti-Loop Fallback (Порт 9443):**
+     * Инбаунд Steal REALITY пересылает не-REALITY запросы с заголовком PROXY protocol v1 (`xver: 1`) на виртуальный хост `02-steal-fallback.conf` (`127.0.0.1:9443`). Nginx отвечает легитимным TLS-сертификатом `cdn.*`, предотвращая сброс сессии (`errno 104`).
 
-```mermaid
+2. **UDP-контур (Скоростные пулы и туннели):**
+   * **Hysteria 2:** Базовый порт `443/udp`. Пул динамического переключения портов `20000:35000/udp` перенаправляется через Netfilter PREROUTING на порт 443.
+   * **Native Kernel AmneziaWG (awg0):** Базовый сокет ядра `8443/udp`. Скоростной пул `35001:49999/udp` перенаправляется через Netfilter PREROUTING на порт 8443.
+   * **3X-UI UDP Stack:** Изолированные порты `10443/udp` (AWG v3.2), `10444/udp` (AWG v2.0 Legacy) и `10445/udp` (3X WireGuard).
+
+
 flowchart TD
-    ClientTCP["Клиент: Web / TCP (REALITY, xHTTP, ACME)"] -->|TCP 80 / 443| NginxL4["Nginx L4 Stream Router (:443)"]
-    ClientUDP["Клиент: UDP (Hy2, AWG v3/v2, 3X-WG, Kernel AWG)"] -->|UDP 443 / 8443 / 8444 / 47443 / 51820| UFW_Engine{"UFW Netfilter / Mangle / NAT"}
+    ClientTCP["Клиент: TCP (HTTPS, REALITY, xHTTP, ACME)"] -->|TCP 80 / 443| NginxL4["Nginx L4 Stream Router (:443)"]
+    ClientUDP["Клиент: UDP (Hy2, Kernel AWG, AWG v3/v2, WG)"] -->|Диапазоны UDP| Netfilter["Netfilter / UFW PREROUTING"]
 
-    subgraph SG_TCP ["Маршрутизация TCP и L4/L7 Shield"]
-        direction TB
-        Port80["Порт :80"] -->|ACME Token| ACME_Root["Webroot: /.well-known/acme-challenge/"]
-        Port80 -->|Сканеры / Боты / Пустой Host| Drop444["TCP Drop: return 444"]
+    subgraph TCP_Pipeline ["Маршрутизация TCP"]
+        Port80["Порт :80"] -->|ACME HTTP-01| ACME["Webroot: /.well-known/acme-challenge/"]
+        Port80 -->|Сканеры / Боты| Drop444["TCP Reset: return 444"]
 
-        NginxL4 -->|"SNI: cdn.* (Steal REALITY)"| XraySteal["Xray Steal REALITY :45443"]
-        NginxL4 -->|"SNI: tbank.ru (Classic REALITY)"| XrayClassic["Xray Classic REALITY :46443"]
+        NginxL4 -->|"SNI: cdn.*"| XraySteal["Xray Steal REALITY :45443"]
+        NginxL4 -->|"SNI: gateway.icloud.com"| XrayClassic["Xray Classic REALITY :46443"]
         NginxL4 -->|"SNI: yourdomain / dns.*"| SockRAM["Unix-Socket: /dev/shm/nginx-http.sock"]
-        NginxL4 -.->|"Резерв при остановке Xray"| SockRAM
 
-        XraySteal -->|"Fallback не-REALITY / xver=1"| Stub11443["Nginx Stub :11443 (HTTP/2 -> 404)"]
-        XrayClassic -->|"Fallback Direct / xver=0"| ExtTarget["Внешний узел :443"]
+        XraySteal -->|"Fallback / PROXY v1"| VhostFallback["Nginx Fallback :9443 (cdn.* SSL)"]
+        XrayClassic -->|"Fallback Direct"| ExtTarget["Внешний узел :443"]
 
-        SockRAM -->|"Прямой IP / Неизвестный SNI"| ZeroSNI["Zero-SNI Defense: ssl_reject_handshake"]
-        SockRAM -->|"Валидный TLS 1.3"| NginxL7["Nginx L7 Security Gateway"]
+        SockRAM -->|"Прямой IP / Неизвестный SNI"| ZeroSNI["Zero-SNI: ssl_reject_handshake"]
+        SockRAM -->|"TLS 1.3 / H2"| NginxL7["Nginx L7 Web Gateway"]
 
-        NginxL7 -->|"URI: / (Decoy SPA)"| DecoySite["DataSphere Decoy v3.14 (CSP Strict)"]
-        NginxL7 -->|"URI: /api/v1/datasphere/"| CoreDaemon["DataSphere Core Python Daemon :20443"]
-        NginxL7 -->|"URI: /my-3x-panel/"| PanelUI["3X-UI Панель управления :10443"]
-        NginxL7 -->|"URI: /my-post-key/"| SubServer["3X-UI Сервер подписок :55443"]
-        NginxL7 -->|"URI: /Stream-One-Path/ (POST Only H2C)"| XrayXHTTP["Xray VLESS xHTTP :50443 (ML-KEM-768)"]
-        NginxL7 -->|"SNI: dns.* /dns-query"| AGH["AdGuard Home DoH Core :3000 / :53"]
+        NginxL7 -->|"URI: /"| Decoy["DataSphere SPA (Zero-Inline)"]
+        NginxL7 -->|"URI: /api/v1/datasphere/"| CoreDaemon["DataSphere Core Daemon :20443"]
+        NginxL7 -->|"URI: /my-3x-panel/"| PanelUI["3X-UI Панель :10443 (Loopback)"]
+        NginxL7 -->|"URI: /my-post-key/"| SubServer["3X-UI Подписки :55443 (Loopback)"]
+        NginxL7 -->|"URI: /Stream-One-Path/ (POST)"| XrayXHTTP["Xray VLESS xHTTP :50443 (H2C)"]
+        NginxL7 -->|"SNI: dns.* /dns-query"| AGH["AdGuard Home :3000 / :53"]
     end
 
-    subgraph SG_UDP ["Обработка туннелей UDP и MSS Clamping"]
-        direction TB
-        UFW_Engine -->|"Port Hopping 20000-50000 -> :443"| XrayHy2["Hysteria 2 UDP :443 (ALPN h3)"]
-        UFW_Engine -->|"UDP :8443 (MTU 1360 / MSS 1320)"| AWG3["AmneziaWG v3.2 3X-UI (10.8.1.0/24)"]
-        UFW_Engine -->|"UDP :8444 (MTU 1360 / MSS 1320)"| AWG2["AmneziaWG v2.0 3X-UI (10.8.2.0/24)"]
-        UFW_Engine -->|"UDP :47443 (MTU 1420 / MSS 1380)"| WG3X["3X WireGuard 3X-UI (10.8.3.0/24)"]
-        UFW_Engine -->|"UDP :51820 (Kernel awg0 Golden)"| AWGKernel["Native Kernel AmneziaWG awg0 (10.9.0.0/24)"]
-        
-        MangleTable["Таблица *mangle: TCPMSS 1320 (AWG) / 1380 (WG) / clamp-to-pmtu"]
-        NatTable["Таблица *nat: MASQUERADE 10.8.1.0/24, 10.8.2.0/24, 10.8.3.0/24, 10.9.0.0/24"]
+    subgraph UDP_Pipeline ["Маршрутизация UDP"]
+        Netfilter -->|"REDIRECT 20000:35000 -> :443"| XrayHy2["Hysteria 2 UDP :443 (QUIC)"]
+        Netfilter -->|"REDIRECT 35001:49999 -> :8443"| KernelAWG["Kernel AmneziaWG awg0 :8443 (AWG3)"]
+        Netfilter -->|"Прямой порт :10443"| AWG3["AmneziaWG v3.2 3X-UI :10443"]
+        Netfilter -->|"Прямой порт :10444"| AWG2["AmneziaWG v2.0 3X-UI :10444"]
+        Netfilter -->|"Прямой порт :10445"| WG3X["3X WireGuard 3X-UI :10445"]
     end
 
-    XraySteal & XrayClassic & XrayXHTTP --> OutboundFreedom["Xray Outbound Freedom (direct)"]
-    OutboundFreedom & AWG3 & AWG2 & WG3X & AWGKernel & XrayHy2 --> Internet["Публичная сеть Интернет"]
-```
+2. Матрица сетевых сокетов и портов
 
----
+| Протокол / Служба         | L4 Сокет                       | Область видимости | Назначение                                           |
+| :------------------------ | :----------------------------- | :---------------- | :--------------------------------------------------- |
+| **ACME Bootstrap**        | `80/tcp`                       | Публичная         | Валидация сертификатов Certbot HTTP-01               |
+| **Nginx L4 Ingress**      | `443/tcp`                      | Публичная         | Единая входная точка TLS/TCP, роутинг по SNI         |
+| **Nginx Fallback**        | `127.0.0.1:9443`               | Изолированная     | Терминация fallback-трафика Steal REALITY (`cdn.*`)  |
+| **DataSphere Core**       | `127.0.0.1:20443`              | Изолированная     | Демон аутентификации SSO и API управления `awg0`     |
+| **3X-UI Web Panel**       | `127.0.0.1:10443`              | Изолированная     | Интерфейс администратора 3X-UI                       |
+| **3X-UI Subscriptions**   | `127.0.0.1:55443`              | Изолированная     | Сервер выдачи клиентских подписок                    |
+| **VLESS xHTTP**           | `127.0.0.1:50443`              | Изолированная     | H2C бэкенд xHTTP Stream-One (ML-KEM-768)             |
+| **VLESS Steal REALITY**   | `127.0.0.1:45443`              | Изолированная     | Инбаунд Steal-Oneself REALITY (PROXY proto v1)       |
+| **VLESS Classic REALITY** | `127.0.0.1:46443`              | Изолированная     | Инбаунд Classic REALITY (`gateway.icloud.com`)       |
+| **AdGuard Home Web**      | `127.0.0.1:3000`               | Изолированная     | Веб-интерфейс управления AdGuard Home                |
+| **AdGuard Home DNS**      | `127.0.0.1:53` / `10.9.0.1:53` | Изолированная     | Локальный и туннельный DNS-резолвер                  |
+| **Hysteria 2**            | `443/udp`                      | Публичная         | Базовый порт Hysteria 2 (QUIC)                       |
+| **Hy2 Hopping Pool**      | `20000:35000/udp`              | Публичная         | Пул динамической ротации портов Hysteria 2           |
+| **Kernel AmneziaWG**      | `8443/udp`                     | Публичная         | Базовый сокет ядра `awg0` (DKMS Bare-Metal)          |
+| **AWG Native Pool**       | `35001:49999/udp`              | Публичная         | Скоростной мультипортовый пул для `awg0`             |
+| **3X-UI AWG v3.2**        | `10443/udp`                    | Публичная         | User-space инбаунд AWG v3.2 (подсеть `10.8.1.0/24`)  |
+| **3X-UI AWG v2.0**        | `10444/udp`                    | Публичная         | User-space инбаунд AWG v2.0 (подсеть `10.8.2.0/24`)  |
+| **3X WireGuard**          | `10445/udp`                    | Публичная         | User-space инбаунд WireGuard (подсеть `10.8.3.0/24`) |
 
-## 👁️ Концепция нулевой видимости: Zero-Leak DataSphere SSO Hub
+3. Веб-маскировка и административный шлюз (DataSphere SSO)
 
-Классические прокси-серверы компрометируют себя наличием открытых веб-панелей, стандартных страниц входа, специфических favicon или ссылок на подписки в коде страниц. В архитектуре **Hardened Master Engine v3.3.5** реализована концепция абсолютной нулевой видимости (**Strict Zero-Knowledge Frontend**):
+  - Фронтенд DataSphere Analytics Enterprise:
+      - Развернут в /var/www/html. Реализует SPA-маскировку платформы
+        распределенной обработки данных.
+      - Архитектура Zero-Inline: строгая политика Content Security Policy
+        (default-src 'self'), отсутствие инлайн-скриптов в HTML, локальные
+        ресурсы /assets/css/datasphere.css и /assets/js/datasphere.js.
+      - В исходном коде и структуре файлов отсутствуют ключевые слова,
+        ассоциируемые с прокси-серверами и VPN.
+  - In-Memory SSO Gateway:
+      - Кнопка «Консоль» в заголовке сайта открывает модальное окно авторизации
+        узла.
+      - Запрос валидируется сервисом datasphere-core.py (127.0.0.1:20443).
+        Пароль сверяется с базой данных 3X-UI алгоритмом hmac.compare_digest в
+        константное время.
+      - После авторизации клиентский JavaScript динамически рендерит в памяти
+        браузера интерфейс DataSphere Infrastructure Hub:
+        1.  Прямой защищенный переход в панель 3X-UI;
+        2.  Панель управления пирами нативного ядра awg0 (мониторинг трафика в
+            реальном времени, добавление клиентов, выгрузка .conf и темный
+            QR-код);
+        3.  Переход в веб-интерфейс AdGuard Home.
+      - Разметка панели администратора не сохраняется на диске и не существует в
+        DOM до успешного ответа сервера с кодом 200.
 
-### 1. Что фиксирует сетевой цензор, сканер ТСПУ или случайный посетитель
-* При обращении по адресу `https://yourdomain.online/` браузер загружает аутентичный портал распределенной аналитической среды **DataSphere Analytics Enterprise v3.14**.
-* Отображаются динамические графики телеметрии Anycast-сети, пропускная способность магистралей (до 99.8 Gbps), задержка ядра (< 1.2 ms), сертификация криптографических стандартов (ML-KEM-768, SOC 2 Type II).
-* **В исходном коде страницы (`index.html`), скриптах (`datasphere.js`) и стилях (`datasphere.css`) физически отсутствуют ключевые слова**: `vpn`, `3x-ui`, `xui`, `xray`, `vless`, `reality`, `wireguard`, `amnezia`, `hysteria`, `proxy`, `adguard`.
-* Нажатие на элементы интерфейса («Консоль», «Подключить узел») вызывает стандартную модальную форму корпоративной авторизации вычислительного узла (поля: *Идентификатор узла / Email* и *API Token / Ключ*).
-* При отправке произвольных данных бэкенд возвращает реалистичный JSON с кодом `401 Unauthorized`:
-  ```json
-  {"status": "error", "code": 401, "error": "Недействительный токен кластера или ключ авторизации узла. Доступ запрещен."}
-  ```
+4. Параметры обфускации AmneziaWG (Профиль AWG3)
 
-### 2. Скрытый провал в сервис (Strict Zero-Knowledge RAM Execution)
-Управляющие интерфейсы материализуются в браузере исключительно в оперативной памяти после прохождения криптографической аутентификации:
+Для исключения сигнатурных блокировок ТСПУ и устранения коллизий длин пакетов в
+нативном ядре awg0 и инбаундах 3X-UI применен профиль AWG3:
 
-* **Этап 1 (Запрос доступа):** Администратор открывает сайт-маскировку, нажимает кнопку «Консоль» и вводит учетные данные администратора панели 3X-UI.
-* **Этап 2 (Бэкенд-верификация):** Запрос передается через Nginx на внутренний сервис `datasphere-core.service` (`127.0.0.1:20443`). Демон сверяет данные с SQLite базой `/etc/x-ui/x-ui.db`. Сравнение логина и хэша пароля производится в константное время алгоритмом `hmac.compare_digest` (с поддержкой `bcrypt`), что исключает атаки по времени (Side-Channel Timing Attacks). При неудаче применяется задержка `time.sleep(0.5)`.
-* **Этап 3 (Генерация сессии и сборка DOM в RAM):** При успешной проверке бэкенд генерирует криптографический сессионный токен высокой энтропии (`secrets.token_hex(24)`) со временем жизни 3600 секунд. Клиентский JavaScript получает JSON со статусом `200 OK` и **на лету перестраивает DOM-дерево модального окна в оперативной памяти**, отрисовывая шлюз **DataSphere Infrastructure Hub**:
-  * **1.** **Авторизация Панели 3X-UI** — прямой переход к защищенной веб-панели управления ядрами Xray;
-  * **2.** **Нативный сервер AmneziaWG** — вызов встроенной панели управления ядром `awg0` (мониторинг активных пиров, объемов трафика Rx/Tx, добавление новых клиентов с автовыделением IP из подсети `10.9.0.0/24`, генерация SVG QR-кодов и выгрузка файлов `.conf`);
-  * **3.** **AdGuard Home DNS** — прямой переход к панели управления приватным DNS-over-HTTPS резолвером (если модуль активирован).
+\mathbf{S1 + 56 \neq S2} \quad (72 + 56 = 128 \neq 56) \quad \text{— исключает совпадение длин Init (148B) и Response (92B)}
+\mathbf{S3 \neq S2 + 28} \quad (32 \neq 56 + 28 = 84) \quad \text{— исключает коллизию Response (92B) и Cookie (64B)}
+\mathbf{S1, S2, S3, S4 \ge 12} \quad \text{— обеспечивает извлечение 12-байтного ChaCha20 Nonce в AWG 3.x}
 
-До момента ввода мастер-пароля разметки центра управления не существует ни на диске веб-сервера, ни в DOM-дереве браузера — её невозможно обнаружить аудитом исходного кода (Ctrl+U) или статическими веб-краулерами.
+  - Спецификация параметров:
+      - MTU = 1360 (с фиксацией TCPMSS 1320 в таблице *mangle);
+      - Jc = 4, Jmin = 40, Jmax = 70 (рандомизация мусорных пакетов перед
+        хэндшейком);
+      - S1 = 72, S2 = 56, S3 = 32, S4 = 16;
+      - H1..H4: Уникальные псевдослучайные 32-битные скаляры в диапазоне от 10^7
+        до 2147483647. Использование скаляров вместо диапазонов обеспечивает
+        совместимость с маршрутизаторами KeeneticOS / OpenWrt и десктопными
+        клиентами.
+      - AllowedIPs = 0.0.0.0/0: Исключение ::/0 предотвращает сброс
+        маршрутизации клиентами при отключенном IPv6 на сервере.
 
----
+5. Системные требования и развёртывание
 
-## ⚙️ Ключевые функциональные и защитные возможности
+Поддерживаемые операционные системы:
 
-* **Нативный сервер AmneziaWG в ядре Linux (Bare-Metal DKMS):**  
-  Сборка официального модуля ядра `amneziawg` под целевое ядро ОС. Интерфейс `awg0` функционирует вне пространств пользователя с минимальными задержками прерываний. Применен эталонный профиль обфускации: $J_c=4, J_{min}=40, J_{max}=70, S_1=64, S_2=56, S_3=32, S_4=16$, рандомизированные $H_1..H_4$. Реестр пиров сохраняется в атомарном файле `/etc/amnezia/amneziawg/clients.json` с защитой от параллельной записи через `fcntl.flock`.
-* **Zero-SNI Defense Shield (`ssl_reject_handshake on`):**  
-  Дефолтный сервер Nginx немедленно сбрасывает TCP-сессию на этапе TLS-хэндшейка при обращениях по IP-адресу или чужим доменным именам. Сетевые сканеры (Censys, Shodan, Masscan) не могут извлечь сертификат сервера.
-* **Выделенный Stub 11443 для Steal-Oneself REALITY:**  
-  Инбаунд Steal REALITY сбрасывает неавторизованные запросы с заголовком PROXY protocol v1 (`xver: 1`) на внутренний виртуальный хост `127.0.0.1:11443` (HTTP/2, безусловный возврат 404). Это полностью исключает зацикливание маршрутизации (Routing Loops) и сбои сопоставления ALPN.
-* **VLESS xHTTP (Native H2C Stream-One) + ML-KEM-768:**  
-  * Полнодуплексный двусторонний стриминг по нативному HTTP/2 (`proxy_http_version 2;`) с полным отключением буферизации (`proxy_buffering off; proxy_request_buffering off;`).
-  * Жесткая изоляция методов: URI xHTTP принимает строго `POST`-запросы, любые `GET`-запросы отдают `404 Not Found`.
-  * Интеграция постквантового алгоритма асимметричного шифрования **ML-KEM-768 (Kyber768)** через утилиту `xray vlessenc`.
-  * Рандомизированный паддинг `xPaddingBytes: 120-1120`, маскировка служебных заголовков под сервисы AWS (`X-Amz-Meta-Trace`) и мультиплексирование сессий `enableXmux: true`.
-* **Эталонный MTU/MSS инжиниринг (Golden Standard):**  
-  * AmneziaWG (ядро `awg0` и инбаунды 3X-UI): `MTU 1360` с принудительной фиксацией `TCPMSS 1320` в таблице `*mangle` UFW.
-  * 3X WireGuard: `MTU 1420` с фиксацией `TCPMSS 1380`.
-  * Глобальное правило `--clamp-mss-to-pmtu` для устранения Path MTU Discovery Blackhole на мобильных сетях.
-* **Zero-Log Policy (Анти-форензика):**  
-  * Полное отключение журналов клиентского доступа в веб-шлюзе (`access_log off;` в Nginx);
-  * Ограничение логирования системных служб оперативной памятью (`Storage=volatile`, `RuntimeMaxUse=64M` в `systemd-journald`). Сетевые метаданные клиентов не сбрасываются на постоянный диск.
-* **Комплекс L7-фильтрации WAF v6.0.4 Hardened:**  
-  Двухуровневая система карт `$badbot_raw` и `$is_scan_attempt` отсекает сканеры уязвимостей (Nuclei, Gobuster, SQLmap), агрессивные AI-краулеры (GPTBot, ClaudeBot, Perplexity) и попытки поиска файлов конфигураций (`.env`, `.git`) с возвратом `404/444`.
-* **Синхронизация схемы ALPN в базе SQLite (3X-UI Zod Validator Fix):**  
-  Автоматический пре-миграционный скрипт нормализует параметры `externalProxy.alpn` во всех записях SQLite, трансформируя строковые значения в строгие JSON-массивы `["h2"]` / `["h3"]`, что исключает сбои валидатора схем Zod при обновлении панели 3X-UI.
+  - Ubuntu 22.04 LTS (Jammy)
+  - Ubuntu 24.04 LTS (Noble)
+  - Ubuntu 26.04 LTS
+  - Debian 12 (Bookworm)
+  - Debian 13 (Trixie)
 
----
+Предварительные условия:
 
-## 🚀 Системные требования и быстрый старт
+  - Права суперпользователя root.
+  - DNS A-записи домена и поддоменов (yourdomain.online, cdn.yourdomain.online,
+    dns.yourdomain.online) должны указывать на IP сервера.
+  - В панели Cloudflare для всех записей должен быть установлен режим DNS-Only
+    (Серое облако). Проксирование Cloudflare не поддерживает REALITY и L4
+    Stream.
 
-### Требования к серверу:
-* **Архитектура процессора:** x86_64 (amd64) или ARM64 (aarch64).
-* **Операционная система:** Ubuntu 22.04 / 24.04 / 26.04 LTS или Debian 12 / 13.
-* **Минимальные ресурсы:** 1 vCPU, 1 ГБ RAM (при 512 МБ обязателен swap от 1 ГБ), 10 ГБ на SSD/NVMe.
-* **Сеть:** 1 публичный статический IPv4-адрес.
-* **DNS-конфигурация:** Основной домен и поддомены (`yourdomain.online`, `cdn.yourdomain.online`, `dns.yourdomain.online`) должны иметь A-записи, указывающие на IP сервера.
+Команда запуска:
 
-> [!CAUTION]
-> ### ⚠️ Настройка DNS в панели Cloudflare
-> Все A-записи домена и поддоменов в личном кабинете Cloudflare должны находиться строго в режиме **DNS-Only (Серое облако)**.  
-> Проксирование через Cloudflare (Оранжевое облако) блокирует протоколы семейства REALITY, нарушает мультиплексирование L4 Stream и полностью отсекает входящий UDP-трафик.
-
-### Запуск развёртывания:
-
-Выполните команду на сервере под учетной записью суперпользователя `root`:
-
-```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/install.sh)
-```
 
-Резервная команда через `wget`:
+[!IMPORTANT] После завершения работы скрипта проверьте подключение по SSH в
+отдельном окне терминала и перезагрузите сервер командой reboot для активации
+модуля ядра amneziawg, правил Netfilter и оптимизаций sysctl.
 
-```bash
-wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/install.sh | bash
-```
+6. Параметры мастера установки
 
----
+| Параметр               | Значение по умолчанию         | Описание                                                                                                               |
+| :--------------------- | :---------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
+| **Режим установки**    | `2` (при наличии БД)          | `1` — Clean Install (полная переустановка); `2` — Safe Migration (сохранение клиентов, ключей, UUID, бэкап `.tar.gz`). |
+| **Гео-профиль**        | Автоопределение               | Назначение системных DNS (Яндекс 77.88.8.8 для РФ / Cloudflare 1.1.1.1 для зарубежных узлов).                          |
+| **Основной домен**     | —                             | FQDN узла (например, `yourdomain.online`).                                                                             |
+| **Порт SSH**           | Текущий активный              | Опциональная смена порта, генерация ключей Ed25519, интеграция с Fail2ban.                                             |
+| **Пути и порты 3X-UI** | `:10443`, `:55443`            | Внутренние сокеты панели и подписок на `127.0.0.1`.                                                                    |
+| **VLESS xHTTP**        | `:50443`, `/Stream-One-Path/` | Внутренний сокет и секретный URI полнодуплексного стриминга.                                                           |
+| **Steal REALITY**      | `:45443`                      | Поддомен `cdn.yourdomain.online`, Fallback на Nginx `:9443` (PROXY proto v1).                                          |
+| **Classic REALITY**    | `:46443`                      | Внешний SNI `gateway.icloud.com` (Apple) с замером задержки RTT.                                                       |
+| **Hysteria 2**         | `:443/udp`                    | Включение пула Port Hopping `20000:35000/udp`.                                                                         |
+| **Kernel AmneziaWG**   | `:8443/udp`                   | Активация интерфейса ядра `awg0` и пула `35001:49999/udp`.                                                             |
+| **3X-UI UDP Туннели**  | `:10443`, `:10444`, `:10445`  | Выделенные порты для AWG v3.2, AWG v2.0 и Native WireGuard.                                                            |
+| **AdGuard Home DoH**   | `dns.yourdomain.online`       | Установка приватного DoH с авторизацией по токену `ClientID`.                                                          |
+| **SSL Движок**         | Certbot HTTP-01               | Нативный выпуск сертификатов Let's Encrypt через веб-рут `/var/www/html`.                                              |
 
-## 📋 Параметры мастера установки
+7. Конфигурации инбаундов Xray-core, Nginx и ядра awg0
 
-| Этап | Конфигурируемый параметр | Значение по умолчанию | Назначение и логика работы |
-| :--- | :--- | :--- | :--- |
-| **Режим** | Режим работы установщика | `2` (при наличии БД) | `1` — Clean Install (сброс базы, новые ключи, генерация клиента Test); `2` — Safe Migration (100% сохранение клиентов, ключей, UUID, горячий бэкап `.tar.gz` и авто-патч схемы ALPN). |
-| **0** | Сетевой гео-профиль | Автодетект (RU / World) | Определяет гео-локацию VPS по IP. Назначает профильные DNS-резолверы (Яндекс 77.88.8.8 для РФ vs Cloudflare 1.1.1.1 для Европы/Мира) и зеркала загрузки. |
-| **1** | Основной домен | — | Базовый FQDN сертифицируемой зоны (например, `yourdomain.online`). |
-| **1** | Email Let's Encrypt | Enter (без почты) | Регистрационный адрес Certbot для выпуска и продления SSL-сертификатов. |
-| **2** | Системный Hardening | `y` | Тюнинг TCP BBR, FQ, somaxconn 65535, loose `rp_filter=2`, отключение IPv6 во избежание утечек. |
-| **2** | Порт службы SSH | Текущий порт | Смена порта SSH, блокировка входа по паролю, генерация ключей Ed25519, интеграция с Fail2ban. |
-| **3** | Внутренние порты и пути 3X-UI | `:10443`, `:55443` | Изоляция веб-панели и сервера выдачи подписок на сокетах loopback. |
-| **3** | VLESS xHTTP порт и URI | `:50443`, `/Stream-One-Path/` | Локальный порт xHTTP и закрытый путь двустороннего H2C-стриминга. |
-| **4** | Steal-Oneself REALITY | `y` (порт `:45443`) | Поддомен `cdn.yourdomain.online`, Anti-Loop Fallback на Stub `:11443` (PROXY proto v1). |
-| **4** | Classic External REALITY | `y` (порт `:46443`) | Внешние SNI с автоматическим замером задержки RTT и TLS 1.3 до целевых серверов. |
-| **6** | Hysteria 2 (UDP) | `y` (`:443`, Режим 2) | QUIC-транспорт. Режим 2 активирует Dynamic Port Hopping (`20000:50000/udp`). |
-| **6** | AmneziaWG v3.2 / v2.0 (3X-UI) | `y` (`:8443` / `:8444`) | User-Space инбаунды 3X-UI: v3.2 для ПК/смартфонов, Legacy v2.0 для маршрутизаторов. |
-| **6** | 3X WireGuard (3X-UI) | `y` (порт `:47443`) | Чистый WireGuard RFC (`MTU 1420`, MSS Clamping 1380, подсеть `10.8.3.0/24`). |
-| **6** | Native Kernel AmneziaWG | `y` (порт `:51820`) | Bare-Metal сервер на модуле ядра Linux (`awg0`, подсеть `10.9.0.0/24`, Golden MTU 1360). |
-| **7** | Приватный AdGuard Home DoH | `y` (`dns.yourdomain.online`)| Локальный DoH со сплит-DNS и роутерной авторизацией через токен `ClientID`. |
-| **8** | Метод выпуска SSL | `1` | `1` — Нативный Certbot HTTP-01 (APT); `2` — acme.sh DNS-01 (Cloudflare API). |
-
-> [!IMPORTANT]
-> **Обязательные действия после завершения развёртывания:**  
-> 1. Откройте **новое отдельное окно терминала** и проверьте доступ к серверу по SSH на установленном порту.  
-> 2. В исходной консоли выполните команду: `reboot`.  
-> После перезагрузки сетевые оптимизации sysctl, модуль ядра `amneziawg`, трансляция NAT/Mangle в UFW и фоновые демоны активируются в стабильном режиме.
-
----
-
-## 📄 Боевые конфигурации инбаундов Xray-core и ядра awg0
-
-<details>
-<summary><b>1. VLESS xHTTP Stream-One + ML-KEM-768 + XMUX + Vision (Порт :50443)</b></summary>
-
-```json
 {
   "listen": "127.0.0.1",
   "port": 50443,
@@ -231,7 +199,7 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
   "settings": {
     "clients": [
       {
-        "id": "ВАШ_UUID",
+        "id": "КЛИЕНТСКИЙ_UUID",
         "flow": "xtls-rprx-vision",
         "email": "Test",
         "subId": "SUB_Test",
@@ -279,13 +247,7 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
     ]
   }
 }
-```
-</details>
 
-<details>
-<summary><b>2. VLESS REALITY Steal-Oneself (Порт :45443, Stub Target :11443, xver 1)</b></summary>
-
-```json
 {
   "listen": "127.0.0.1",
   "port": 45443,
@@ -294,7 +256,7 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
   "settings": {
     "clients": [
       {
-        "id": "ВАШ_UUID",
+        "id": "КЛИЕНТСКИЙ_UUID",
         "flow": "xtls-rprx-vision",
         "email": "Test",
         "subId": "SUB_Test",
@@ -317,18 +279,16 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
     "realitySettings": {
       "show": false,
       "xver": 1,
-      "target": "127.0.0.1:11443",
-      "dest": "127.0.0.1:11443",
+      "target": "127.0.0.1:9443",
+      "dest": "127.0.0.1:9443",
       "serverNames": ["cdn.yourdomain.online"],
-      "privateKey": "ВАШ_PRIVATE_KEY",
+      "privateKey": "СЕРВЕРНЫЙ_PRIVATE_KEY",
       "minClientVer": "1.0.0",
-      "maxClientVer": "",
-      "maxTimediff": 0,
-      "shortIds": ["ВАШ_16_HEX_SHORT_ID"],
+      "shortIds": ["SHORT_ID_HEX"],
       "settings": {
-        "publicKey": "ВАШ_PUBLIC_KEY",
+        "publicKey": "СЕРВЕРНЫЙ_PUBLIC_KEY",
         "fingerprint": "firefox",
-        "serverName": "",
+        "serverName": "cdn.yourdomain.online",
         "spiderX": "/"
       }
     },
@@ -337,18 +297,13 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
         "dest": "yourdomain.online",
         "port": 443,
         "forceTls": "same",
+        "sni": "cdn.yourdomain.online",
         "remark": "REALITY-443"
       }
     ]
   }
 }
-```
-</details>
 
-<details>
-<summary><b>3. VLESS REALITY Classic External (Порт :46443, Target:443, xver 0)</b></summary>
-
-```json
 {
   "listen": "127.0.0.1",
   "port": 46443,
@@ -357,7 +312,7 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
   "settings": {
     "clients": [
       {
-        "id": "ВАШ_UUID",
+        "id": "КЛИЕНТСКИЙ_UUID",
         "flow": "xtls-rprx-vision",
         "email": "Test",
         "subId": "SUB_Test",
@@ -380,18 +335,16 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
     "realitySettings": {
       "show": false,
       "xver": 0,
-      "target": "tbank.ru:443",
-      "dest": "tbank.ru:443",
-      "serverNames": ["tbank.ru"],
-      "privateKey": "ВАШ_PRIVATE_KEY",
+      "target": "gateway.icloud.com:443",
+      "dest": "gateway.icloud.com:443",
+      "serverNames": ["gateway.icloud.com"],
+      "privateKey": "СЕРВЕРНЫЙ_PRIVATE_KEY",
       "minClientVer": "1.0.0",
-      "maxClientVer": "",
-      "maxTimediff": 0,
-      "shortIds": ["ВАШ_16_HEX_SHORT_ID"],
+      "shortIds": ["SHORT_ID_HEX"],
       "settings": {
-        "publicKey": "ВАШ_PUBLIC_KEY",
+        "publicKey": "СЕРВЕРНЫЙ_PUBLIC_KEY",
         "fingerprint": "firefox",
-        "serverName": "",
+        "serverName": "gateway.icloud.com",
         "spiderX": "/"
       }
     },
@@ -400,18 +353,13 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
         "dest": "yourdomain.online",
         "port": 443,
         "forceTls": "same",
+        "sni": "gateway.icloud.com",
         "remark": "REALITY-Classic"
       }
     ]
   }
 }
-```
-</details>
 
-<details>
-<summary><b>4. Hysteria 2 UDP (Порт :443 + Port Hopping 20000-50000)</b></summary>
-
-```json
 {
   "listen": "0.0.0.0",
   "port": 443,
@@ -420,19 +368,15 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
   "settings": {
     "clients": [
       {
-        "id": "ВАШ_ПАРОЛЬ_АВТОРИЗАЦИИ",
-        "auth": "ВАШ_ПАРОЛЬ_АВТОРИЗАЦИИ",
-        "password": "ВАШ_ПАРОЛЬ_АВТОРИЗАЦИИ",
+        "id": "ПАРОЛЬ_КЛИЕНТА",
+        "auth": "ПАРОЛЬ_КЛИЕНТА",
+        "password": "ПАРОЛЬ_КЛИЕНТА",
         "email": "Test",
         "subId": "SUB_Test",
         "enable": true
       }
     ],
     "version": 2
-  },
-  "sniffing": {
-    "enabled": true,
-    "destOverride": ["http", "tls", "quic", "fakedns"]
   },
   "streamSettings": {
     "network": "hysteria",
@@ -465,313 +409,164 @@ wget -qO- https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-
     ]
   }
 }
-```
-</details>
 
-<details>
-<summary><b>5. AmneziaWG v3.2 в 3X-UI (Подсеть 10.8.1.0/24, Golden MTU 1360 — Порт :8443)</b></summary>
-
-```json
-{
-  "listen": "0.0.0.0",
-  "port": 8443,
-  "protocol": "amneziawg",
-  "tag": "in-8443-udp",
-  "settings": {
-    "clients": [
-      {
-        "privateKey": "CLIENT_PRIVATE_KEY",
-        "publicKey": "CLIENT_PUBLIC_KEY",
-        "allowedIPs": ["10.8.1.3/32"],
-        "email": "Test",
-        "subId": "SUB_Test",
-        "enable": true
-      }
-    ],
-    "server": {
-      "contentPaddingAddition": "0",
-      "disableCookies": true,
-      "h1": "СЛУЧАЙНОЕ_ЧИСЛО_H1",
-      "h2": "СЛУЧАЙНОЕ_ЧИСЛО_H2",
-      "h3": "СЛУЧАЙНОЕ_ЧИСЛО_H3",
-      "h4": "СЛУЧАЙНОЕ_ЧИСЛО_H4",
-      "jc": 4,
-      "jmin": 40,
-      "jmax": 70,
-      "s1": 64,
-      "s2": 56,
-      "s3": 32,
-      "s4": 16,
-      "mtu": 1360,
-      "primaryDns": "1.1.1.1",
-      "secondaryDns": "8.8.8.8",
-      "privateKey": "SERVER_PRIVATE_KEY",
-      "publicKey": "SERVER_PUBLIC_KEY",
-      "randomTrailers": false,
-      "rejectAfterTime": "600-900",
-      "rekeyAfterTime": "300-500",
-      "rekeyTimeout": "10-15",
-      "keepaliveTimeout": "20-25",
-      "maxHandshakeAttempts": "10-15",
-      "subnetCidr": 24,
-      "subnetIp": "10.8.1.0"
-    }
-  },
-  "streamSettings": {
-    "externalProxy": [
-      {
-        "dest": "yourdomain.online",
-        "port": 8443,
-        "remark": "AmneziaWG v3"
-      }
-    ]
-  }
-}
-```
-</details>
-
-<details>
-<summary><b>6. 3X WireGuard в 3X-UI (Подсеть 10.8.3.0/24, MTU 1420 — Порт :47443)</b></summary>
-
-```json
-{
-  "listen": "0.0.0.0",
-  "port": 47443,
-  "protocol": "wireguard",
-  "tag": "in-wireguard-native",
-  "settings": {
-    "secretKey": "SERVER_PRIVATE_KEY",
-    "peers": [
-      {
-        "publicKey": "CLIENT_PUBLIC_KEY",
-        "allowedIPs": ["10.8.3.3/32"],
-        "keepAlive": 25,
-        "email": "Test"
-      }
-    ],
-    "mtu": 1420,
-    "noKernelTun": false
-  },
-  "streamSettings": {
-    "externalProxy": [
-      {
-        "dest": "yourdomain.online",
-        "port": 47443,
-        "remark": "3X WireGuard"
-      }
-    ]
-  }
-}
-```
-</details>
-
-<details>
-<summary><b>7. Конфигурация нативного сервера AmneziaWG в ядре Linux (/etc/amnezia/amneziawg/awg0.conf)</b></summary>
-
-```ini
 [Interface]
 Address = 10.9.0.1/24
-ListenPort = 51820
-PrivateKey = SERVER_PRIVATE_KEY
+ListenPort = 8443
+PrivateKey = СЕРВЕРНЫЙ_PRIVATE_KEY
 MTU = 1360
 Jc = 4
 Jmin = 40
 Jmax = 70
-S1 = 64
+S1 = 72
 S2 = 56
 S3 = 32
 S4 = 16
-H1 = 149419586
-H2 = 878791997
-H3 = 1251051976
-H4 = 1657628296
+H1 = 138104463
+H2 = 465648900
+H3 = 1351372787
+H4 = 138617230
+PostUp = iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o eth0 -j MASQUERADE; iptables -t nat -A PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports 8443
+PostDown = iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s 10.9.0.0/24 -o eth0 -j MASQUERADE; iptables -t nat -D PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports 8443
 
 # --- Client: Test-Client ---
 [Peer]
-PublicKey = CLIENT_PUBLIC_KEY
+PublicKey = КЛИЕНТСКИЙ_PUBLIC_KEY
 AllowedIPs = 10.9.0.2/32
-```
-</details>
 
-<details>
-<summary><b>8. Исходящий шлюз Freedom (direct) со Split-маршрутизацией 4 подсетей</b></summary>
+8. Клиентские подписки и логика назначения DNS
 
-```json
-{
-  "tag": "direct",
-  "protocol": "freedom",
-  "settings": {
-    "finalRules": [
-      { "action": "allow", "ip": ["127.0.0.1"], "port": "53" },
-      { "action": "allow", "ip": ["10.8.1.0/24", "10.8.2.0/24", "10.8.3.0/24", "10.9.0.0/24"] },
-      { "action": "block", "ip": ["geoip:private"] },
-      { "action": "allow" }
-    ]
-  },
-  "streamSettings": {
-    "sockopt": { "domainStrategy": "ForceIPv4" }
-  }
-}
-```
-</details>
+Реквизиты доступа сохраняются в файле /root/vpn_credentials.txt (chmod 600).
 
----
+Точки подключения:
 
-## 📱 Подписки, логика назначения DNS и клиентская экосистема
+  - Адаптивная подписка (Base64 / Clash Auto-Detect):
+    https://yourdomain.online/my-post-key/SUB_Test
+  - Выделенная подписка JSON (Sing-box v1.10+):
+    https://yourdomain.online/my-post-key/sub-json/SUB_Test
+  - Выделенная подписка Clash / Mihomo YAML:
+    https://yourdomain.online/sub-clash/SUB_Test
+  - Клиентский файл нативного AmneziaWG (awg0):
+    /root/amneziawg-client.conf
+  - Клиентский файл 3X WireGuard:
+    /root/wireguard-client.conf
 
-Все авторизационные реквизиты доступа фиксируются в файле `/root/vpn_credentials.txt` (`chmod 600`).  
-В режиме чистой установки генерируются следующие ссылки и конфигурационные файлы:
+Клиентский профиль Native Kernel AmneziaWG (/root/amneziawg-client.conf):
 
-* **Адаптивная подписка (Base64 / Clash Auto-Detect):**  
-  `https://yourdomain.online/my-post-key/SUB_Test`  
-  *(Клиенты Clash/Mihomo автоматически получают YAML, v2rayNG/Happ — Base64, браузеры — веб-интерфейс с QR-кодами).*
-* **Выделенная подписка JSON (Sing-box v1.10+ / SFI / Karing):**  
-  `https://yourdomain.online/my-post-key/sub-json/SUB_Test`
-* **Выделенная подписка Clash / Mihomo YAML:**  
-  `https://yourdomain.online/sub-clash/SUB_Test`
-* **Клиентский файл нативного AmneziaWG (Kernel awg0):**  
-  `/root/amneziawg-client.conf` (Golden MTU 1360 / MSS 1320).
-* **Клиентский файл 3X WireGuard:**  
-  `/root/wireguard-client.conf` (MTU 1420 / MSS 1380).
-
-### Клиентский профиль Native Kernel AmneziaWG (`/root/amneziawg-client.conf`):
-
-```ini
 [Interface]
 Address = 10.9.0.2/32
-PrivateKey = CLIENT_PRIVATE_KEY
+PrivateKey = КЛИЕНТСКИЙ_PRIVATE_KEY
 DNS = 10.9.0.1
 MTU = 1360
 Jc = 4
 Jmin = 40
 Jmax = 70
-S1 = 64
+S1 = 72
 S2 = 56
 S3 = 32
 S4 = 16
-H1 = 149419586
-H2 = 878791997
-H3 = 1251051976
-H4 = 1657628296
+H1 = 138104463
+H2 = 465648900
+H3 = 1351372787
+H4 = 138617230
 
 [Peer]
-PublicKey = SERVER_PUBLIC_KEY
-Endpoint = yourdomain.online:51820
-AllowedIPs = 0.0.0.0/0, ::/0
+PublicKey = СЕРВЕРНЫЙ_PUBLIC_KEY
+Endpoint = yourdomain.online:8443
+AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
-```
 
-> [!NOTE]
-> ### 🌐 Инженерная логика назначения параметра `DNS` в клиентских профилях
-> В зависимости от выбранного при установке сетевого гео-профиля (`GEO_PROFILE`) и статуса приватного резолвера AdGuard Home (`ENABLE_AGH`), скрипт и демон `datasphere-core.py` автоматически подставляют в поле `DNS` одно из трех значений:
-> 
-> 1. **`DNS = 10.9.0.1` (При включенном AdGuard Home, `ENABLE_AGH=1`):**  
->    Внутренний IP-шлюз туннеля `awg0`. Все DNS-запросы клиента направляются внутрь зашифрованного туннеля на локальный сервис AdGuard Home (`127.0.0.1:53`), где проходят фильтрацию рекламы и разрешаются через защищенные апстримы DoH/DoQ.
-> 2. **`DNS = 1.1.1.1` (Зарубежный VPS — профиль `[2] EU/World`, например `DE`, при `ENABLE_AGH=0`):**  
->    Глобальный нейтральный резолвер Cloudflare (в профилях 3X WireGuard и инбаундах 3X-UI назначается пара `1.1.1.1, 8.8.8.8`). Обеспечивает максимальную скорость разрешения имен на европейских и американских магистралях без цензуры.
-> 3. **`DNS = 77.88.8.8` (Российский VPS или принудительный выбор профиля `[1] RU` при `ENABLE_AGH=0`):**  
->    Базовый публичный резолвер **Яндекс.DNS** (вторичный — `77.88.8.1`). Применяется для узлов внутри РФ либо в сценариях, когда необходимо исключить блокировку внешних DNS-запросов на сетях ТСПУ и обеспечить корректную гео-привязку российских CDN.
-> 
-> *Если при развёртывании на зарубежном сервере (например, в Германии — `DE`) был вручную выбран профиль `[1] RU`, в конфигурацию пропишется `77.88.8.8`. Вы можете в любой момент изменить строку `DNS = ...` в клиентском файле `.conf` на `1.1.1.1`, `8.8.8.8`, `9.9.9.9` или `10.9.0.1` (при активном AGH).*
+[!NOTE] Клиент AmneziaWG может использовать в качестве Endpoint как базовый порт
+:8443, так и любой порт из пула :35001-49999 (например,
+yourdomain.online:39415), трафик которого аппаратно перенаправляется ядром на
+порт 8443.
 
-### Матрица совместимости клиентских платформ:
+Логика назначения параметра DNS:
 
-| Клиентское ПО | Платформа | VLESS xHTTP (ML-KEM-768) | VLESS REALITY (Vision) | Hysteria 2 (UDP) | AmneziaWG v3.2 / v2.0 | Native Kernel AWG (awg0) | 3X WireGuard |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Amnezia VPN Client** | Win, macOS, Linux, Android, iOS | ❌ | ❌ | ❌ | ✔️ | ✔️ (Импорт .conf / QR) | ✔️ |
-| **Happ Proxy / Streisand** | iOS, iPadOS | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
-| **v2rayNG / v2rayN** | Android, Windows | ✔️ | ✔️ | ✔️ | ❌ | ❌ | ❌ |
-| **NekoBox (NB+)** | Android | ❌ | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
-| **Clash Verge Rev / Mihomo**| Desktop | ✔️ | ✔️ | ✔️ | ❌ | ❌ | ❌ |
-| **KeeneticOS / OpenWrt Podkop**| Маршрутизаторы | ✔️ | ✔️ | ✔️ | ✔️ (v2.0) | ✔️ (.conf) | ✔️ (.conf) |
-| **Официальный WireGuard Client**| Все платформы | ❌ | ❌ | ❌ | ❌ | ❌ | ✔️ (.conf) |
+1.  DNS = 10.9.0.1 (При активном AdGuard Home): Запросы маршрутизируются в
+    защищенный туннель на локальный резолвер 10.9.0.1:53 с фильтрацией рекламы и
+    шифрованием апстримов.
+2.  DNS = 1.1.1.1, 8.8.8.8 (Зарубежный профиль EU/World): Прямые нейтральные
+    резолверы Cloudflare и Google без локальной фильтрации.
+3.  DNS = 77.88.8.8, 77.88.8.1 (Российский профиль RU): Резолверы Яндекс.DNS для
+    исключения блокировок DNS на сетях ТСПУ внутри РФ.
 
----
+9. Интеграция приватного DoH AdGuard Home
 
-## 🌐 Приватный DNS AdGuard Home (DoH) со Split-маршрутизацией
+Сервис AdGuard Home изолирован на 127.0.0.1:3000 и обслуживает клиентов через
+шлюз Nginx с проверкой токена ClientID (home-router). Порт 53 закрыт от внешнего
+сканирования. Доверенные подсети туннелей: 10.8.1.0/24, 10.8.2.0/24, 10.8.3.0/24
+и 10.9.0.0/24.
 
-Локальный резолвер AdGuard Home изолирован на интерфейсе `127.0.0.1:3000` и обслуживает запросы DoH через шлюз Nginx с проверкой токена `ClientID` (по умолчанию `home-router`). Прямой порт 53 снаружи заблокирован. Пул доверенных подсетей охватывает все туннели: `10.8.1.0/24`, `10.8.2.0/24`, `10.8.3.0/24` и `10.9.0.0/24`.
+  - Панель управления DNS: https://dns.yourdomain.online/
+  - DoH URL для роутеров: https://dns.yourdomain.online/dns-query/home-router
 
-* **Панель управления DNS:** `https://dns.yourdomain.online/`
-* **DoH URL для роутеров и клиентов:** `https://dns.yourdomain.online/dns-query/home-router`
+Настройка роутера Keenetic (KeeneticOS 3.x / 4.x):
 
-### 1. Настройка маршрутизаторов Keenetic (KeeneticOS 3.x / 4.x):
-1. Перейдите в раздел **«Сетевые правила»** -> **«Интернет-фильтр»** (вкладка «Серверы DNS»).
-2. Нажмите **«Добавить сервер DNS»**:
-   * **Адрес DNS (Bootstrap):** `77.88.8.8` или `1.1.1.1` *(внимание: запрещено вводить публичный IP VPS во избежание циклического запроса)*;
-   * **Протокол:** `DNS-over-HTTPS (DoH)`;
-   * **URL-адрес:** `https://dns.yourdomain.online/dns-query/home-router`;
-   * **SNI:** `dns.yourdomain.online`.
-3. Активируйте опцию **«Игнорировать DNS провайдера»** и сохраните конфигурацию.
+1.  Сетевые правила \to Интернет-фильтр (вкладка «Серверы DNS»).
+2.  Добавить сервер DNS:
+      - Адрес DNS (Bootstrap): 77.88.8.8 или 1.1.1.1 (запрещено указывать IP
+        собственного VPS во избежание цикла);
+      - Протокол: DNS-over-HTTPS (DoH);
+      - URL-адрес: https://dns.yourdomain.online/dns-query/home-router;
+      - SNI: dns.yourdomain.online.
+3.  Включить опцию «Игнорировать DNS провайдера».
 
-### 2. Настройка маршрутизаторов OpenWrt (Пакет Podkop):
-1. В интерфейсе LuCI откройте **«Службы»** -> **«Podkop»** -> **«Настройки»**.
-2. В блоке параметров DNS укажите:
-   * **Протокол:** `DNS через HTTPS (DoH)`;
-   * **Строка подключения:** `dns.yourdomain.online/dns-query/home-router` (без схемы `https://`);
-   * **Bootstrap DNS сервер:** `77.88.8.8` или `1.1.1.1`.
-3. Сохраните конфигурацию и перезапустите службу Podkop.
+Настройка роутера OpenWrt (Пакет Podkop):
 
----
+1.  Службы \to Podkop \to Настройки.
+2.  В параметрах DNS указать:
+      - Протокол: DNS через HTTPS (DoH);
+      - Строка подключения: dns.yourdomain.online/dns-query/home-router;
+      - Bootstrap DNS: 77.88.8.8 или 1.1.1.1.
+3.  Сохранить настройки и перезапустить службу Podkop.
 
-## 🩺 Инженерный аудит, валидация и мониторинг
+10. Диагностика, аудит и мониторинг
 
-Комплексный чек-лист проверки состояния компонентов системы после развёртывания:
+Команды проверки состояния компонентов:
 
-```bash
-# 1. Проверка синтаксиса и статуса Nginx Mainline L4/L7
+# 1. Проверка синтаксиса и статуса Nginx
 nginx -t && systemctl status nginx --no-pager
 
-# 2. Инспекция наличия и прав L4 Unix-сокета в оперативной памяти (RAM)
+# 2. Проверка изоляции L4 Unix-сокета в RAM
 ls -la /dev/shm/nginx-http.sock
 
-# 3. Верификация Zero-SNI Defense (TLS-хэндшейк обязан сбрасываться при прямом запросе по IP)
+# 3. Верификация Zero-SNI (хэндшейк обязан сбрасываться при обращении по IP)
 curl -Iv https://ВАШ_IP_СЕРВЕРА 2>&1 | grep -E 'SSL|handshake|alert|Connection reset'
 
-# 4. Проверка изоляции VLESS xHTTP (строгий возврат 404 Not Found на GET-запрос)
+# 4. Проверка изоляции VLESS xHTTP (строгий 404 на GET-запрос)
 curl -Iv --http2 https://yourdomain.online/Stream-One-Path/
 
-# 5. Проверка ответа Stub 11443 для Steal-Oneself (должен отдавать HTTP/2 404)
-curl -Iv --http2 http://127.0.0.1:11443 2>&1 | head -n 15
-
-# 6. Инспекция состояния нативного модуля ядра AmneziaWG (awg0)
+# 5. Инспекция интерфейса ядра AmneziaWG (awg0) и активных пиров
 awg show awg0
 ip link show awg0
 
-# 7. Проверка статуса фонового сервиса DataSphere Core SSO Gateway
+# 6. Проверка статуса сервиса DataSphere Core SSO Gateway
 systemctl status datasphere-core --no-pager
 ss -tlnp | grep 20443
 
-# 8. Проверка локальных слушающих сокетов внутренних служб
-ss -tlnp | grep -E '10443|55443|50443|45443|46443|11443|9443|3000|20443'
+# 7. Проверка локальных слушающих сокетов
+ss -tlnp | grep -E '10443|55443|50443|45443|46443|9443|3000|20443'
 
-# 9. Инспекция UDP-сокетов (Hysteria 2, WireGuard, AmneziaWG v2/v3, Kernel awg0)
-ss -ulnp | grep -E '443|8443|8444|47443|51820'
+# 8. Проверка открытых UDP-сокетов туннелей
+ss -ulnp | grep -E '443|8443|10443|10444|10445'
 
-# 10. Проверка правил UFW, NAT-трансляции 4 подсетей и MSS Clamping
+# 9. Проверка правил UFW, NAT и MSS Clamping
 ufw status verbose
-iptables -t nat -L POSTROUTING -n -v
-iptables -t mangle -L FORWARD -n -v
+iptables -t nat -S PREROUTING
+iptables -t nat -S POSTROUTING
+iptables -t mangle -S FORWARD
 
-# 11. Проверка версии зафиксированного бинарника Xray Core
-/usr/local/x-ui/bin/xray version
+# 10. Мониторинг прохождения трафика туннелей в реальном времени
+tcpdump -ni any udp port 8443 -c 10
+tcpdump -ni any udp port 443 -c 10
 
-# 12. Инспекция записей БД 3X-UI SQLite
-sqlite3 /etc/x-ui/x-ui.db "SELECT id, remark, port, protocol, enable FROM inbounds;"
-sqlite3 /etc/x-ui/x-ui.db "SELECT id, email, sub_id, enable FROM clients;"
-sqlite3 /etc/x-ui/x-ui.db "SELECT id, remark, address, port, path, alpn FROM hosts;"
-```
+11. Резервное копирование и восстановление
 
----
+Создание горячего резервного архива:
 
-## 💾 Резервное копирование, восстановление и откат
-
-### Создание атомарного горячего бэкапа:
-```bash
-# Принудительный сброс WAL-журнала базы SQLite перед архивацией
 python3 -c "import sqlite3; c=sqlite3.connect('/etc/x-ui/x-ui.db'); c.execute('PRAGMA wal_checkpoint(FULL);'); c.close()" 2>/dev/null || true
 
-# Формирование защищенного архива
 tar -czvf /root/backup_vpn_$(date +%F_%H%M%S).tar.gz \
   /etc/x-ui \
   /etc/nginx \
@@ -784,18 +579,15 @@ tar -czvf /root/backup_vpn_$(date +%F_%H%M%S).tar.gz \
   /root/amneziawg-client.conf \
   /root/wireguard-client.conf 2>/dev/null || true
 chmod 600 /root/backup_vpn_*.tar.gz
-```
 
-### Восстановление системы из архива:
-```bash
+Восстановление системы из архива:
+
 systemctl stop x-ui nginx AdGuardHome datasphere-core awg-quick@awg0 2>/dev/null || true
 rm -f /etc/x-ui/x-ui.db-wal /etc/x-ui/x-ui.db-shm
-tar -xzvf /root/backup_vpn_ГГГГ-ММ-ДД_ЧЧММСС.tar.gz -C /
+tar -xzvf /root/backup_vpn_АРХИВ.tar.gz -C /
 nginx -t && systemctl start nginx x-ui AdGuardHome datasphere-core awg-quick@awg0
-```
 
----
+📄 Лицензия
 
-## 📄 Лицензия
-
-Проект распространяется на условиях открытой лицензии **MIT**. Полный юридический текст изложен в файле [LICENSE](LICENSE).
+Проект распространяется на условиях лицензии MIT. Полный текст лицензии доступен
+в файле LICENSE.
