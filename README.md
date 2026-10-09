@@ -1,6 +1,6 @@
 # 🛡️ Hardened Master Engine v3.5 DataSphere Ultra
 
-Техническая документация узла сетевой маскировки и туннелирования трафика: OS Hardening, TCP BBR, Nginx L4 Stream Router, 3X-UI, Xray Core v26.7.28 (Pinned), VLESS xHTTP (Native H2C Stream-One / ML-KEM-768), VLESS REALITY (Steal-Oneself & Classic), Hysteria 2, AdGuard Home DoH, нативный сервер AmneziaWG в ядре Linux (DKMS Bare-Metal, профиль AWG3) и шлюз управления DataSphere SSO Hub.
+Техническая документация узла сетевой маскировки и туннелирования трафика: OS Hardening, TCP BBR, Nginx L4 Stream Router, 3X-UI, Xray Core v26.7.28 (Pinned), VLESS xHTTP (Native H2C Stream-One / ML-KEM-768), VLESS REALITY (Steal-Oneself & Classic), Hysteria 2, AdGuard Home DoH, нативный сервер AmneziaWG в ядре Linux (DKMS Bare-Metal, профиль AWG3), сетевой экран UFW и шлюз управления DataSphere SSO Hub.
 
 ---
 
@@ -10,13 +10,14 @@
 2. [Матрица сетевых сокетов и портов](#2-матрица-сетевых-сокетов-и-портов)
 3. [Веб-маскировка и административный шлюз (DataSphere SSO)](#3-веб-маскировка-и-административный-шлюз-datasphere-sso)
 4. [Параметры обфускации AmneziaWG (Профиль AWG3)](#4-параметры-обфускации-amneziawg-профиль-awg3)
-5. [Системные требования и развёртывание](#5-системные-требования-и-развёртывание)
-6. [Параметры мастера установки](#6-параметры-мастера-установки)
-7. [Конфигурации инбаундов Xray-core, Nginx и ядра awg0](#7-конфигурации-инбаундов-xray-core-nginx-и-ядра-awg0)
-8. [Клиентские подписки и логика назначения DNS](#8-клиентские-подписки-и-логика-назначения-dns)
-9. [Интеграция приватного DoH AdGuard Home](#9-интеграция-приватного-doh-adguard-home)
-10. [Диагностика, аудит и мониторинг](#10-диагностика-аудит-и-мониторинг)
-11. [Резервное копирование и восстановление](#11-резервное-копирование-и-восстановление)
+5. [Маршрутизация, NAT и безопасность (UFW)](#5-маршрутизация-nat-и-безопасность-ufw)
+6. [Системные требования и развёртывание](#6-системные-требования-и-развёртывание)
+7. [Параметры мастера установки](#7-параметры-мастера-установки)
+8. [Конфигурации инбаундов Xray-core, Nginx и ядра awg0](#8-конфигурации-инбаундов-xray-core-nginx-и-ядра-awg0)
+9. [Клиентские подписки и логика назначения DNS](#9-клиентские-подписки-и-логика-назначения-dns)
+10. [Интеграция приватного DoH AdGuard Home](#10-интеграция-приватного-doh-adguard-home)
+11. [Диагностика, аудит и мониторинг](#11-диагностика-аудит-и-мониторинг)
+12. [Резервное копирование и восстановление](#12-резервное-копирование-и-восстановление)
 
 ---
 
@@ -35,14 +36,14 @@
      * Инбаунд Steal REALITY пересылает не-REALITY запросы с заголовком PROXY protocol v1 (`xver: 1`) на виртуальный хост `02-steal-fallback.conf` (`127.0.0.1:9443`). Nginx отвечает легитимным TLS-сертификатом `cdn.*`, предотвращая сброс сессии (`errno 104`).
 
 2. **UDP-контур (Скоростные пулы и туннели):**
-   * **Hysteria 2:** Базовый порт `443/udp`. Пул динамического переключения портов `20000:35000/udp` перенаправляется через Netfilter PREROUTING на порт 443.
-   * **Native Kernel AmneziaWG (awg0):** Базовый сокет ядра `8443/udp`. Скоростной пул `35001:49999/udp` перенаправляется через Netfilter PREROUTING на порт 8443.
+   * **Hysteria 2:** Базовый порт `443/udp`. Пул динамического переключения портов `20000:35000/udp` перенаправляется средствами фаервола UFW на порт 443.
+   * **Native Kernel AmneziaWG (awg0):** Базовый сокет ядра `8443/udp`. Скоростной пул `35001:49999/udp` перенаправляется средствами фаервола UFW на порт 8443.
    * **3X-UI UDP Stack:** Изолированные порты `10443/udp` (AWG v3.2), `10444/udp` (AWG v2.0 Legacy) и `10445/udp` (3X WireGuard).
 
 ```mermaid
 flowchart TD
     ClientTCP["Клиент: TCP (HTTPS, REALITY, xHTTP, ACME)"] -->|TCP 80 / 443| NginxL4["Nginx L4 Stream Router (:443)"]
-    ClientUDP["Клиент: UDP (Hy2, Kernel AWG, AWG v3/v2, WG)"] -->|Диапазоны UDP| Netfilter["Netfilter / UFW PREROUTING"]
+    ClientUDP["Клиент: UDP (Hy2, Kernel AWG, AWG v3/v2, WG)"] -->|Диапазоны UDP| UFW_Rules["Фаервол UFW (Фильтрация и NAT)"]
 
     subgraph TCP_Pipeline ["Маршрутизация TCP"]
         Port80["Порт :80"] -->|ACME HTTP-01| ACME["Webroot: /.well-known/acme-challenge/"]
@@ -67,11 +68,11 @@ flowchart TD
     end
 
     subgraph UDP_Pipeline ["Маршрутизация UDP"]
-        Netfilter -->|"REDIRECT 20000:35000 -> :443"| XrayHy2["Hysteria 2 UDP :443 (QUIC)"]
-        Netfilter -->|"REDIRECT 35001:49999 -> :8443"| KernelAWG["Kernel AmneziaWG awg0 :8443 (AWG3)"]
-        Netfilter -->|"Прямой порт :10443"| AWG3["AmneziaWG v3.2 3X-UI :10443"]
-        Netfilter -->|"Прямой порт :10444"| AWG2["AmneziaWG v2.0 3X-UI :10444"]
-        Netfilter -->|"Прямой порт :10445"| WG3X["3X WireGuard 3X-UI :10445"]
+        UFW_Rules -->|"REDIRECT 20000:35000 -> :443"| XrayHy2["Hysteria 2 UDP :443 (QUIC)"]
+        UFW_Rules -->|"REDIRECT 35001:49999 -> :8443"| KernelAWG["Kernel AmneziaWG awg0 :8443 (AWG3)"]
+        UFW_Rules -->|"Прямой порт :10443"| AWG3["AmneziaWG v3.2 3X-UI :10443"]
+        UFW_Rules -->|"Прямой порт :10444"| AWG2["AmneziaWG v2.0 3X-UI :10444"]
+        UFW_Rules -->|"Прямой порт :10445"| WG3X["3X WireGuard 3X-UI :10445"]
     end
 ```
 
@@ -128,7 +129,7 @@ $$\mathbf{S3 \neq S2 + 28} \quad (32 \neq 56 + 28 = 84) \quad \text{— искл
 $$\mathbf{S1, S2, S3, S4 \ge 12} \quad \text{— обеспечивает извлечение 12-байтного ChaCha20 Nonce в AWG 3.x}$$
 
 * **Спецификация параметров:**
-  * `MTU = 1360` (с фиксацией `TCPMSS 1320` в таблице `*mangle`);
+  * `MTU = 1360` (с фиксацией `TCPMSS 1320` в фаерволе);
   * `Jc = 4`, `Jmin = 40`, `Jmax = 70` (рандомизация мусорных пакетов перед хэндшейком);
   * `S1 = 72`, `S2 = 56`, `S3 = 32`, `S4 = 16`;
   * `H1..H4`: Уникальные псевдослучайные 32-битные скаляры в диапазоне от $10^7$ до $2147483647$. Использование скаляров вместо диапазонов обеспечивает совместимость с маршрутизаторами KeeneticOS / OpenWrt и десктопными клиентами.
@@ -136,7 +137,26 @@ $$\mathbf{S1, S2, S3, S4 \ge 12} \quad \text{— обеспечивает изв
 
 ---
 
-## 5. Системные требования и развёртывание
+## 5. Маршрутизация, NAT и безопасность (UFW)
+
+Вся фильтрация трафика, трансляция адресов (NAT), форвардинг и фиксация MSS централизованы в конфигурации сетевого экрана **UFW** (`/etc/ufw/before.rules` и `/etc/default/ufw`). 
+
+Файлы конфигураций интерфейсов (включая `awg0.conf`) полностью очищены от сторонних скриптов: они не содержат вызовов фаервола, что исключает дублирование правил в системе и сбои при аварийных перезапусках туннелей.
+
+### Правила обработки пакетов в UFW:
+1. **Редирект скоростных пулов (PREROUTING):**
+   * Пул Hysteria 2: `20000:35000/udp` перенаправляется на базовый порт `443/udp`.
+   * Пул AmneziaWG Native: `35001:49999/udp` перенаправляется на базовый порт `8443/udp`.
+2. **Маскарадинг подсетей (POSTROUTING MASQUERADE):**
+   * Туннельный трафик подсетей `10.9.0.0/24` (`awg0`), `10.8.1.0/24`, `10.8.2.0/24` и `10.8.3.0/24` маскарадится через внешний интерфейс сервера (`eth0`).
+3. **Маршрутизация и фильтрация (FORWARD):**
+   * Межсетевой форвардинг трафика туннелей активирован системной политикой `DEFAULT_FORWARD_POLICY="ACCEPT"` в `/etc/default/ufw`.
+4. **Фиксация максимального размера сегмента (TCP MSS Clamping):**
+   * Принудительная установка `TCPMSS 1320` для туннельных подсетей AmneziaWG и `1380` для WireGuard предотвращает фрагментацию пакетов и Path MTU Blackhole в мобильных сетях.
+
+---
+
+## 6. Системные требования и развёртывание
 
 ### Поддерживаемые операционные системы:
 * Ubuntu 22.04 LTS (Jammy)
@@ -156,11 +176,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Rout
 ```
 
 > [!IMPORTANT]
-> После завершения работы скрипта проверьте подключение по SSH в отдельном окне терминала и перезагрузите сервер командой `reboot` для активации модуля ядра `amneziawg`, правил Netfilter и оптимизаций `sysctl`.
+> После завершения работы скрипта проверьте подключение по SSH в отдельном окне терминала и перезагрузите сервер командой `reboot` для активации модуля ядра `amneziawg`, сетевых правил UFW и оптимизаций `sysctl`.
 
 ---
 
-## 6. Параметры мастера установки
+## 7. Параметры мастера установки
 
 | Параметр | Значение по умолчанию | Описание |
 | :--- | :--- | :--- |
@@ -180,7 +200,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Rout
 
 ---
 
-## 7. Конфигурации инбаундов Xray-core, Nginx и ядра awg0
+## 8. Конфигурации инбаундов Xray-core, Nginx и ядра awg0
 
 <details>
 <summary><b>1. VLESS xHTTP Stream-One + ML-KEM-768 (Внутренний порт :50443)</b></summary>
@@ -445,8 +465,6 @@ H1 = 138104463
 H2 = 465648900
 H3 = 1351372787
 H4 = 138617230
-PostUp = iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o eth0 -j MASQUERADE; iptables -t nat -A PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports 8443
-PostDown = iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s 10.9.0.0/24 -o eth0 -j MASQUERADE; iptables -t nat -D PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports 8443
 
 # --- Client: Test-Client ---
 [Peer]
@@ -457,7 +475,7 @@ AllowedIPs = 10.9.0.2/32
 
 ---
 
-## 8. Клиентские подписки и логика назначения DNS
+## 9. Клиентские подписки и логика назначения DNS
 
 Реквизиты доступа сохраняются в файле `/root/vpn_credentials.txt` (`chmod 600`).
 
@@ -501,7 +519,7 @@ PersistentKeepalive = 25
 ```
 
 > [!NOTE]
-> Клиент AmneziaWG может использовать в качестве `Endpoint` как базовый порт `:8443`, так и любой порт из пула `:35001-49999` (например, `yourdomain.online:39415`), трафик которого аппаратно перенаправляется ядром на порт 8443.
+> Клиент AmneziaWG может использовать в качестве `Endpoint` как базовый порт `:8443`, так и любой порт из пула `:35001-49999` (например, `yourdomain.online:39415`), трафик которого перенаправляется сетевым экраном UFW на базовый порт 8443.
 
 ### Логика назначения параметра `DNS`:
 1. **`DNS = 10.9.0.1` (При активном AdGuard Home):** Запросы маршрутизируются в защищенный туннель на локальный резолвер `10.9.0.1:53` с фильтрацией рекламы и шифрованием апстримов.
@@ -510,7 +528,7 @@ PersistentKeepalive = 25
 
 ---
 
-## 9. Интеграция приватного DoH AdGuard Home
+## 10. Интеграция приватного DoH AdGuard Home
 
 Сервис AdGuard Home изолирован на `127.0.0.1:3000` и обслуживает клиентов через шлюз Nginx с проверкой токена `ClientID` (`home-router`). Порт 53 закрыт от внешнего сканирования. Доверенные подсети туннелей: `10.8.1.0/24`, `10.8.2.0/24`, `10.8.3.0/24` и `10.9.0.0/24`.
 
@@ -536,7 +554,7 @@ PersistentKeepalive = 25
 
 ---
 
-## 10. Диагностика, аудит и мониторинг
+## 11. Диагностика, аудит и мониторинг
 
 Команды проверки состояния компонентов:
 
@@ -561,17 +579,15 @@ ip link show awg0
 systemctl status datasphere-core --no-pager
 ss -tlnp | grep 20443
 
-# 7. Проверка локальных слушающих сокетов
+# 7. Проверка локальных слушающих сокетов внутренних служб
 ss -tlnp | grep -E '10443|55443|50443|45443|46443|9443|3000|20443'
 
 # 8. Проверка открытых UDP-сокетов туннелей
 ss -ulnp | grep -E '443|8443|10443|10444|10445'
 
-# 9. Проверка правил UFW, NAT и MSS Clamping
+# 9. Проверка статуса сетевого экрана UFW и правил маршрутизации
 ufw status verbose
-iptables -t nat -S PREROUTING
-iptables -t nat -S POSTROUTING
-iptables -t mangle -S FORWARD
+grep -E 'PREROUTING|POSTROUTING|TCPMSS' /etc/ufw/before.rules
 
 # 10. Мониторинг прохождения трафика туннелей в реальном времени
 tcpdump -ni any udp port 8443 -c 10
@@ -580,7 +596,7 @@ tcpdump -ni any udp port 443 -c 10
 
 ---
 
-## 11. Резервное копирование и восстановление
+## 12. Резервное копирование и восстановление
 
 ### Создание горячего резервного архива:
 ```bash
