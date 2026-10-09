@@ -512,7 +512,7 @@ SUB_PATH="/${RAW_SUB_PATH#/}"
 SUB_PATH="${SUB_PATH%/}/"
 
 SUB_JSON_PATH="${SUB_PATH}sub-json/"
-SUB_CLASH_PATH="/sub-clash/"
+SUB_CLASH_PATH="${SUB_PATH}sub-clash/"
 
 prompt_port "Внутренний порт инбаунда VLESS xHTTP (Native H2 Stream-One)" "50443" XHTTP_STREAM_PORT
 prompt_default "Секретный URI-путь для xHTTP" "Stream-One-Path" RAW_XHTTP_STREAM_PATH
@@ -2596,7 +2596,19 @@ server {
         proxy_set_header Host \$http_host;
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
-    location ~* ^/(sub|json|clash)/ {
+
+    location ^~ ${SUB_CLASH_PATH} {
+        proxy_hide_header Content-Security-Policy;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'self';" always;
+
+        limit_req zone=subs burst=60 nodelay;
+        proxy_pass http://sub_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location ~* ^/(sub|json|clash|sub-clash)/ {
         proxy_hide_header Content-Security-Policy;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'self';" always;
 
@@ -2898,7 +2910,7 @@ for cp in "${CLASSIC_PORTS_LIST[@]:-}"; do
     CLASSIC_CONFIG_DATA="${CLASSIC_CONFIG_DATA}${cp}=${snis_joined};"
 done
 
-export DB_PATH PRIMARY_DOMAIN PANEL_PORT PANEL_PATH SUB_PORT SUB_PATH
+export DB_PATH PRIMARY_DOMAIN PANEL_PORT PANEL_PATH SUB_PORT SUB_PATH SUB_CLASH_PATH
 export XHTTP_STREAM_PORT XHTTP_STREAM_PATH ENABLE_STEAL STEAL_CONFIG_DATA
 export ENABLE_CLASSIC CLASSIC_CONFIG_DATA ENABLE_HY2 HY2_PORT ENABLE_AWG_V3 AWG_V3_PORT
 export ENABLE_AWG_V2 AWG_V2_PORT ENABLE_WG_NATIVE WG_NATIVE_PORT ADMIN_USER ADMIN_PASS
@@ -2957,7 +2969,7 @@ panel_path = os.environ["PANEL_PATH"]
 sub_port = os.environ["SUB_PORT"]
 sub_path = os.environ["SUB_PATH"]
 sub_json_path = f"{sub_path}sub-json/"
-sub_clash_path = "/sub-clash/"
+sub_clash_path = os.environ.get("SUB_CLASH_PATH", f"{sub_path}sub-clash/")
 xhttp_port = int(os.environ["XHTTP_STREAM_PORT"])
 xhttp_path = os.environ["XHTTP_STREAM_PATH"]
 admin_u = os.environ["ADMIN_USER"]
@@ -3101,7 +3113,7 @@ settings_data = {
 for k, v in settings_data.items():
     cur.execute("SELECT id FROM settings WHERE key = ?", (k,))
     if cur.fetchone():
-        if install_mode == "1" or k in ["webListen", "subListen", "subPath", "subURI", "subJsonPath", "subJsonURI", "subClashPath", "subClashURI", "trustedProxyCIDRs", "subJsonAlwaysArray", "subClashAutoDetect", "subShowInfo", "subEnable"]:
+        if install_mode == "1" or k in ["webListen", "subListen", "subPath", "subURI", "subJsonPath", "subJsonURI", "subClashPath", "subClashURI", "trustedProxyCIDRs", "subJsonAlwaysArray", "subClashAutoDetect", "subShowInfo", "subEnable", "subClashEnable", "subJsonEnable"]:
             cur.execute("UPDATE settings SET value = ? WHERE key = ?", (str(v), k))
     else:
         cur.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
@@ -4580,6 +4592,9 @@ echo -e "  ${GREEN}https://${PRIMARY_DOMAIN}${SUB_PATH}${UNIFIED_SUB_ID}${NC}"
 echo
 echo -e "  ${BOLD}Клиент «${TEST_EMAIL}» (JSON для Sing-box):${NC}"
 echo -e "  ${GREEN}https://${PRIMARY_DOMAIN}${SUB_JSON_PATH}${UNIFIED_SUB_ID}${NC}"
+echo
+echo -e "  ${BOLD}Клиент «${TEST_EMAIL}» (Clash / Mihomo Meta):${NC}"
+echo -e "  ${GREEN}https://${PRIMARY_DOMAIN}${SUB_CLASH_PATH}${UNIFIED_SUB_ID}${NC}"
 echo
 fi
 echo -e "  ${WHITE}Zero-SNI Shield:${NC}             ${GREEN}ssl_reject_handshake on (Скан IP изолирован)${NC}"
