@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup Monoscript: Hardened Master Engine v3.3.5 Universal
+# Production AutoSetup Monoscript: Hardened Master Engine v3.5 DataSphere Ultra
 # Architecture: Single-IP Ultra Enhanced + Native Kernel AmneziaWG (Bare-Metal)
-# Zero-Leak Frontend: DataSphere SSO In-Memory Gateway + Stealth Admin Hub
-# OS Hardening + BBR + somaxconn + Nginx L4 Stream + 3X-UI + Xray v26.7.28 Pinned
-# VLESS xHTTP (Native H2C Stream-One) + ML-KEM-768 + Multi-Port REALITY + Stub 11443
-# Multi-Tunnel UDP Engine: Hysteria 2 + AWG v3.2 + AWG v2.0 + 3X WireGuard
-# High-Speed Golden Standard: Native AWG awg0 (MTU 1360 / MSS 1320 / Jmax 70)
-# Zero-SNI Defense (ssl_reject_handshake) + Port 80 444 Drop + WAF v6.0.5 Hardened
+# Zero-Leak Frontend: DataSphere Enterprise SSO Hub + Modular WebCrypto Plane
+# Strict OS Gating: Ubuntu 22.04 / 24.04 / 26.04 & Debian 12 / 13
+# Nginx L4 Single-Ingress (TCP 443) + Xray v26.7.28 Pinned + ML-KEM-768 + Vision
+# Dual UDP Speed Pools: Hy2 (20000:35000 -> 443) | AWG Native (35001:49999 -> 8443)
+# AWG3 Golden Matrix: S1=72, S2=56, S3=32, S4=16, Jc=4, Jmin=40, Jmax=70, MTU=1360
+# Isolated 3X-UI UDP Stack: AWG v3.2 (:10443) | AWG v2.0 (:10444) | WG (:10445)
+# Zero-SNI Defense + Port 80 444 Drop + Live Anti-Loop Fallback 9443
 # Zero-Placeholder Guarantee: Production-Grade Monolithic Script
 # ==============================================================================
 
@@ -23,7 +24,7 @@ export PYTHONUTF8=1
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-LOCK_FILE="/var/run/hardened-master-engine-v335.lock"
+LOCK_FILE="/var/run/hardened-master-engine-v350.lock"
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
     echo -e "\033[0;31m[X] Ошибка: Установщик уже выполняется в параллельном процессе.\033[0m" >&2
@@ -56,13 +57,13 @@ trap 'cleanup $LINENO' ERR INT TERM
 
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN}  Hardened Master Engine v3.3.5 (Single-IP Ultra + Native AmneziaWG)  ${NC}"
+echo -e "${GREEN}  Hardened Master Engine v3.5 (DataSphere Ultra + Native AmneziaWG)  ${NC}"
 echo -e "${CYAN}  Dual-Mode: Clean Setup / Safe Migration + Nginx L4 Native + 3X-UI  ${NC}"
 echo -e "${WHITE}  Xray Core v26.7.28 Pinned + Native H2C xHTTP + ML-KEM-768 + Vision  ${NC}"
-echo -e "${WHITE}  UDP Stack: Hysteria 2 + AWG v3.2 + AWG v2.0 + 3X WireGuard         ${NC}"
-echo -e "${WHITE}  Native Kernel Engine: AmneziaWG (awg0, MTU 1360 / MSS 1320 Golden)  ${NC}"
+echo -e "${WHITE}  Dual UDP Pools: Hy2 (20000-35000) & AWG Native (35001-49999)      ${NC}"
+echo -e "${WHITE}  AWG3 Golden Matrix: S1=72, S2=56, S3=32, S4=16, MTU 1360 / MSS 1320 ${NC}"
 echo -e "${WHITE}  Stealth SSO Hub: DataSphere In-Memory Portal (3X-UI / AWG / AGH)   ${NC}"
-echo -e "${WHITE}  Shield: Zero-SNI + Port 80 444 Drop + Stub 11443 (PROXY_PROTO)      ${NC}"
+echo -e "${WHITE}  Ingress Shield: Zero-SNI + Port 80 444 Drop + Live Fallback 9443   ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 if [ "$EUID" -ne 0 ]; then
@@ -75,18 +76,15 @@ ROOT_PASSWORD=""
 NEW_USERNAME=""
 NEW_USER_PASS=""
 HY2_PORT="443"
-AWG_V3_PORT="8443"
-AWG_V2_PORT="8444"
-WG_NATIVE_PORT="47443"
+NATIVE_AWG_PORT="8443"
+AWG_V3_PORT="10443"
+AWG_V2_PORT="10444"
+WG_NATIVE_PORT="10445"
 ENABLE_NATIVE_AWG=1
-NATIVE_AWG_PORT="51820"
 AGH_DOMAIN=""
 AGH_USER="admin"
 AGH_PASS=""
 AGH_CLIENT_ID=""
-
-rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx /usr/share/keyrings/nginx-archive-keyring.gpg.tmp 2>/dev/null || true
-[ -f /usr/share/keyrings/nginx-archive-keyring.gpg ] && [ ! -s /usr/share/keyrings/nginx-archive-keyring.gpg ] && rm -f /usr/share/keyrings/nginx-archive-keyring.gpg 2>/dev/null || true
 
 mkdir -p /etc/needrestart/conf.d
 echo "\$nrconf{restart} = 'a';" > /etc/needrestart/conf.d/99-disable-auto-restart.conf 2>/dev/null || true
@@ -108,7 +106,7 @@ if [ -f /etc/os-release ]; then
             if [[ "$MAJOR_VER" =~ ^[0-9]+$ ]] && [ "$MAJOR_VER" -ge 22 ]; then
                 OS_COMPATIBLE=1
             fi
-        elif [[ "$OS_CODENAME" =~ ^(jammy|noble|plucky|testing)$ ]]; then
+        elif [[ "$OS_CODENAME" =~ ^(jammy|noble|plucky|questy|testing)$ ]]; then
             OS_COMPATIBLE=1
         fi
     elif [ "$OS_ID" = "debian" ]; then
@@ -123,7 +121,7 @@ if [ -f /etc/os-release ]; then
     fi
 
     if [ "$OS_COMPATIBLE" -ne 1 ]; then
-        die "ОС ${PRETTY_NAME:-$OS_ID $OS_VER_ID} ($OS_CODENAME) не поддерживается. Требуется Ubuntu 22.04+ / Debian 12+."
+        die "ОС ${PRETTY_NAME:-$OS_ID $OS_VER_ID} ($OS_CODENAME) не поддерживается. Разрешены строго Ubuntu 22.04+ / 24.04+ / 26.04+ или Debian 12+ / 13+."
     fi
     ok "Операционная система валидирована: ${PRETTY_NAME:-$OS_ID $OS_VER_ID} ($OS_CODENAME)"
 else
@@ -317,7 +315,7 @@ if [ -n "$EXISTING_DB_PATH" ]; then
     echo -e "${YELLOW}=====================================================================${NC}"
     echo -e "  1) ${RED}Чистая установка (Clean Install)${NC} — Сброс базы, новые ключи и клиенты"
     echo -e "  2) ${GREEN}${BOLD}Безопасное обновление (Safe Migration Mode)${NC} — Сохранение ВСЕХ клиентов,"
-    echo -e "     их UUID, ключей, паролей, статистики и хостов + авто-патч схемы ALPN"
+    echo -e "     их UUID, ключей, паролей, статистики и хостов + авто-патч схемы ALPN/SNI"
     prompt_default "Выберите режим работы" "2" INSTALL_MODE
 
     if [ "$INSTALL_MODE" = "2" ]; then
@@ -438,7 +436,7 @@ else
     INSTALL_EXTRA_UTILS=0
 fi
 
-if prompt_yes_no "Включить TCP BBR, somaxconn и отключить IPv6?" "y"; then
+if prompt_yes_no "Включить TCP BBR, somaxconn, MTU probing и отключить IPv6?" "y"; then
     ENABLE_BBR_IPV6=1
 else
     ENABLE_BBR_IPV6=0
@@ -535,7 +533,7 @@ fi
 
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 4: Настройка протоколов маскировки REALITY ---${NC}"
-if prompt_yes_no "Включить Steal-Oneself REALITY (Кража у своего поддомена)?" "y"; then
+if prompt_yes_no "Включить Steal-Oneself REALITY (Кража у своего поддомена с Anti-Loop Fallback 9443)?" "y"; then
     ENABLE_STEAL=1
 else
     ENABLE_STEAL=0
@@ -590,7 +588,7 @@ if [ "$ENABLE_STEAL" -eq 1 ]; then
             DOMAIN_TO_PORT["$S_DOM"]="$PORT_VAL"
             port_doms_str="${port_doms_str} ${S_DOM}"
             added_count_for_port=$((added_count_for_port + 1))
-            ok "    Домен $S_DOM привязан к инбаунд-порту $PORT_VAL (Stub 11443)"
+            ok "    Домен $S_DOM привязан к инбаунд-порту $PORT_VAL (Anti-Loop Fallback 9443)"
         done
         STEAL_PORT_DOMAINS["$PORT_VAL"]="$(echo "$port_doms_str" | xargs)"
 
@@ -682,7 +680,7 @@ while true; do
 done
 
 echo
-echo -e "${WHITE}${BOLD}--- ШАГ 6: Скоростные UDP VPN туннели ---${NC}"
+echo -e "${WHITE}${BOLD}--- ШАГ 6: Скоростные UDP VPN туннели и портовые пулы ---${NC}"
 if prompt_yes_no "Установить Hysteria 2 (UDP)?" "y"; then
     ENABLE_HY2=1
 else
@@ -694,14 +692,27 @@ if [ "$ENABLE_HY2" -eq 1 ]; then
     prompt_port "  Внешний UDP-порт для Hysteria 2" "443" HY2_PORT
     echo -e "  ${WHITE}Режим работы портов Hysteria 2:${NC}"
     echo -e "    1) ${GREEN}Одиночный порт :${HY2_PORT}/udp${NC}"
-    echo -e "    2) ${GREEN}Port Hopping :${HY2_PORT} + диапазон 20000-50000/udp${NC}"
+    echo -e "    2) ${GREEN}Скоростной пул Hopping :${HY2_PORT} + диапазон 20000-35000/udp${NC}"
     prompt_default "  Выберите вариант (1 или 2)" "2" HY2_MODE_CHOICE
     if [ "$HY2_MODE_CHOICE" = "2" ]; then
         ENABLE_HY2_HOP=1
-        ok "  Port Hopping активирован"
+        ok "  Hysteria 2 Hopping пул 20000:35000 активирован"
     else
         ENABLE_HY2_HOP=0
         ok "  Выбран одиночный порт ${HY2_PORT}/udp"
+    fi
+fi
+
+if [ "$VIRT_TYPE" = "lxc" ] || [ "$VIRT_TYPE" = "openvz" ] || [ "$VIRT_TYPE" = "docker" ]; then
+    warn "Обнаружена среда контейнеризации ($VIRT_TYPE). Нативный DKMS AmneziaWG отключён (требуется KVM/Bare-Metal)."
+    ENABLE_NATIVE_AWG=0
+else
+    if prompt_yes_no "Установить НА ТЕХНОЛОГИЯХ ЯДРА нативный сервер AmneziaWG (Bare-Metal awg0)?" "y"; then
+        ENABLE_NATIVE_AWG=1
+        prompt_port "  Базовый UDP-порт для нативного сервера AmneziaWG awg0" "8443" NATIVE_AWG_PORT
+        ok "  Скоростной пул AmneziaWG 35001-49999/udp привязан к порту :${NATIVE_AWG_PORT}/udp"
+    else
+        ENABLE_NATIVE_AWG=0
     fi
 fi
 
@@ -711,7 +722,7 @@ else
     ENABLE_AWG_V3=0
 fi
 if [ "$ENABLE_AWG_V3" -eq 1 ]; then
-    prompt_port "  Внешний UDP-порт для AmneziaWG v3.2 (3X-UI)" "8443" AWG_V3_PORT
+    prompt_port "  Выделенный UDP-порт для AmneziaWG v3.2 (3X-UI)" "10443" AWG_V3_PORT
 fi
 
 if prompt_yes_no "Установить AmneziaWG v2.0 / Legacy в 3X-UI (UDP)?" "y"; then
@@ -720,28 +731,16 @@ else
     ENABLE_AWG_V2=0
 fi
 if [ "$ENABLE_AWG_V2" -eq 1 ]; then
-    prompt_port "  Внешний UDP-порт для AmneziaWG v2.0 (3X-UI)" "8444" AWG_V2_PORT
+    prompt_port "  Выделенный UDP-порт для AmneziaWG v2.0 (3X-UI)" "10444" AWG_V2_PORT
 fi
 
-if prompt_yes_no "Установить чистый 3X WireGuard в 3X-UI (UDP, MTU 1420 / MSS 1380)?" "y"; then
+if prompt_yes_no "Установить чистый 3X WireGuard в 3X-UI (UDP)?" "y"; then
     ENABLE_WG_NATIVE=1
 else
     ENABLE_WG_NATIVE=0
 fi
 if [ "$ENABLE_WG_NATIVE" -eq 1 ]; then
-    prompt_port "  Внешний UDP-порт для 3X WireGuard (3X-UI)" "47443" WG_NATIVE_PORT
-fi
-
-if [ "$VIRT_TYPE" = "lxc" ] || [ "$VIRT_TYPE" = "openvz" ] || [ "$VIRT_TYPE" = "docker" ]; then
-    warn "Обнаружена среда контейнеризации ($VIRT_TYPE). Нативный DKMS AmneziaWG отключён (требуется KVM/Bare-Metal)."
-    ENABLE_NATIVE_AWG=0
-else
-    if prompt_yes_no "Установить НА ТЕХНОЛОГИЯХ ЯДРА нативный сервер AmneziaWG (Bare-Metal, MTU 1360 Golden)?" "y"; then
-        ENABLE_NATIVE_AWG=1
-        prompt_port "  Выделенный UDP-порт для нативного сервера AmneziaWG" "51820" NATIVE_AWG_PORT
-    else
-        ENABLE_NATIVE_AWG=0
-    fi
+    prompt_port "  Выделенный UDP-порт для 3X WireGuard (3X-UI)" "10445" WG_NATIVE_PORT
 fi
 
 echo
@@ -792,8 +791,6 @@ echo -e "${CYAN}================================================================
 echo -e "${GREEN}  ФАЗА 1: Hardening ОС, TCP BBR, somaxconn и Zero-Log Storage        ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
-rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx 2>/dev/null || true
-
 log "Обновление пакетных репозиториев..."
 wait_for_apt_lock
 apt-get update -q
@@ -823,7 +820,6 @@ if [ "${INSTALL_EXTRA_UTILS:-0}" -eq 1 ]; then
 fi
 ok "Системные утилиты установлены."
 
-# Zero-Log Policy для journald (хранение логов в RAM)
 mkdir -p /etc/systemd/journald.conf.d/
 cat << 'EOF' > /etc/systemd/journald.conf.d/00-volatile.conf
 [Journal]
@@ -835,7 +831,7 @@ systemctl restart systemd-journald 2>/dev/null || true
 ok "Политика Zero-Log активирована в RAM (systemd-journald Storage=volatile)."
 
 if [ "${ENABLE_BBR_IPV6:-0}" -eq 1 ]; then
-    log "Настройка TCP BBR, fq, somaxconn, loose rp_filter, ip_nonlocal_bind и отключение IPv6..."
+    log "Настройка TCP BBR, fq, somaxconn, Path MTU probing, loose rp_filter и отключение IPv6..."
     modprobe tcp_bbr 2>/dev/null || true
     mkdir -p /etc/sysctl.d/
     cat << 'EOF' > /etc/sysctl.d/99-hardened-network.conf
@@ -873,7 +869,16 @@ vm.swappiness = 10
 fs.file-max = 2097152
 net.ipv4.tcp_fastopen = 3
 net.netfilter.nf_conntrack_max = 1048576
+net.netfilter.nf_conntrack_udp_timeout = 30
+net.netfilter.nf_conntrack_udp_timeout_stream = 120
 net.ipv4.tcp_notsent_lowat = 16384
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_mtu_probe_floor = 1024
+net.ipv4.tcp_orphan_retries = 2
+fs.inotify.max_user_watches = 524288
+fs.inotify.max_user_instances = 8192
+vm.dirty_ratio = 6
+vm.dirty_background_ratio = 3
 EOF
     sysctl --system >/dev/null 2>&1 || true
 fi
@@ -990,7 +995,7 @@ systemctl restart fail2ban || true
 ok "Служба Fail2ban активна."
 
 # =============================================================
-#  ФАЗА 2: ВНЕШНИЙ ШЛЮЗ NGINX, SSL И ADGUARD HOME DOH
+#  ФАЗА 2: ВНЕШНИЙ ШЛЮЗ NGINX MAINLINE, SSL И ADGUARD HOME DOH
 # =============================================================
 echo
 echo -e "${CYAN}=====================================================================${NC}"
@@ -1023,19 +1028,17 @@ for dom in "${ALL_DOMAINS[@]}"; do
     fi
 done
 
-log "Оркестрация репозитория Nginx Mainline для $OS_ID ($OS_CODENAME)..."
+log "Оркестрация официального репозитория Nginx Mainline для $OS_ID ($OS_CODENAME)..."
 systemctl stop nginx 2>/dev/null || true
 
 NGINX_KEYRING="/usr/share/keyrings/nginx-archive-keyring.gpg"
 mkdir -p /usr/share/keyrings
-rm -f "$NGINX_KEYRING" "${NGINX_KEYRING}.tmp"
 
 NGINX_KEY_OK=0
 for key_url in "https://nginx.org/keys/nginx_signing.key" "http://nginx.org/keys/nginx_signing.key"; do
     log "Запрос ключа Nginx: $key_url"
-    if curl -fsSL --connect-timeout 12 -m 30 --retry 2 "$key_url" 2>/dev/null | gpg --dearmor -o "${NGINX_KEYRING}.tmp" 2>/dev/null; then
-        if [ -s "${NGINX_KEYRING}.tmp" ]; then
-            mv -f "${NGINX_KEYRING}.tmp" "$NGINX_KEYRING"
+    if curl -fsSL --connect-timeout 12 -m 30 --retry 2 "$key_url" 2>/dev/null | gpg --dearmor --yes -o "$NGINX_KEYRING" 2>/dev/null; then
+        if [ -s "$NGINX_KEYRING" ]; then
             chmod 644 "$NGINX_KEYRING"
             NGINX_KEY_OK=1
             ok "Ключ Nginx успешно загружен и деарморирован."
@@ -1058,52 +1061,37 @@ if [ "$NGINX_KEY_OK" -eq 0 ] || ! gpg --no-default-keyring --keyring "$NGINX_KEY
     done
 fi
 
-USE_OFFICIAL_NGINX_REPO=0
-if [ "$NGINX_KEY_OK" -eq 1 ] && [ -s "$NGINX_KEYRING" ]; then
-    NGINX_REPO_CODENAME="$OS_CODENAME"
-    if ! curl -fsSL -I --connect-timeout 5 "https://nginx.org/packages/mainline/$OS_ID/dists/$OS_CODENAME/Release" >/dev/null 2>&1; then
-        if [ "$OS_ID" = "ubuntu" ]; then
-            NGINX_REPO_CODENAME="noble"
-        else
-            NGINX_REPO_CODENAME="bookworm"
-        fi
+[ "$NGINX_KEY_OK" -eq 1 ] && [ -s "$NGINX_KEYRING" ] || die "Не удалось верифицировать GPG-ключ репозитория nginx.org."
+
+NGINX_REPO_CODENAME="$OS_CODENAME"
+if ! curl -fsSL -I --connect-timeout 5 "https://nginx.org/packages/mainline/$OS_ID/dists/$OS_CODENAME/Release" >/dev/null 2>&1; then
+    if [ "$OS_ID" = "ubuntu" ]; then
+        NGINX_REPO_CODENAME="noble"
+    else
+        NGINX_REPO_CODENAME="bookworm"
     fi
+    warn "Релиз $OS_CODENAME не найден на nginx.org. Использован совместимый кодовый профиль: $NGINX_REPO_CODENAME"
+fi
 
-    echo "deb [signed-by=$NGINX_KEYRING] https://nginx.org/packages/mainline/$OS_ID $NGINX_REPO_CODENAME nginx" \
-        | tee /etc/apt/sources.list.d/nginx.list >/dev/null
+echo "deb [signed-by=$NGINX_KEYRING] https://nginx.org/packages/mainline/$OS_ID $NGINX_REPO_CODENAME nginx" \
+    | tee /etc/apt/sources.list.d/nginx.list >/dev/null
 
-    cat << EOF > /etc/apt/preferences.d/99nginx
+cat << EOF > /etc/apt/preferences.d/99nginx
 Package: nginx*
 Pin: origin nginx.org
 Pin-Priority: 900
 EOF
 
-    wait_for_apt_lock
-    if apt-get update -q -o Dir::Etc::sourcelist="sources.list.d/nginx.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1; then
-        log "Очистка конфликтующих пакетов дистрибутива перед установкой Mainline..."
-        wait_for_apt_lock
-        apt-get remove -y nginx-common nginx-core libnginx-mod-* 2>/dev/null || true
-        USE_OFFICIAL_NGINX_REPO=1
-        ok "Репозиторий Nginx Mainline ($NGINX_REPO_CODENAME) верифицирован."
-    else
-        warn "Сбой верификации внешнего репозитория nginx.org. Fallback на пакет ОС..."
-        rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx
-    fi
+if [ -d /etc/nginx/modules-enabled ]; then
+    rm -f /etc/nginx/modules-enabled/*stream*.conf 2>/dev/null || true
 fi
 
-if [ "$USE_OFFICIAL_NGINX_REPO" -eq 0 ]; then
-    log "Установка Nginx из системного репозитория $OS_ID..."
-    rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx
-    wait_for_apt_lock
-    apt-get update -q
-    wait_for_apt_lock
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx libnginx-mod-stream 2>/dev/null || apt-get install -y -q nginx
-else
-    wait_for_apt_lock
-    apt-get update -q
-    wait_for_apt_lock
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
-fi
+wait_for_apt_lock
+apt-get update -q -o Dir::Etc::sourcelist="sources.list.d/nginx.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1 || apt-get update -q
+
+wait_for_apt_lock
+log "Установка пакета Nginx Mainline с флагами восстановления conffiles..."
+apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confmiss" nginx
 
 NGINX_USER="nginx"
 id -u nginx >/dev/null 2>&1 || NGINX_USER="www-data"
@@ -1111,7 +1099,7 @@ id -u nginx >/dev/null 2>&1 || NGINX_USER="www-data"
 WEBROOT="/var/www/html"
 mkdir -p "$WEBROOT/.well-known/acme-challenge"
 mkdir -p "$WEBROOT/assets/css" "$WEBROOT/assets/js" "$WEBROOT/assets/img"
-mkdir -p /var/log/nginx /var/cache/nginx /var/www/mirror /var/www/proxy_temp /etc/nginx/stream.d /etc/nginx/conf.d /etc/nginx/modules-enabled
+mkdir -p /var/log/nginx /var/cache/nginx /var/www/mirror /var/www/proxy_temp /etc/nginx/stream.d /etc/nginx/conf.d
 
 rm -rf /etc/nginx/sites-enabled/* /etc/nginx/sites-available/* 2>/dev/null || true
 rm -rf /etc/nginx/conf.d/* /etc/nginx/stream.d/* 2>/dev/null || true
@@ -1120,6 +1108,91 @@ chmod 755 /var /var/www "$WEBROOT"
 chmod -R 755 "$WEBROOT/.well-known"
 chmod 755 /var/log/nginx
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT" /var/cache/nginx /var/www/mirror /var/www/proxy_temp /var/log/nginx
+
+if [ ! -s /etc/nginx/mime.types ]; then
+    log "Синтез автономной таблицы MIME-типов (/etc/nginx/mime.types)..."
+    cat << 'EOF_MIME' > /etc/nginx/mime.types
+types {
+    text/html                             html htm shtml;
+    text/css                              css;
+    text/xml                              xml;
+    image/gif                             gif;
+    image/jpeg                            jpeg jpg;
+    application/javascript                js;
+    application/atom+xml                  atom;
+    application/rss+xml                   rss;
+    text/mathml                           mml;
+    text/plain                            txt;
+    text/vnd.sun.j2me.app-descriptor      jad;
+    text/vnd.wap.wml                      wml;
+    text/x-component                      htc;
+    image/avif                            avif;
+    image/png                             png;
+    image/svg+xml                         svg svgz;
+    image/tiff                            tif tiff;
+    image/vnd.wap.wbmp                    wbmp;
+    image/webp                            webp;
+    image/x-icon                          ico;
+    image/x-jng                           jng;
+    image/x-ms-bmp                        bmp;
+    font/woff                             woff;
+    font/woff2                            woff2;
+    application/java-archive              jar war ear;
+    application/json                      json;
+    application/mac-binhex40              hqx;
+    application/msword                    doc;
+    application/pdf                       pdf;
+    application/postscript                ps eps ai;
+    application/rtf                       rtf;
+    application/vnd.apple.mpegurl         m3u8;
+    application/vnd.google-earth.kml+xml  kml;
+    application/vnd.google-earth.kmz      kmz;
+    application/vnd.ms-excel              xls;
+    application/vnd.ms-fontobject         eot;
+    application/vnd.ms-powerpoint         ppt;
+    application/vnd.wap.wmlc              wmlc;
+    application/wasm                      wasm;
+    application/x-7z-compressed           7z;
+    application/x-cocoa                   cco;
+    application/x-java-archive-diff       jardiff;
+    application/x-java-jnlp-file          jnlp;
+    application/x-makeself                run;
+    application/x-perl                    pl pm;
+    application/x-pilot                   prc pdb;
+    application/x-rar-compressed          rar;
+    application/x-redhat-package-manager  rpm;
+    application/x-sea                     sea;
+    application/x-shockwave-flash         swf;
+    application/x-stuffit                 sit;
+    application/x-tcl                     tcl tk;
+    application/x-x509-ca-cert            der pem crt;
+    application/x-xpinstall               xpi;
+    application/xhtml+xml                 xhtml;
+    application/xspf+xml                  xspf;
+    application/zip                       zip;
+    application/octet-stream              bin exe dll deb dmg iso img msi msp msm;
+    audio/midi                            mid midi kar;
+    audio/mpeg                            mp3;
+    audio/ogg                             ogg;
+    audio/x-m4a                           m4a;
+    audio/x-realaudio                     ra;
+    video/3gpp                            3gpp 3gp;
+    video/mp2t                            ts;
+    video/mp4                             mp4;
+    video/mpeg                            mpeg mpg;
+    video/quicktime                       mov;
+    video/webm                            webm;
+    video/x-flv                           flv;
+    video/x-m4v                           m4v;
+    video/x-mng                           mng;
+    video/x-ms-asf                        asx asf;
+    video/x-ms-wmv                        wmv;
+    video/x-msvideo                       avi;
+}
+EOF_MIME
+    chmod 644 /etc/nginx/mime.types
+    ok "Каноническая таблица /etc/nginx/mime.types успешно создана."
+fi
 
 cat << EOF > /etc/nginx/nginx.conf
 user $NGINX_USER;
@@ -1197,7 +1270,7 @@ EOF
 
     for dom in "${ALL_DOMAINS[@]}"; do
         if [ -f "/etc/letsencrypt/live/$dom/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/$dom/privkey.pem" ]; then
-            ok "Сертификат для $dom уже существует в системе."
+            ok "Сертификат для $dom уже существует в системе и валиден."
             continue
         fi
 
@@ -1253,7 +1326,6 @@ fi
 chmod 755 /etc/letsencrypt /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
 chmod 644 /etc/letsencrypt/live/*/* 2>/dev/null || true
 
-# Установка AdGuard Home DoH
 if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
     log "Установка AdGuard Home (DoH + Split-DNS)..."
     mkdir -p /etc/systemd/resolved.conf.d
@@ -1263,7 +1335,6 @@ DNSStubListener=no
 EOF
     systemctl restart systemd-resolved 2>/dev/null || true
 
-    # Гарантия разрешения имен хостом на время инициализации
     if [ "$GEO_PROFILE" = "1" ]; then
         cat << 'EOF' > /etc/resolv.conf
 nameserver 77.88.8.8
@@ -1332,6 +1403,7 @@ users:
 dns:
   bind_hosts:
     - 127.0.0.1
+    - 10.9.0.1
   port: 53
   trusted_proxies:
     - 127.0.0.1
@@ -1372,13 +1444,13 @@ EOF
 
     /opt/AdGuardHome/AdGuardHome -s install >/dev/null 2>&1 || true
     systemctl restart AdGuardHome || true
-    ok "AdGuard Home DoH активен на 127.0.0.1:53."
+    ok "AdGuard Home DoH активен на 127.0.0.1:53 и 10.9.0.1:53."
 fi
 
 # =============================================================
 #  ВЕБ-МАСКИРОВКА (DataSphere Decoy Shield v3.14 - CSP Compliant)
 # =============================================================
-log "Генерация полного комплекса веб-маскировки (DataSphere Decoy Shield v3.14)..."
+log "Генерация веб-маскировки (DataSphere Decoy Shield v3.14)..."
 
 cat << 'EOF' > /var/www/html/assets/img/favicon.svg
 <svg viewBox="0 0 100 100" width="100" height="100" xmlns="http://www.w3.org/2000/svg">
@@ -1412,8 +1484,6 @@ ln -sf /var/www/html/assets/img/favicon.svg /var/www/html/favicon.ico
 cat << 'EOF' > /var/www/html/robots.txt
 User-agent: *
 Disallow: /api/
-Disallow: /console/
-Disallow: /telemetry/
 Allow: /
 EOF
 
@@ -1575,6 +1645,54 @@ header {
 .status-pill.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
 .status-pill.offline { background: var(--text-muted); }
 
+.hub-loading { text-align: center; padding: 30px; }
+.spinner-center { margin: 0 auto 10px; }
+.actions-cell { white-space: nowrap; text-align: right; }
+.actions-group { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex-wrap: nowrap; }
+.btn-mini { padding: 4px 10px; font-size: 11px; white-space: nowrap; }
+.hub-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.btn-toolbar { padding: 6px 14px; font-size: 12px; }
+.hub-meta-box { background: #131314; border: 1px solid var(--border); border-radius: 14px; padding: 12px; font-size: 12px; margin-bottom: 12px; }
+.text-success { color: var(--success); }
+.qr-preview-box {
+    display: none;
+    text-align: center;
+    padding: 16px;
+    background: #131314;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    margin-bottom: 14px;
+}
+.qr-card-inner {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    background: #1e1f20;
+    border: 1px solid rgba(168, 199, 250, 0.2);
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.qr-img {
+    width: 200px;
+    height: 200px;
+    display: block;
+    border-radius: 8px;
+}
+.qr-hint {
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+.btn-qr-hide {
+    margin-top: 12px;
+    padding: 6px 16px;
+    font-size: 12px;
+}
+.peers-table-container { max-height: 240px; overflow-y: auto; }
+.peers-empty-td { text-align: center; color: var(--text-muted); padding: 20px; }
+
 footer { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; border-top: 1px solid var(--border); }
 @keyframes spin { 100% { transform: rotate(360deg); } }
 EOF
@@ -1697,18 +1815,28 @@ function closeAuthModal() {
     document.getElementById("authModal")?.classList.remove("active");
 }
 
+let authenticatedSession = null;
+let currentAwgPeers = [];
+
 async function fetchClusterStatus() {
+    if (!authenticatedSession) {
+        openAuthModal("Мониторинг кластера (Требуется ключ)");
+        return;
+    }
     try {
-        const res = await fetch("/api/v1/datasphere/status");
+        const res = await fetch("/api/v1/datasphere/status", {
+            headers: { "Authorization": "Bearer " + authenticatedSession.token }
+        });
+        if (res.status === 401) {
+            openAuthModal("Мониторинг кластера (Требуется ключ)");
+            return;
+        }
         const data = await res.json();
         showToast("Статус кластера: " + (data.status || "online").toUpperCase(), `Узлов: ${data.nodes_active || 148} | SLA: 99.998% | Среда: ${data.cluster || "Core"}`);
     } catch(e) {
         openAuthModal("Мониторинг кластера (Требуется ключ)");
     }
 }
-
-let authenticatedSession = null;
-let currentAwgPeers = [];
 
 function renderAdminHub(services) {
     const modalHeader = document.querySelector("#authModal .modal-header");
@@ -1744,7 +1872,7 @@ function renderAdminHub(services) {
             <div class="hub-card" data-action="open-awg">
                 <div class="hub-info">
                     <h4>Нативный сервер AmneziaWG</h4>
-                    <p>Ядро Linux awg0 (MTU 1360 Golden) • Управление клиентами и QR</p>
+                    <p>Ядро Linux awg0 (:8443, пул 35001-49999, MTU 1360) • Управление клиентами и QR</p>
                 </div>
                 <div class="hub-arrow">&rarr;</div>
             </div>
@@ -1782,7 +1910,7 @@ async function openAwgManager() {
     const hubContainer = document.getElementById("hubContainer");
     if (!hubContainer || !authenticatedSession) return;
 
-    hubContainer.innerHTML = '<div style="text-align:center; padding:30px;"><div class="spinner" style="margin:0 auto 10px;"></div>Синхронизация с ядром awg0...</div>';
+    hubContainer.innerHTML = '<div class="hub-loading"><div class="spinner spinner-center"></div>Синхронизация с ядром awg0...</div>';
 
     try {
         const res = await fetch("/api/v1/datasphere/awg/peers", {
@@ -1799,11 +1927,11 @@ async function openAwgManager() {
                     <td><span class="status-pill ${statusClass}"></span><strong>${p.name}</strong></td>
                     <td>${p.ip}</td>
                     <td>&darr; ${p.rx} / &uarr; ${p.tx}</td>
-                    <td style="white-space: nowrap; text-align: right;">
-                        <div style="display:inline-flex; align-items:center; gap:5px; white-space:nowrap; flex-wrap:nowrap;">
-                            <button class="btn" style="padding:4px 10px; font-size:11px; white-space:nowrap;" data-action="show-qr" data-key="${p.public_key}">QR</button>
-                            <button class="btn" style="padding:4px 10px; font-size:11px; white-space:nowrap;" data-action="download-conf" data-key="${p.public_key}">.conf</button>
-                            <button class="btn" style="padding:4px 10px; font-size:11px; white-space:nowrap;" data-action="remove-peer" data-key="${p.public_key}">&times;</button>
+                    <td class="actions-cell">
+                        <div class="actions-group">
+                            <button class="btn btn-mini" data-action="show-qr" data-key="${p.public_key}">QR</button>
+                            <button class="btn btn-mini" data-action="download-conf" data-key="${p.public_key}">.conf</button>
+                            <button class="btn btn-mini" data-action="remove-peer" data-key="${p.public_key}">&times;</button>
                         </div>
                     </td>
                 </tr>
@@ -1811,20 +1939,20 @@ async function openAwgManager() {
         });
 
         hubContainer.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                <button class="btn btn-outline" style="padding:6px 14px; font-size:12px;" data-action="back-to-hub">&larr; Назад в Hub</button>
-                <button class="btn" style="padding:6px 14px; font-size:12px;" data-action="add-peer">+ Новый клиент</button>
+            <div class="hub-toolbar">
+                <button class="btn btn-outline btn-toolbar" data-action="back-to-hub">&larr; Назад в Hub</button>
+                <button class="btn btn-toolbar" data-action="add-peer">+ Новый клиент</button>
             </div>
-            <div style="background:#131314; border:1px solid var(--border); border-radius:14px; padding:12px; font-size:12px; margin-bottom:12px;">
-                Интерфейс: <strong style="color:var(--success);">awg0 (Kernel DKMS)</strong> | MTU: <strong>1360</strong> | MSS: <strong>1320</strong>
+            <div class="hub-meta-box">
+                Интерфейс: <strong class="text-success">awg0 (Kernel DKMS)</strong> | Базовый порт: <strong>8443</strong> | Пул: <strong>35001-49999</strong> | MTU: <strong>1360</strong>
             </div>
-            <div id="qrPreviewArea" style="display:none; text-align:center; padding:12px; background:#fff; border-radius:14px; margin-bottom:12px;"></div>
-            <div style="max-height:240px; overflow-y:auto;">
+            <div id="qrPreviewArea" class="qr-preview-box"></div>
+            <div class="peers-table-container">
                 <table class="awg-table">
                     <thead>
                         <tr><th>Клиент</th><th>IP</th><th>Трафик</th><th>Действия</th></tr>
                     </thead>
-                    <tbody>${rows || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">Нет активных пиров</td></tr>'}</tbody>
+                    <tbody>${rows || '<tr><td colspan="4" class="peers-empty-td">Нет активных пиров</td></tr>'}</tbody>
                 </table>
             </div>
         `;
@@ -1875,7 +2003,15 @@ async function showQr(pubKey) {
     const qrArea = document.getElementById("qrPreviewArea");
     if (!qrArea) return;
     qrArea.style.display = "block";
-    qrArea.innerHTML = `<img src="/api/v1/datasphere/awg/peer/qr?key=${encodeURIComponent(pubKey)}" style="width:190px; height:190px;" alt="QR Code"><br><button class="btn" style="margin-top:8px; padding:4px 10px; font-size:11px;" data-action="hide-qr">Скрыть QR</button>`;
+    qrArea.innerHTML = `
+        <div class="qr-card-inner">
+            <img src="/api/v1/datasphere/awg/peer/qr?key=${encodeURIComponent(pubKey)}" class="qr-img" alt="QR Code">
+            <span class="qr-hint">Сканируйте в приложении AmneziaWG</span>
+        </div>
+        <div>
+            <button class="btn btn-outline btn-qr-hide" data-action="hide-qr">Скрыть QR</button>
+        </div>
+    `;
 }
 
 async function downloadAwgConf(publicKey) {
@@ -2010,92 +2146,59 @@ window.addEventListener('keydown', (e) => {
 });
 EOF
 
-cat << 'EOF' > /var/www/html/index.html
+cat << EOF > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DataSphere Analytics — Платформа распределенных данных</title>
-    
-    <meta name="description" content="Корпоративная аналитическая среда распределенной обработки данных с аппаратным сетевым ускорением, шифрованием TLS 1.3 и Anycast-маршрутизацией узлов.">
-    <meta name="keywords" content="datasphere, analytics, anycast, edge cloud, tls 1.3, distributed storage, zero-copy">
-    <meta name="author" content="DataSphere Cloud Systems Inc.">
-    <meta name="theme-color" content="#131314">
-    <meta property="og:type" content="website">
-    <meta property="og:title" content="DataSphere Analytics — Платформа распределенных данных">
-    <meta property="og:description" content="Инфраструктура аналитики и передачи данных корпоративного уровня.">
+    <title>DataSphere Analytics — Enterprise Data Plane</title>
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="stylesheet" href="/assets/css/datasphere.css">
-    <script defer src="/assets/js/datasphere.js"></script>
 </head>
 <body>
     <header>
         <div class="logo">
-            <svg viewBox="0 0 100 100" width="26" height="26" xmlns="http://www.w3.org/2000/svg">
-                <clipPath id="circleMask"><circle cx="50" cy="50" r="48"/></clipPath>
-                <g clip-path="url(#circleMask)">
-                    <rect x="0" y="0" width="100" height="100" fill="#008dd5"/>
-                    <polygon points="50,-8 100,21 100,79 50,108 0,79 0,21" fill="#ffffff"/>
-                    <polygon points="50,6.7 87.5,28.35 87.5,71.65 50,93.3 12.5,71.65 12.5,28.35" fill="#66a88f"/>
-                    <polygon points="50,28.35 68.75,39.17 68.75,60.83 50,71.65 31.25,60.83 31.25,39.17" fill="#e7ab21"/>
-                    <g stroke="#000000" stroke-width="4" stroke-linecap="round">
-                        <line x1="-10" y1="6.7" x2="110" y2="6.7"/>
-                        <line x1="-10" y1="28.35" x2="110" y2="28.35"/>
-                        <line x1="-10" y1="50" x2="110" y2="50"/>
-                        <line x1="-10" y1="71.65" x2="110" y2="71.65"/>
-                        <line x1="-10" y1="93.3" x2="110" y2="93.3"/>
-                        <line x1="15.36" y1="-10" x2="84.64" y2="110"/>
-                        <line x1="40.36" y1="-10" x2="109.64" y2="110"/>
-                        <line x1="-9.64" y1="-10" x2="59.64" y2="110"/>
-                        <line x1="84.64" y1="-10" x2="15.36" y2="110"/>
-                        <line x1="109.64" y1="-10" x2="40.36" y2="110"/>
-                        <line x1="59.64" y1="-10" x2="-9.64" y2="110"/>
-                    </g>
-                </g>
-                <circle cx="50" cy="50" r="48" fill="none" stroke="#000000" stroke-width="5"/>
-            </svg>
-            DataSphere Analytics
+            <img src="/assets/img/favicon.svg" alt="DataSphere Logo" width="28" height="28">
+            <span>DataSphere</span>
         </div>
-        <button type="button" id="headerConsoleBtn" class="btn">Консоль</button>
+        <button id="headerConsoleBtn" class="btn" type="button">Консоль</button>
     </header>
-
     <main>
         <section class="hero">
-            <div class="badge"><span class="badge-dot"></span><span>DataSphere Cloud Engine v3.14 — Доступность <span id="heroSla">99.998%</span></span></div>
-            <h1>Инфраструктура распределения данных нового поколения</h1>
-            <p>Корпоративная аналитическая среда с аппаратным ускорением сетевого стека, сквозным TLS 1.3 / H2 шифрованием и Anycast-маршрутизацией узлов.</p>
+            <div class="badge"><span class="badge-dot"></span><span>DataSphere Edge Engine v3.14 — Доступность <span id="heroSla">99.998%</span></span></div>
+            <h1>Инфраструктура распределённых данных нового поколения</h1>
+            <p>Корпоративная аналитическая среда с аппаратным ускорением сетевого стека, сквозным TLS 1.3 / ML-KEM-768 шифрованием и Anycast-маршрутизацией узлов.</p>
             <div class="hero-actions">
-                <button type="button" id="connectNodeBtn" class="btn">
+                <button id="connectNodeBtn" class="btn" style="padding: 13px 28px; font-size: 15px;" type="button">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                     Подключить узел
                 </button>
-                <button type="button" id="netStatusBtn" class="btn btn-outline">
+                <button id="netStatusBtn" class="btn btn-outline" style="padding: 13px 28px; font-size: 15px;" type="button">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                     Статус сети
                 </button>
             </div>
             <div class="stats-bar">
-                <div class="stat-item"><h4 id="heroLatency">&lt; 1.2 ms</h4><p>Средняя задержка ядра</p></div>
-                <div class="stat-item"><h4 id="heroBandwidth">95.3 Gbps</h4><p>Пропускная способность</p></div>
+                <div class="stat-item"><h4 id="heroLatency">&lt; 1.1 ms</h4><p>Средняя задержка ядра</p></div>
+                <div class="stat-item"><h4 id="heroBandwidth">98.4 Gbps</h4><p>Пропускная способность</p></div>
                 <div class="stat-item"><h4>TLS 1.3 / H2</h4><p>Аппаратное шифрование</p></div>
             </div>
         </section>
-
         <section class="features">
-            <div class="feature-card" id="cardCrypto">
+            <div id="cardCrypto" class="feature-card" tabindex="0">
                 <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
                 <h3>Сквозное квантовое шифрование</h3>
                 <p>Передача пакетов осуществляется с аппаратным криптоускорением TLS 1.3 и защитой от перехвата на пограничных маршрутизаторах.</p>
                 <span class="card-action">Аудит протоколов &rarr;</span>
             </div>
-            <div class="feature-card" id="cardTelemetry">
+            <div id="cardTelemetry" class="feature-card" tabindex="0">
                 <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
                 <h3>Распределённая телеметрия</h3>
                 <p>Многопоточный конвейер аналитики агрегирует метрики узлов в реальном времени с нулевой деградацией пропускной способности.</p>
                 <span class="card-action">Anycast-магистраль &rarr;</span>
             </div>
-            <div class="feature-card" id="cardIpc">
+            <div id="cardIpc" class="feature-card" tabindex="0">
                 <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6"/></svg></div>
                 <h3>Изоляция сокетов IPC</h3>
                 <p>Все процессы ввода-вывода распределяются по энергонезависимым сегментам оперативной памяти с прямой маршрутизацией через Unix-сокеты.</p>
@@ -2111,12 +2214,12 @@ cat << 'EOF' > /var/www/html/index.html
                     <h2 id="modalTitle">Авторизация в DataSphere</h2>
                     <p>Введите учётные данные для доступа к консоли</p>
                 </div>
-                <button type="button" id="authModalClose" class="modal-close" aria-label="Закрыть">
+                <button id="authModalClose" class="modal-close" type="button" aria-label="Закрыть">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div id="errorAlert" class="alert-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 <span id="errorMsg">Ошибка аутентификации</span>
             </div>
             <form id="authForm">
@@ -2128,38 +2231,39 @@ cat << 'EOF' > /var/www/html/index.html
                     <label for="dsKey">API Token / Ключ</label>
                     <input type="password" id="dsKey" class="form-control" placeholder="••••••••••••••••" required autocomplete="current-password">
                 </div>
-                <button type="submit" id="submitBtn" class="btn">Подключиться к кластеру</button>
+                <button type="submit" id="submitBtn" class="btn" style="width: 100%; height: 46px; margin-top: 10px;">Подключиться к кластеру</button>
             </form>
         </div>
     </div>
 
     <div id="detailModal" class="modal-overlay">
-        <div class="modal-card">
+        <div class="modal-card" style="max-width: 520px;">
             <div class="modal-header">
                 <div>
                     <h2 id="detailTitle">Архитектурный узел</h2>
                     <p id="detailSubtitle">Спецификация и статус безопасности подсистемы</p>
                 </div>
-                <button type="button" id="detailModalClose" class="modal-close" aria-label="Закрыть">
+                <button id="detailModalClose" class="modal-close" type="button" aria-label="Закрыть">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div id="detailContent"></div>
-            <button type="button" id="detailModalOk" class="btn">Понятно</button>
+            <button id="detailModalOk" class="btn" style="width: 100%; height: 44px; margin-top: 24px;" type="button">Понятно</button>
         </div>
     </div>
 
     <div id="toastHud" class="toast-hud">
-        <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
-            <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-        </svg>
+        <div class="toast-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
         <div>
-            <div class="toast-title" id="toastTitle">Телеметрия сети DataSphere</div>
-            <div class="toast-desc" id="toastDesc">Кластер функционирует штатно.</div>
+            <div id="toastTitle" class="toast-title">Оповещение</div>
+            <div id="toastDesc" class="toast-desc">Данные синхронизированы</div>
         </div>
     </div>
 
     <footer>&copy; 2026 DataSphere Cloud Systems Inc. Платформа распределенной аналитики и защиты данных.</footer>
+    <script src="/assets/js/datasphere.js"></script>
 </body>
 </html>
 EOF
@@ -2171,16 +2275,11 @@ EOF
 chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT"
 chmod -R 755 "$WEBROOT"
 
-# -------------------------------------------------------------
-# БОЕВАЯ КОНФИГУРАЦИЯ NGINX MAINLINE L4/L7 (ZERO-LOG STRICT)
-# -------------------------------------------------------------
-log "Сборка постоянной конфигурации Nginx Mainline (Stream L4 + Zero-SNI Shield)..."
+# =============================================================
+#  БОЕВАЯ КОНФИГУРАЦИЯ NGINX MAINLINE L4/L7 (STREAM TCP 443 ONLY)
+# =============================================================
+log "Сборка постоянной конфигурации Nginx (Stream L4 Single-Ingress 443 + Zero-SNI Shield)..."
 rm -f /etc/nginx/conf.d/00-acme.conf
-
-MODULE_LOAD_LINE=""
-if [ "$USE_OFFICIAL_NGINX_REPO" -eq 0 ] && [ -d /etc/nginx/modules-enabled ]; then
-    MODULE_LOAD_LINE="include /etc/nginx/modules-enabled/*.conf;"
-fi
 
 PANEL_PORT="${PANEL_PORT//[!0-9]/}"
 SUB_PORT="${SUB_PORT//[!0-9]/}"
@@ -2189,14 +2288,27 @@ if [ -z "$PANEL_PORT" ]; then PANEL_PORT="10443"; fi
 if [ -z "$SUB_PORT" ]; then SUB_PORT="55443"; fi
 if [ -z "$XHTTP_STREAM_PORT" ]; then XHTTP_STREAM_PORT="50443"; fi
 
+NGINX_RAW_VER=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "1.26.0")
+NGINX_MAJOR=$(echo "$NGINX_RAW_VER" | cut -d. -f1)
+NGINX_MINOR=$(echo "$NGINX_RAW_VER" | cut -d. -f2)
+NGINX_PATCH=$(echo "$NGINX_RAW_VER" | cut -d. -f3)
+
+NGINX_PROXY_H2_DIRECTIVE="proxy_http_version 1.1;"
+if [ "$NGINX_MAJOR" -gt 1 ] || \
+   { [ "$NGINX_MAJOR" -eq 1 ] && [ "$NGINX_MINOR" -gt 29 ]; } || \
+   { [ "$NGINX_MAJOR" -eq 1 ] && [ "$NGINX_MINOR" -eq 29 ] && [ "$NGINX_PATCH" -ge 4 ]; }; then
+    NGINX_PROXY_H2_DIRECTIVE="proxy_http_version 2;"
+    ok "Обнаружен Nginx $NGINX_RAW_VER (>= 1.29.4). Активирован нативный 'proxy_http_version 2;' для H2C xHTTP."
+else
+    ok "Обнаружен Nginx $NGINX_RAW_VER (< 1.29.4). Для H2C xHTTP применен безопасный 'proxy_http_version 1.1;'."
+fi
+
 cat << EOF > /etc/nginx/nginx.conf
 user $NGINX_USER;
 worker_processes auto;
 pid /run/nginx.pid;
 worker_rlimit_nofile 524288;
 error_log /var/log/nginx/error.log warn;
-
-$MODULE_LOAD_LINE
 
 events {
     worker_connections 65535;
@@ -2211,7 +2323,10 @@ http {
     tcp_nopush on;
     tcp_nodelay on;
     server_tokens off;
+    etag off;
+    charset utf-8;
     resolver 77.88.8.8 1.1.1.1 ipv6=off valid=300s;
+    resolver_timeout 5s;
 
     http2_recv_buffer_size 16m;
     http2_max_concurrent_streams 512;
@@ -2240,6 +2355,22 @@ http {
     set_real_ip_from 127.0.0.1;
     set_real_ip_from ::1;
     set_real_ip_from unix:;
+
+    client_max_body_size 64m;
+    client_body_buffer_size 128k;
+    large_client_header_buffers 4 16k;
+    client_header_buffer_size 1k;
+
+    open_file_cache max=2000 inactive=20s;
+    open_file_cache_valid 30s;
+    open_file_cache_min_uses 2;
+
+    gzip on;
+    gzip_vary on;
+    gzip_comp_level 2;
+    gzip_min_length 512;
+    gzip_proxied any;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;
 
     map \$http_upgrade \$connection_upgrade {
         default upgrade;
@@ -2294,15 +2425,19 @@ http {
     limit_conn_zone \$binary_remote_addr zone=addr:1m;
     limit_req_status 429;
 
+    proxy_hide_header X-Proxy-Engine;
+    proxy_hide_header X-Original-URL;
+    proxy_hide_header X-RateLimit-Remaining;
     proxy_hide_header Server;
     proxy_hide_header X-Powered-By;
     proxy_hide_header Via;
     proxy_hide_header X-Varnish;
-    proxy_hide_header X-Proxy-Engine;
-    proxy_hide_header Alt-Svc;
+    proxy_hide_header X-Varnish-Cache;
     proxy_hide_header Age;
     proxy_hide_header CF-Ray;
     proxy_hide_header CF-Cache-Status;
+    proxy_hide_header Alt-Svc;
+    proxy_hide_header X-Cache-Status;
 
     include /etc/nginx/conf.d/*.conf;
 }
@@ -2415,6 +2550,10 @@ server {
     ssl_certificate ${SSL_BASE_DIR}/$PRIMARY_DOMAIN/fullchain.pem;
     ssl_certificate_key ${SSL_BASE_DIR}/$PRIMARY_DOMAIN/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+
+    ssl_buffer_size 4k;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 4h;
 
@@ -2471,7 +2610,7 @@ server {
     location ^~ ${XHTTP_STREAM_PATH} {
         if (\$request_method != POST) { return 404; }
         
-        proxy_http_version 2;
+        $NGINX_PROXY_H2_DIRECTIVE
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$ak_real_ip;
         proxy_set_header X-Forwarded-For \$ak_real_ip;
@@ -2537,19 +2676,39 @@ server {
 }
 EOF
 
-S_DOM_VAL="${S_DOM:-cdn.$PRIMARY_DOMAIN}"
-cat << EOF > /etc/nginx/conf.d/02-steal-stub.conf
+# Генерация виртуальных хостов для поддоменов Steal-Oneself Reality на порту 9443
+if [ "${ENABLE_STEAL:-0}" -eq 1 ] && [ "${#STEAL_DOMAINS[@]}" -gt 0 ]; then
+    STEAL_VHOSTS=""
+    for s_dom in "${STEAL_DOMAINS[@]}"; do
+        if [ -f "${SSL_BASE_DIR}/$s_dom/fullchain.pem" ]; then
+            STEAL_VHOSTS+="
 server {
-    listen 127.0.0.1:11443 ssl proxy_protocol;
+    listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol;
+    listen 127.0.0.1:$REALITY_FALLBACK_PORT ssl proxy_protocol;
     http2 on;
-    server_name ${S_DOM_VAL} ${PRIMARY_DOMAIN} *.${PRIMARY_DOMAIN};
-    ssl_certificate ${SSL_BASE_DIR}/$PRIMARY_DOMAIN/fullchain.pem;
-    ssl_certificate_key ${SSL_BASE_DIR}/$PRIMARY_DOMAIN/privkey.pem;
+    server_name $s_dom;
+
+    ssl_certificate ${SSL_BASE_DIR}/$s_dom/fullchain.pem;
+    ssl_certificate_key ${SSL_BASE_DIR}/$s_dom/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_tickets off;
-    location / { return 404; }
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+
+    location / {
+        root $WEBROOT;
+        index index.html;
+        try_files \$uri \$uri/ /index.html =404;
+    }
 }
+"
+        fi
+    done
+    if [ -n "$STEAL_VHOSTS" ]; then
+        cat << EOF > "/etc/nginx/conf.d/02-steal-fallback.conf"
+$STEAL_VHOSTS
 EOF
+    fi
+fi
 
 if [ "${ENABLE_AGH:-0}" -eq 1 ] && [ -f "${SSL_BASE_DIR}/$AGH_DOMAIN/fullchain.pem" ]; then
     cat << EOF > "/etc/nginx/conf.d/03-adguard.conf"
@@ -2591,9 +2750,10 @@ server {
 EOF
 fi
 
+rm -f /dev/shm/nginx-http.sock 2>/dev/null || true
 nginx -t || die "Критическая ошибка синтаксиса Nginx!"
 systemctl restart nginx
-ok "Внешний шлюз Nginx Mainline успешно запущен на порту 443."
+ok "Внешний шлюз Nginx успешно запущен на порту 443."
 
 # =============================================================
 #  ФАЗА 3: УСТАНОВКА 3X-UI, XRAY v26.7.28 И БАЗА SQLITE
@@ -2829,6 +2989,15 @@ if "inbounds" in tables:
                             elif not isinstance(ep["alpn"], list):
                                 ep["alpn"] = [str(ep["alpn"])]
                                 st_changed = True
+                        if proto_val == "vless" and "in-steal-reality" in tag_val:
+                            if not ep.get("sni"):
+                                ep["sni"] = f"cdn.{domain}"
+                                st_changed = True
+                if proto_val == "vless" and "in-steal-reality" in tag_val and "realitySettings" in st_data:
+                    rs = st_data["realitySettings"]
+                    if not rs.get("settings", {}).get("serverName"):
+                        rs.setdefault("settings", {})["serverName"] = f"cdn.{domain}"
+                        st_changed = True
                 if st_changed:
                     cur.execute("UPDATE inbounds SET stream_settings = ? WHERE id = ?", 
                                 (json.dumps(st_data, ensure_ascii=False), row_id))
@@ -2853,7 +3022,7 @@ if "inbounds" in tables:
                         "jc": 4,
                         "jmin": 40,
                         "jmax": 70,
-                        "s1": 64,
+                        "s1": 72,
                         "s2": 56,
                         "s3": 32,
                         "s4": 16
@@ -2939,7 +3108,7 @@ for k, v in settings_data.items():
 
 freedom_final_rules = []
 if enable_agh:
-    freedom_final_rules.append({"action": "allow", "ip": ["127.0.0.1"], "port": "53"})
+    freedom_final_rules.append({"action": "allow", "ip": ["127.0.0.1", "10.9.0.1"], "port": "53"})
 freedom_final_rules.append({"action": "allow", "ip": ["10.8.1.0/24", "10.8.2.0/24", "10.8.3.0/24", "10.9.0.0/24"]})
 freedom_final_rules.append({"action": "block", "ip": ["geoip:private"]})
 freedom_final_rules.append({"action": "allow"})
@@ -2948,7 +3117,7 @@ routing_rules = [
     {"inboundTag": ["api"], "outboundTag": "api", "type": "field"}
 ]
 if enable_agh:
-    routing_rules.append({"ip": ["127.0.0.1"], "outboundTag": "direct", "port": "53", "ruleTag": "xui-dns-allow", "type": "field"})
+    routing_rules.append({"ip": ["127.0.0.1", "10.9.0.1"], "outboundTag": "direct", "port": "53", "ruleTag": "xui-dns-allow", "type": "field"})
 routing_rules.append({"ip": ["10.8.1.0/24", "10.8.2.0/24", "10.8.3.0/24", "10.9.0.0/24"], "outboundTag": "direct", "type": "field"})
 routing_rules.append({"ip": ["geoip:private"], "outboundTag": "blocked", "type": "field"})
 routing_rules.append({"outboundTag": "blocked", "protocol": ["bittorrent"], "type": "field"})
@@ -3060,13 +3229,17 @@ def upsert_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, listen="127.
             rs["spiderX"] = "/"
             if not rs.get("shortIds"): rs["shortIds"] = [reality_hex_sid]
             if proto == "vless" and "in-steal-reality" in tag:
-                rs["dest"] = "127.0.0.1:11443"
-                rs["target"] = "127.0.0.1:11443"
+                rs["dest"] = "127.0.0.1:9443"
+                rs["target"] = "127.0.0.1:9443"
+                rs["xver"] = 1
+                rs.setdefault("settings", {})["serverName"] = f"cdn.{domain}"
         
         if "externalProxy" in final_st and isinstance(final_st["externalProxy"], list):
             for ep in final_st["externalProxy"]:
                 if "alpn" in ep and isinstance(ep["alpn"], str):
                     ep["alpn"] = [a.strip() for a in ep["alpn"].split(",") if a.strip()]
+                if proto == "vless" and "in-steal-reality" in tag:
+                    ep["sni"] = f"cdn.{domain}"
 
         if proto == "amneziawg" and "server" in final_s:
             final_s["server"]["contentPaddingAddition"] = "0"
@@ -3074,7 +3247,7 @@ def upsert_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, listen="127.
             final_s["server"]["jc"] = 4
             final_s["server"]["jmin"] = 40
             final_s["server"]["jmax"] = 70
-            final_s["server"]["s1"] = 64
+            final_s["server"]["s1"] = 72
             final_s["server"]["s2"] = 56
             final_s["server"]["s3"] = 32
             final_s["server"]["s4"] = 16
@@ -3125,17 +3298,18 @@ if os.environ.get("ENABLE_STEAL") == "1":
         p = int(p_str)
         tag = f"in-steal-reality-{p}" if p != 45443 else "in-steal-reality"
         remark = f"REALITY-443 ({p})" if len(steal_dict) > 1 else "REALITY-443"
+        primary_steal_sni = doms[0] if doms else f"cdn.{domain}"
         s_obj = {"clients": [client_reality_dict], "decryption": "none"}
         st_obj = {
             "network": "tcp", "security": "reality",
             "tcpSettings": {"acceptProxyProtocol": True, "header": {"type": "none"}},
             "realitySettings": {
-                "show": False, "xver": 1, "target": "127.0.0.1:11443", "dest": "127.0.0.1:11443",
+                "show": False, "xver": 1, "target": "127.0.0.1:9443", "dest": "127.0.0.1:9443",
                 "serverNames": doms, "privateKey": def_r_priv, "minClientVer": "1.0.0",
                 "maxClientVer": "", "maxTimediff": 0, "shortIds": [reality_hex_sid],
-                "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": "", "spiderX": "/"}
+                "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": primary_steal_sni, "spiderX": "/"}
             },
-            "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": remark}]
+            "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "sni": primary_steal_sni, "remark": remark}]
         }
         ib1_id = upsert_inbound(p, "vless", tag, remark, s_obj, st_obj)
 
@@ -3162,9 +3336,9 @@ if os.environ.get("ENABLE_CLASSIC") == "1":
                 "show": False, "xver": 0, "target": f"{primary_sni}:443", "dest": f"{primary_sni}:443",
                 "serverNames": snis, "privateKey": def_r_priv, "minClientVer": "1.0.0",
                 "maxClientVer": "", "maxTimediff": 0, "shortIds": [reality_hex_sid],
-                "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": "", "spiderX": "/"}
+                "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": primary_sni, "spiderX": "/"}
             },
-            "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "remark": remark}]
+            "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "sni": primary_sni, "remark": remark}]
         }
         ib2_id = upsert_inbound(p, "vless", tag, remark, c_obj, ct_obj)
 
@@ -3212,7 +3386,7 @@ if os.environ.get("ENABLE_HY2") == "1":
 awg3_dns_prim = "77.88.8.8" if geo_profile == "1" else "1.1.1.1"
 awg3_dns_sec = "77.88.8.1" if geo_profile == "1" else "8.8.8.8"
 
-# 5. AmneziaWG v3.2
+# 5. AmneziaWG v3.2 (3X-UI) на порту 10443/udp
 if os.environ.get("ENABLE_AWG_V3") == "1":
     a3p = int(os.environ["AWG_V3_PORT"])
     a3_client = dict(client_reality_dict)
@@ -3228,7 +3402,7 @@ if os.environ.get("ENABLE_AWG_V3") == "1":
         "clients": [a3_client],
         "server": {
             "h1": a3_h1, "h2": a3_h2, "h3": a3_h3, "h4": a3_h4,
-            "jc": 4, "jmin": 40, "jmax": 70, "s1": 64, "s2": 56, "s3": 32, "s4": 16,
+            "jc": 4, "jmin": 40, "jmax": 70, "s1": 72, "s2": 56, "s3": 32, "s4": 16,
             "mtu": 1360, "primaryDns": awg3_dns_prim, "secondaryDns": awg3_dns_sec,
             "privateKey": def_wg_s_priv, "publicKey": def_wg_s_pub,
             "randomTrailers": False, "disableCookies": True, "contentPaddingAddition": "0",
@@ -3237,10 +3411,10 @@ if os.environ.get("ENABLE_AWG_V3") == "1":
             "subnetCidr": 24, "subnetIp": "10.8.1.0"
         }
     }
-    a3t_obj = {"externalProxy": [{"dest": domain, "port": a3p, "remark": "AmneziaWG v3"}]}
-    ib5_id = upsert_inbound(a3p, "amneziawg", "in-8443-udp", "AmneziaWG v3", a3_obj, a3t_obj, listen="0.0.0.0")
+    a3t_obj = {"externalProxy": [{"dest": domain, "port": a3p, "remark": "AmneziaWG v3.2"}]}
+    ib5_id = upsert_inbound(a3p, "amneziawg", "in-awg-v3", "AmneziaWG v3.2", a3_obj, a3t_obj, listen="0.0.0.0")
 
-# 6. AmneziaWG v2.0
+# 6. AmneziaWG v2.0 (3X-UI) на порту 10444/udp
 if os.environ.get("ENABLE_AWG_V2") == "1":
     a2p = int(os.environ["AWG_V2_PORT"])
     a2_client = dict(client_reality_dict)
@@ -3250,7 +3424,7 @@ if os.environ.get("ENABLE_AWG_V2") == "1":
         "clients": [a2_client],
         "server": {
             "h1": "149419586", "h2": "878791997", "h3": "1251051976", "h4": "1657628296",
-            "jc": 4, "jmin": 40, "jmax": 70, "s1": 64, "s2": 56, "s3": 32, "s4": 16,
+            "jc": 4, "jmin": 40, "jmax": 70, "s1": 72, "s2": 56, "s3": 32, "s4": 16,
             "mtu": 1360, "primaryDns": awg3_dns_prim, "secondaryDns": awg3_dns_sec,
             "privateKey": def_wg_s2_priv, "publicKey": def_wg_s2_pub,
             "randomTrailers": False, "disableCookies": True, "contentPaddingAddition": "0",
@@ -3262,7 +3436,7 @@ if os.environ.get("ENABLE_AWG_V2") == "1":
     a2t_obj = {"externalProxy": [{"dest": domain, "port": a2p, "remark": "AmneziaWG v2"}]}
     ib6_id = upsert_inbound(a2p, "amneziawg", "in-awg-v2-legacy", "AmneziaWG v2", a2_obj, a2t_obj, listen="0.0.0.0")
 
-# 7. 3X WireGuard
+# 7. 3X WireGuard (3X-UI) на порту 10445/udp
 if os.environ.get("ENABLE_WG_NATIVE") == "1":
     wgp = int(os.environ["WG_NATIVE_PORT"])
     wg_peer = {
@@ -3398,17 +3572,35 @@ if install_mode == "1":
     group_all_uuid = str(uuid.uuid4())
     group_xhttp_uuid = str(uuid.uuid4())
 
-    for r_id in [ib1_id, ib2_id]:
-        if r_id is not None:
-            add_host_entry(group_all_uuid, r_id, "REALITY_443", domain, 443, "same", sort_order=1)
+    if ib1_id is not None:
+        add_host_entry(group_all_uuid, ib1_id, "REALITY_443", domain, 443, "same", sni=f"cdn.{domain}", fp="firefox", sort_order=1)
+    if ib2_id is not None:
+        c_snis = os.environ.get("CLASSIC_CONFIG_DATA", "")
+        c_def_sni = "tbank.ru"
+        if "=" in c_snis:
+            c_def_sni = c_snis.split("=", 1)[1].split(";")[0].split(",")[0].strip()
+        add_host_entry(group_all_uuid, ib2_id, "REALITY_Classic", domain, 443, "same", sni=c_def_sni, fp="firefox", sort_order=1)
 
     if ib3_id is not None:
         alpn_str = json.dumps(["h2"])
         add_host_entry(group_xhttp_uuid, ib3_id, "xHTTP_H2", domain, 443, "tls", sni=domain, path=xhttp_path, alpn=alpn_str, fp="firefox", sort_order=2)
 elif install_mode == "2":
     cur.execute("DELETE FROM hosts WHERE inbound_id IN (SELECT id FROM inbounds WHERE protocol IN ('hysteria', 'amneziawg', 'wireguard'))")
+    if ib1_id is not None:
+        cur.execute("SELECT id FROM hosts WHERE inbound_id = ?", (ib1_id,))
+        if cur.fetchone():
+            cur.execute("UPDATE hosts SET sni = ? WHERE inbound_id = ?", (f"cdn.{domain}", ib1_id))
+        else:
+            group_all_uuid = str(uuid.uuid4())
+            add_host_entry(group_all_uuid, ib1_id, "REALITY_443", domain, 443, "same", sni=f"cdn.{domain}", fp="firefox", sort_order=1)
     if ib3_id is not None:
-        cur.execute("UPDATE hosts SET path = ? WHERE inbound_id = ?", (xhttp_path, ib3_id))
+        cur.execute("SELECT id FROM hosts WHERE inbound_id = ?", (ib3_id,))
+        if cur.fetchone():
+            cur.execute("UPDATE hosts SET path = ? WHERE inbound_id = ?", (xhttp_path, ib3_id))
+        else:
+            group_xhttp_uuid = str(uuid.uuid4())
+            alpn_str = json.dumps(["h2"])
+            add_host_entry(group_xhttp_uuid, ib3_id, "xHTTP_H2", domain, 443, "tls", sni=domain, path=xhttp_path, alpn=alpn_str, fp="firefox", sort_order=2)
 
 conn.commit()
 conn.close()
@@ -3435,11 +3627,11 @@ if [ -f "/tmp/vpn_unified_creds.txt" ]; then
 fi
 
 # =============================================================
-#  ФАЗА 4: НА РАБОТЕ В ЯДРЕ: NATIVE AMNEZIAWG SERVER (DKMS)
+#  ФАЗА 4: НА ТЕХНОЛОГИЯХ ЯДРА: NATIVE AMNEZIAWG SERVER (DKMS)
 # =============================================================
 echo
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN}  ФАЗА 4: Нативный сервер AmneziaWG (Ядро Linux Bare-Metal)          ${NC}"
+echo -e "${GREEN}  ФАЗА 4: Нативный сервер AmneziaWG (Ядро Linux Bare-Metal awg0)     ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
@@ -3451,10 +3643,13 @@ if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
         apt-get update -q >/dev/null 2>&1 || true
         wait_for_apt_lock
         apt-get install -y amneziawg-dkms amneziawg-tools -q >/dev/null 2>&1 || true
-    else
-        log "Сборка DKMS AmneziaWG для Debian 12 ($OS_CODENAME)..."
+    fi
+
+    if ! command -v awg >/dev/null 2>&1 || ! dkms status 2>/dev/null | grep -q "amneziawg"; then
+        log "Сборка DKMS AmneziaWG из исходников для $OS_ID ($OS_CODENAME)..."
         wait_for_apt_lock
-        apt-get install -y "linux-headers-$(uname -r)" git dkms wireguard-tools libmnl-dev -q >/dev/null 2>&1 || true
+        apt-get install -y "linux-headers-$(uname -r)" git dkms wireguard-tools libmnl-dev -q >/dev/null 2>&1 || \
+            apt-get install -y linux-headers-amd64 linux-headers-cloud-amd64 git dkms wireguard-tools libmnl-dev -q >/dev/null 2>&1 || true
         
         AWG_CLONE_DIR="/tmp/awg-kernel-src"
         AWG_BUILD_DIR="/usr/src/amneziawg-1.0.0"
@@ -3463,12 +3658,14 @@ if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
         if [ -d "$AWG_CLONE_DIR/src" ]; then
             mkdir -p "$AWG_BUILD_DIR"
             cp -r "$AWG_CLONE_DIR"/src/* "$AWG_BUILD_DIR"/
+            
             cat << 'EOF_DKMS' > "$AWG_BUILD_DIR/dkms.conf"
 PACKAGE_NAME="amneziawg"
 PACKAGE_VERSION="1.0.0"
 BUILT_MODULE_NAME[0]="amneziawg"
 DEST_MODULE_LOCATION[0]="/kernel/net"
 AUTOINSTALL="yes"
+MAKE[0]="'make' -C $kernel_source_dir M=$dkms_tree/$PACKAGE_NAME/$PACKAGE_VERSION/build KCFLAGS='-Wno-incompatible-pointer-types -Wno-error=incompatible-pointer-types -Wno-error' EXTRA_CFLAGS='-Wno-incompatible-pointer-types -Wno-error=incompatible-pointer-types -Wno-error'"
 EOF_DKMS
             dkms remove amneziawg/1.0.0 --all 2>/dev/null || true
             dkms add -m amneziawg -v 1.0.0 2>/dev/null || true
@@ -3487,6 +3684,10 @@ EOF_DKMS
         fi
     fi
 
+    mkdir -p /etc/modules-load.d
+    echo "amneziawg" > /etc/modules-load.d/amneziawg.conf
+    modprobe amneziawg 2>/dev/null || true
+
     if ! command -v awg >/dev/null 2>&1; then
         die "Утилита awg не найдена. Сборка amneziawg-tools завершилась сбоем."
     fi
@@ -3494,17 +3695,29 @@ EOF_DKMS
     mkdir -p /etc/amnezia/amneziawg
     chmod 700 /etc/amnezia /etc/amnezia/amneziawg
 
-    AWG_S_PRIV=$(awg genkey 2>/dev/null || openssl rand -base64 32)
-    AWG_S_PUB=$(echo "$AWG_S_PRIV" | awg pubkey 2>/dev/null || openssl rand -base64 32)
-    AWG_C_PRIV=$(awg genkey 2>/dev/null || openssl rand -base64 32)
-    AWG_C_PUB=$(echo "$AWG_C_PRIV" | awg pubkey 2>/dev/null || openssl rand -base64 32)
+    DEFAULT_IF=$(ip -4 route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -n1 || echo "")
+    if [ -z "$DEFAULT_IF" ]; then
+        DEFAULT_IF=$(ip -4 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -n1 || echo "")
+    fi
+    if [ -z "$DEFAULT_IF" ]; then
+        DEFAULT_IF="eth0"
+    fi
 
-    AWG_H1=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
-    AWG_H2=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
-    AWG_H3=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
-    AWG_H4=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
+    if [ "$INSTALL_MODE" = "2" ] && [ -f /etc/amnezia/amneziawg/awg0.conf ] && [ -f /etc/amnezia/amneziawg/clients.json ]; then
+        ok "Режим Safe Migration: существующая конфигурация awg0 и клиентская база сохранены без перезаписи ключей."
+    else
+        log "Генерация новых ключей и конфигурации сервера AmneziaWG awg0..."
+        AWG_S_PRIV=$(awg genkey 2>/dev/null || openssl rand -base64 32)
+        AWG_S_PUB=$(echo "$AWG_S_PRIV" | awg pubkey 2>/dev/null || openssl rand -base64 32)
+        AWG_C_PRIV=$(awg genkey 2>/dev/null || openssl rand -base64 32)
+        AWG_C_PUB=$(echo "$AWG_C_PRIV" | awg pubkey 2>/dev/null || openssl rand -base64 32)
 
-    cat << EOF > /etc/amnezia/amneziawg/awg0.conf
+        AWG_H1=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
+        AWG_H2=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
+        AWG_H3=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
+        AWG_H4=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
+
+        cat << EOF > /etc/amnezia/amneziawg/awg0.conf
 [Interface]
 Address = 10.9.0.1/24
 ListenPort = $NATIVE_AWG_PORT
@@ -3513,7 +3726,7 @@ MTU = 1360
 Jc = 4
 Jmin = 40
 Jmax = 70
-S1 = 64
+S1 = 72
 S2 = 56
 S3 = 32
 S4 = 16
@@ -3521,22 +3734,24 @@ H1 = $AWG_H1
 H2 = $AWG_H2
 H3 = $AWG_H3
 H4 = $AWG_H4
+PostUp = iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o $DEFAULT_IF -j MASQUERADE; iptables -t nat -A PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports $NATIVE_AWG_PORT
+PostDown = iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s 10.9.0.0/24 -o $DEFAULT_IF -j MASQUERADE; iptables -t nat -D PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports $NATIVE_AWG_PORT
 
 # --- Client: Test-Client ---
 [Peer]
 PublicKey = $AWG_C_PUB
 AllowedIPs = 10.9.0.2/32
 EOF
-    chmod 600 /etc/amnezia/amneziawg/awg0.conf
+        chmod 600 /etc/amnezia/amneziawg/awg0.conf
 
-    AWG_DNS_IP="77.88.8.8"
-    if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
-        AWG_DNS_IP="10.9.0.1"
-    elif [ "$GEO_PROFILE" != "1" ]; then
-        AWG_DNS_IP="1.1.1.1"
-    fi
+        AWG_DNS_IP="77.88.8.8"
+        if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
+            AWG_DNS_IP="10.9.0.1"
+        elif [ "$GEO_PROFILE" != "1" ]; then
+            AWG_DNS_IP="1.1.1.1"
+        fi
 
-    cat << EOF > /root/amneziawg-client.conf
+        cat << EOF > /root/amneziawg-client.conf
 [Interface]
 Address = 10.9.0.2/32
 PrivateKey = $AWG_C_PRIV
@@ -3545,7 +3760,7 @@ MTU = 1360
 Jc = 4
 Jmin = 40
 Jmax = 70
-S1 = 64
+S1 = 72
 S2 = 56
 S3 = 32
 S4 = 16
@@ -3557,13 +3772,13 @@ H4 = $AWG_H4
 [Peer]
 PublicKey = $AWG_S_PUB
 Endpoint = ${PRIMARY_DOMAIN}:${NATIVE_AWG_PORT}
-AllowedIPs = 0.0.0.0/0, ::/0
+AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
-    chmod 600 /root/amneziawg-client.conf
+        chmod 600 /root/amneziawg-client.conf
 
-    CLIENTS_JSON="/etc/amnezia/amneziawg/clients.json"
-    cat << EOF > "$CLIENTS_JSON"
+        CLIENTS_JSON="/etc/amnezia/amneziawg/clients.json"
+        cat << EOF > "$CLIENTS_JSON"
 {
   "${AWG_C_PUB}": {
     "name": "Test-Client",
@@ -3573,8 +3788,10 @@ EOF
   }
 }
 EOF
-    chmod 600 "$CLIENTS_JSON"
+        chmod 600 "$CLIENTS_JSON"
+    fi
 
+    awg-quick down awg0 2>/dev/null || true
     systemctl stop awg-quick@awg0 2>/dev/null || true
     systemctl enable awg-quick@awg0 >/dev/null 2>&1 || true
     systemctl restart awg-quick@awg0 || true
@@ -3607,7 +3824,7 @@ CONF_PATH = "/etc/amnezia/amneziawg/awg0.conf"
 ENABLE_AGH = os.environ.get("ENABLE_AGH", "0") == "1"
 GEO_PROFILE = os.environ.get("GEO_PROFILE", "2")
 PRIMARY_DOMAIN = os.environ.get("PRIMARY_DOMAIN", "")
-NATIVE_AWG_PORT = os.environ.get("NATIVE_AWG_PORT", "51820")
+NATIVE_AWG_PORT = os.environ.get("NATIVE_AWG_PORT", "8443")
 
 def execute_cmd(cmd):
     try:
@@ -3641,6 +3858,31 @@ def gen_wireguard_keypair():
     k = clamp(raw)
     pub = x25519(k, 9).to_bytes(32, "little")
     return base64.b64encode(raw).decode(), base64.b64encode(pub).decode()
+
+def atomic_write_conf(text):
+    try:
+        tmp_conf = f"{CONF_PATH}.tmp.{os.getpid()}"
+        with open(tmp_conf, "w") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            f.write(text)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        os.chmod(tmp_conf, 0o600)
+        os.replace(tmp_conf, CONF_PATH)
+    except Exception:
+        pass
+
+def save_clients(clients):
+    try:
+        os.makedirs(os.path.dirname(CLIENTS_FILE), exist_ok=True)
+        tmp_file = f"{CLIENTS_FILE}.tmp.{os.getpid()}"
+        with open(tmp_file, "w") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            json.dump(clients, f, indent=2)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        os.chmod(tmp_file, 0o600)
+        os.replace(tmp_file, CLIENTS_FILE)
+    except Exception:
+        pass
 
 def load_clients():
     clients = {}
@@ -3693,21 +3935,9 @@ def load_clients():
                 text = f.read()
             text = re.sub(r'\[Peer\][\s\S]*', '', text).strip()
             text += f"\n\n# --- Client: Test-Client ---\n[Peer]\nPublicKey = {pub}\nAllowedIPs = {ip}\n"
-            with open(CONF_PATH, "w") as f:
-                f.write(text)
+            atomic_write_conf(text)
             execute_cmd(f"awg set awg0 peer '{pub}' allowed-ips '{ip}'")
     return clients
-
-def save_clients(clients):
-    try:
-        os.makedirs(os.path.dirname(CLIENTS_FILE), exist_ok=True)
-        with open(CLIENTS_FILE, "w") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            json.dump(clients, f, indent=2)
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        os.chmod(CLIENTS_FILE, 0o600)
-    except Exception:
-        pass
 
 def get_db_creds():
     try:
@@ -3777,7 +4007,7 @@ MTU = {srv.get('MTU', '1360')}
 Jc = {srv.get('Jc', '4')}
 Jmin = {srv.get('Jmin', '40')}
 Jmax = {srv.get('Jmax', '70')}
-S1 = {srv.get('S1', '64')}
+S1 = {srv.get('S1', '72')}
 S2 = {srv.get('S2', '56')}
 S3 = {srv.get('S3', '32')}
 S4 = {srv.get('S4', '16')}
@@ -3789,7 +4019,7 @@ H4 = {srv.get('H4', '1657628296')}
 [Peer]
 PublicKey = {s_pub}
 Endpoint = {h}:{port_val}
-AllowedIPs = 0.0.0.0/0, ::/0
+AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 """
 
@@ -3844,7 +4074,9 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                     except Exception:
                         p_ok = False
                 else:
-                    p_ok = hmac.compare_digest(pwd, db_hash)
+                    import hashlib
+                    p_sha = hashlib.sha256(pwd.encode('utf-8')).hexdigest()
+                    p_ok = hmac.compare_digest(pwd, db_hash) or hmac.compare_digest(p_sha, db_hash)
 
             if u_ok and p_ok:
                 clean_expired_sessions()
@@ -3881,9 +4113,11 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             priv, pub = gen_wireguard_keypair()
 
             lines = []
+            current_conf = ""
             if os.path.exists(CONF_PATH):
                 with open(CONF_PATH, "r") as f:
-                    lines = f.readlines()
+                    current_conf = f.read()
+                    lines = current_conf.splitlines()
 
             used_octets = [1]
             for l in lines:
@@ -3895,8 +4129,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
 
             client_ip = f"10.9.0.{next_ip}/32"
             new_peer = f"\n# --- Client: {name} ---\n[Peer]\nPublicKey = {pub}\nAllowedIPs = {client_ip}\n"
-            with open(CONF_PATH, "a") as f:
-                f.write(new_peer)
+            atomic_write_conf(current_conf.strip() + "\n" + new_peer)
 
             execute_cmd(f"awg set awg0 peer '{pub}' allowed-ips '{client_ip}'")
             
@@ -3921,8 +4154,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                         text = f.read()
                     pattern = rf"(# --- Client: .*?---\n)?\[Peer\]\nPublicKey\s*=\s*{re.escape(pub)}[\s\S]*?(?=\n\[Peer\]|\n# ---|$)"
                     text = re.sub(pattern, "", text)
-                    with open(CONF_PATH, "w") as f:
-                        f.write(text.strip() + "\n")
+                    atomic_write_conf(text.strip() + "\n")
                 
                 clients = load_clients()
                 if pub in clients:
@@ -3935,6 +4167,9 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/v1/datasphere/status":
+            if not self._auth_valid():
+                self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
+                return
             self._send_json({
                 "status": "online",
                 "cluster": "datasphere-edge-ultra",
@@ -3951,7 +4186,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             
             conf_str = build_client_conf(pub_key, self.headers.get('Host', ''))
             
-            p = subprocess.Popen(["qrencode", "-t", "SVG", "-m", "2"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            p = subprocess.Popen(["qrencode", "-t", "SVG", "-m", "2", "--foreground=FFFFFF", "--background=1E1F20"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             svg_out, _ = p.communicate(input=conf_str.encode("utf-8"))
             
             self.send_response(200)
@@ -3977,7 +4212,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body_conf.encode("utf-8"))
             return
 
-        if self.path == "/api/v1/datasphere/awg/peers":
+        if self.path.startswith("/api/v1/datasphere/awg/peers"):
             if not self._auth_valid():
                 self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
                 return
@@ -4093,30 +4328,36 @@ ufw allow "${TARGET_SSH_PORT}/tcp" comment 'SSH' >/dev/null 2>&1 || true
 ufw allow 80/tcp comment 'HTTP ACME' >/dev/null 2>&1 || true
 ufw allow 443/tcp comment 'HTTPS L4 Router' >/dev/null 2>&1 || true
 
+if [ "${ENABLE_AGH:-0}" -eq 1 ] && [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
+    ufw allow in on awg0 to 10.9.0.1 port 53 proto udp comment 'AdGuard DNS awg0 UDP' >/dev/null 2>&1 || true
+    ufw allow in on awg0 to 10.9.0.1 port 53 proto tcp comment 'AdGuard DNS awg0 TCP' >/dev/null 2>&1 || true
+fi
+
 if [ "${ENABLE_HY2:-0}" -eq 1 ]; then
     ufw allow "${HY2_PORT}/udp" comment 'Hysteria 2' >/dev/null 2>&1 || true
     if [ "${ENABLE_HY2_HOP:-0}" -eq 1 ]; then
-        ufw allow 20000:50000/udp comment 'Hysteria 2 Hopping' >/dev/null 2>&1 || true
+        ufw allow 20000:35000/udp comment 'Hysteria 2 Hopping Pool' >/dev/null 2>&1 || true
     fi
 fi
 
+if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
+    ufw allow "${NATIVE_AWG_PORT}/udp" comment 'AmneziaWG Native awg0 Base' >/dev/null 2>&1 || true
+    ufw allow 35001:49999/udp comment 'AmneziaWG Native Speed Pool' >/dev/null 2>&1 || true
+fi
+
 if [ "${ENABLE_AWG_V3:-0}" -eq 1 ]; then
-    ufw allow "${AWG_V3_PORT}/udp" comment 'AmneziaWG v3' >/dev/null 2>&1 || true
+    ufw allow "${AWG_V3_PORT}/udp" comment '3X-UI AWG v3.2' >/dev/null 2>&1 || true
 fi
 
 if [ "${ENABLE_AWG_V2:-0}" -eq 1 ]; then
-    ufw allow "${AWG_V2_PORT}/udp" comment 'AmneziaWG v2' >/dev/null 2>&1 || true
+    ufw allow "${AWG_V2_PORT}/udp" comment '3X-UI AWG v2.0' >/dev/null 2>&1 || true
 fi
 
 if [ "${ENABLE_WG_NATIVE:-0}" -eq 1 ]; then
-    ufw allow "${WG_NATIVE_PORT}/udp" comment '3X WireGuard' >/dev/null 2>&1 || true
+    ufw allow "${WG_NATIVE_PORT}/udp" comment '3X-UI WireGuard Native' >/dev/null 2>&1 || true
 fi
 
-if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
-    ufw allow "${NATIVE_AWG_PORT}/udp" comment 'AmneziaWG Kernel Native' >/dev/null 2>&1 || true
-fi
-
-export ENABLE_HY2_HOP HY2_PORT ENABLE_AWG_V3 ENABLE_AWG_V2 ENABLE_WG_NATIVE ENABLE_NATIVE_AWG DEFAULT_IF
+export ENABLE_HY2_HOP HY2_PORT ENABLE_NATIVE_AWG NATIVE_AWG_PORT ENABLE_AWG_V3 ENABLE_AWG_V2 ENABLE_WG_NATIVE DEFAULT_IF
 python3 - << 'EOF_UFW_PYTHON'
 # -*- coding: utf-8 -*-
 import os, sys, re
@@ -4136,27 +4377,32 @@ content = content.strip() + "\n"
 enable_hop = os.environ.get("ENABLE_HY2_HOP") == "1"
 hy2_p = os.environ.get("HY2_PORT", "443")
 default_if = os.environ.get("DEFAULT_IF", "eth0")
+awg_native = os.environ.get("ENABLE_NATIVE_AWG") == "1"
+nawg_p = os.environ.get("NATIVE_AWG_PORT", "8443")
 awg3 = os.environ.get("ENABLE_AWG_V3") == "1"
 awg2 = os.environ.get("ENABLE_AWG_V2") == "1"
 wg_nat = os.environ.get("ENABLE_WG_NATIVE") == "1"
-awg_native = os.environ.get("ENABLE_NATIVE_AWG") == "1"
 
 nat_rules = ["*nat", ":PREROUTING ACCEPT [0:0]", ":POSTROUTING ACCEPT [0:0]", ":OUTPUT ACCEPT [0:0]"]
 if enable_hop:
-    nat_rules.append(f"-A PREROUTING -p udp --dport 20000:50000 -j REDIRECT --to-ports {hy2_p}")
+    nat_rules.append(f"-A PREROUTING -p udp --dport 20000:35000 -j REDIRECT --to-ports {hy2_p}")
+if awg_native:
+    nat_rules.append(f"-A PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports {nawg_p}")
+    nat_rules.append(f"-A POSTROUTING -s 10.9.0.0/24 -o {default_if} -j MASQUERADE")
 if awg3:
     nat_rules.append(f"-A POSTROUTING -s 10.8.1.0/24 -o {default_if} -j MASQUERADE")
 if awg2:
     nat_rules.append(f"-A POSTROUTING -s 10.8.2.0/24 -o {default_if} -j MASQUERADE")
 if wg_nat:
     nat_rules.append(f"-A POSTROUTING -s 10.8.3.0/24 -o {default_if} -j MASQUERADE")
-if awg_native:
-    nat_rules.append(f"-A POSTROUTING -s 10.9.0.0/24 -o {default_if} -j MASQUERADE")
 nat_rules.append("COMMIT\n")
 
 nat_part = "# START HARDENED NAT\n" + "\n".join(nat_rules) + "\n# END HARDENED NAT\n\n"
 
 forward_rules = ["# START HARDENED FORWARD"]
+if awg_native:
+    forward_rules.append("-A ufw-before-forward -s 10.9.0.0/24 -j ACCEPT")
+    forward_rules.append(f"-A ufw-before-forward -i {default_if} -d 10.9.0.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
 if awg3:
     forward_rules.append("-A ufw-before-forward -s 10.8.1.0/24 -j ACCEPT")
     forward_rules.append(f"-A ufw-before-forward -i {default_if} -d 10.8.1.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
@@ -4166,9 +4412,6 @@ if awg2:
 if wg_nat:
     forward_rules.append("-A ufw-before-forward -s 10.8.3.0/24 -j ACCEPT")
     forward_rules.append(f"-A ufw-before-forward -i {default_if} -d 10.8.3.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
-if awg_native:
-    forward_rules.append("-A ufw-before-forward -s 10.9.0.0/24 -j ACCEPT")
-    forward_rules.append(f"-A ufw-before-forward -i {default_if} -d 10.9.0.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
 forward_rules.append("# END HARDENED FORWARD\n")
 forward_block = "\n".join(forward_rules)
 
@@ -4187,14 +4430,14 @@ mangle_part = """# START HARDENED MANGLE
 :FORWARD ACCEPT [0:0]
 :OUTPUT ACCEPT [0:0]
 :POSTROUTING ACCEPT [0:0]
+-A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.9.0.0/24 -j TCPMSS --set-mss 1320
+-A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.9.0.0/24 -j TCPMSS --set-mss 1320
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.1.0/24 -j TCPMSS --set-mss 1320
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.1.0/24 -j TCPMSS --set-mss 1320
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.2.0/24 -j TCPMSS --set-mss 1320
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.2.0/24 -j TCPMSS --set-mss 1320
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.3.0/24 -j TCPMSS --set-mss 1380
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.3.0/24 -j TCPMSS --set-mss 1380
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.9.0.0/24 -j TCPMSS --set-mss 1320
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.9.0.0/24 -j TCPMSS --set-mss 1320
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 COMMIT
 # END HARDENED MANGLE
@@ -4206,7 +4449,7 @@ with open(rules_file, "w") as f:
     f.write(final_body)
 EOF_UFW_PYTHON
 
-DENIED_PORTS=(10443 55443 50443 9443 11443 3000 20443)
+DENIED_PORTS=(10443 55443 50443 9443 3000 20443)
 for p in "${ALL_REALITY_PORTS[@]:-}"; do
     DENIED_PORTS+=("$p")
 done
@@ -4221,20 +4464,20 @@ fi
 
 ufw --force enable >/dev/null 2>&1 || true
 ufw reload >/dev/null 2>&1 || true
-ok "Фаервол UFW настроен. MSS Clamping (1320/1380) активен."
+ok "Фаервол UFW настроен. Маршрутизация пулов и MSS Clamping (1320/1380) активны."
 
 # =============================================================
 #  ФИНАЛ: СОХРАНЕНИЕ УЧЕТНЫХ ДАННЫХ И ДАШБОРД
 # =============================================================
 HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT:-443}"
 if [ "${ENABLE_HY2_HOP:-0}" -eq 1 ]; then
-    HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT:-443},20000-50000"
+    HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT:-443},20000-35000"
 fi
 
 CRED_FILE="/root/vpn_credentials.txt"
 cat << EOF > "$CRED_FILE"
 =====================================================================
-  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Single-IP Ultra Enhanced v3.3.5)
+  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Single-IP Ultra Enhanced v3.5)
   ОС: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
   Ядро Xray-core: ${DETECTED_XRAY_VER} (Pinned)
   Режим:          $([ "$INSTALL_MODE" = "2" ] && echo "Safe Migration" || echo "Clean Setup")
@@ -4258,10 +4501,11 @@ $([ "$INSTALL_MODE" = "1" ] && echo "Логин администратора:  $
 $([ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ] && cat << EOF_NAWG_CRED
 [ НА ТЕХНОЛОГИЯХ ЯДРА: НА РАБОЧЕМ ЖЕЛЕЗЕ AMNEZIAWG ]
 Интерфейс:             awg0 (Модуль ядра Linux DKMS)
-Порт / Хост:           ${PRIMARY_DOMAIN}:${NATIVE_AWG_PORT:-51820}
+Базовый порт / Хост:   ${PRIMARY_DOMAIN}:${NATIVE_AWG_PORT:-8443}
+Скоростной пул UDP:    ${PRIMARY_DOMAIN}:35001-49999 (Любой порт пула -> :${NATIVE_AWG_PORT})
 Первый клиент:         Test-Client
 Конфиг файл (.conf):   /root/amneziawg-client.conf
-Стандарт скорости:     MTU 1360 | MSS 1320 | Jc 4 | Jmin 40 | Jmax 70
+Стандарт скорости:     MTU 1360 | MSS 1320 | Jc 4 | Jmin 40 | Jmax 70 | S1 72 | S2 56 | S3 32 | S4 16
 
 EOF_NAWG_CRED
 )
@@ -4289,15 +4533,15 @@ $([ "${ENABLE_HY2:-0}" -eq 1 ] && echo "[ HYSTERIA 2 ]
 Подключение:           ${HY2_REPORT_LINE}
 ")
 $([ "${ENABLE_AWG_V3:-0}" -eq 1 ] && echo "[ AMNEZIAWG v3.2 (3X-UI) ]
-Порт / Хост:           ${PRIMARY_DOMAIN}:${AWG_V3_PORT:-8443}
-Стандарт скорости:     MTU 1360 | MSS 1320 | Jc 4
+Порт / Хост:           ${PRIMARY_DOMAIN}:${AWG_V3_PORT:-10443}
+Стандарт скорости:     MTU 1360 | MSS 1320 | Jc 4 | S1 72 | S2 56 | S3 32 | S4 16
 ")
 $([ "${ENABLE_AWG_V2:-0}" -eq 1 ] && echo "[ AMNEZIAWG v2.0 / LEGACY (3X-UI) ]
-Порт / Хост:           ${PRIMARY_DOMAIN}:${AWG_V2_PORT:-8444}
-Стандарт скорости:     MTU 1360 | MSS 1320 | Jc 4
+Порт / Хост:           ${PRIMARY_DOMAIN}:${AWG_V2_PORT:-10444}
+Стандарт скорости:     MTU 1360 | MSS 1320 | Jc 4 | S1 72 | S2 56 | S3 32 | S4 16
 ")
 $([ "${ENABLE_WG_NATIVE:-0}" -eq 1 ] && echo "[ 3X WIREGUARD (3X-UI) ]
-Порт / Хост:           ${PRIMARY_DOMAIN}:${WG_NATIVE_PORT:-47443}
+Порт / Хост:           ${PRIMARY_DOMAIN}:${WG_NATIVE_PORT:-10445}
 Конфиг файл (.conf):   /root/wireguard-client.conf
 MTU / Clamping:        MTU 1420 | MSS 1380
 ")
@@ -4314,7 +4558,7 @@ chmod 600 "$CRED_FILE"
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА В РЕЖИМЕ SINGLE-IP (v3.3.5 ULTRA)!       ${NC}"
+echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА В РЕЖИМЕ SINGLE-IP (v3.5 ULTRA)!         ${NC}"
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Сайт-маскировка DataSphere:  ${CYAN}https://${PRIMARY_DOMAIN}/${NC}"
 echo -e "  Скрытый SSO Hub:             ${WHITE}Кнопка «Консоль» в шапке сайта${NC}"
@@ -4324,7 +4568,7 @@ fi
 echo
 echo -e "  Прямой URL панели 3X-UI:     ${CYAN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
-echo -e "  Нативный AmneziaWG (Kernel): ${GREEN}awg0 (:51820/udp, MTU 1360 / MSS 1320)${NC}"
+echo -e "  Нативный AmneziaWG (Kernel): ${GREEN}awg0 (:8443/udp, пул 35001-49999, MTU 1360 / MSS 1320)${NC}"
 echo -e "  Первый клиент:               ${GREEN}Test-Client (/root/amneziawg-client.conf)${NC}"
 fi
 if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
@@ -4342,8 +4586,12 @@ echo
 fi
 echo -e "  ${WHITE}Zero-SNI Shield:${NC}             ${GREEN}ssl_reject_handshake on (Скан IP изолирован)${NC}"
 echo -e "  ${WHITE}Порт 80:${NC}                     ${GREEN}Только ACME, сканеры сбрасываются (444)${NC}"
-echo -e "  ${WHITE}Stub Listener 11443:${NC}         ${GREEN}Proxy_Protocol + HTTP2 + ALPN${NC}"
-echo -e "  ${WHITE}AWG Golden Standard:${NC}         ${GREEN}MTU 1360 | MSS 1320 | Jc 4 | Jmin 40 | Jmax 70${NC}"
+echo -e "  ${WHITE}Anti-Loop Fallback 9443:${NC}     ${GREEN}Proxy_Protocol v1 + Живой Nginx (Декой DataSphere)${NC}"
+echo -e "  ${WHITE}L4 Stream Ingress:${NC}           ${GREEN}Строго порт 443/tcp (Порт 8443 освобожден под UDP)${NC}"
+echo -e "  ${WHITE}Hysteria 2 Hopping Пул:${NC}      ${GREEN}Порты 20000:35000/udp -> :443/udp${NC}"
+echo -e "  ${WHITE}AmneziaWG Native Пул:${NC}        ${GREEN}Порты 35001:49999/udp -> :8443/udp${NC}"
+echo -e "  ${WHITE}AWG3 Golden Matrix:${NC}          ${GREEN}S1=72 | S2=56 | S3=32 | S4=16 | MTU 1360 | MSS 1320${NC}"
+echo -e "  ${WHITE}3X-UI Выделенный UDP Стек:${NC}   ${GREEN}AWG v3.2 (:10443) | AWG v2.0 (:10444) | WG (:10445)${NC}"
 echo -e "  ${WHITE}Zero-Leak In-Memory Hub:${NC}     ${GREEN}Разметка меню строится в RAM только после 200 OK${NC}"
 echo
 echo -e "  Все доступы сохранены в файл: ${CYAN}${CRED_FILE}${NC} (chmod 600)"
