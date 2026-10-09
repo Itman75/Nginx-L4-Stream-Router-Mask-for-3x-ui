@@ -1694,6 +1694,40 @@ header {
 .peers-empty-td { text-align: center; color: var(--text-muted); padding: 20px; }
 
 footer { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; border-top: 1px solid var(--border); }
+/* Large QR Modal Window */
+.qr-modal-card {
+    max-width: 480px !important;
+    text-align: center;
+}
+.qr-display-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 12px 0 6px;
+}
+.qr-card-inner-large {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    background: #1e1f20;
+    border: 1px solid rgba(168, 199, 250, 0.25);
+    border-radius: 24px;
+    padding: 22px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+}
+.qr-img-large {
+    width: clamp(280px, 75vw, 380px);
+    height: clamp(280px, 75vw, 380px);
+    display: block;
+    border-radius: 12px;
+    image-rendering: crisp-edges;
+}
+.qr-hint-large {
+    margin-top: 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+}
 @keyframes spin { 100% { transform: rotate(360deg); } }
 EOF
 
@@ -1946,7 +1980,7 @@ async function openAwgManager() {
             <div class="hub-meta-box">
                 Интерфейс: <strong class="text-success">awg0 (Kernel DKMS)</strong> | Базовый порт: <strong>8443</strong> | Пул: <strong>35001-49999</strong> | MTU: <strong>1360</strong>
             </div>
-            <div id="qrPreviewArea" class="qr-preview-box"></div>
+            
             <div class="peers-table-container">
                 <table class="awg-table">
                     <thead>
@@ -1999,19 +2033,19 @@ async function promptAddPeer() {
     }
 }
 
-async function showQr(pubKey) {
-    const qrArea = document.getElementById("qrPreviewArea");
-    if (!qrArea) return;
-    qrArea.style.display = "block";
-    qrArea.innerHTML = `
-        <div class="qr-card-inner">
-            <img src="/api/v1/datasphere/awg/peer/qr?key=${encodeURIComponent(pubKey)}" class="qr-img" alt="QR Code">
-            <span class="qr-hint">Сканируйте в приложении AmneziaWG</span>
-        </div>
-        <div>
-            <button class="btn btn-outline btn-qr-hide" data-action="hide-qr">Скрыть QR</button>
-        </div>
-    `;
+function showQr(pubKey, clientName) {
+    const modal = document.getElementById("qrModal");
+    const img = document.getElementById("qrModalImg");
+    const title = document.getElementById("qrClientTitle");
+    if (!modal || !img) return;
+    if (title && clientName) title.innerText = "QR-код: " + clientName;
+    img.src = "/api/v1/datasphere/awg/peer/qr?key=" + encodeURIComponent(pubKey);
+    modal.classList.add("active");
+}
+
+function closeQrModal() {
+    const modal = document.getElementById("qrModal");
+    if (modal) modal.classList.remove("active");
 }
 
 async function downloadAwgConf(publicKey) {
@@ -2097,11 +2131,12 @@ document.addEventListener("click", (e) => {
     if (act === "open-awg") openAwgManager();
     if (act === "back-to-hub") renderAdminHub(authenticatedSession.services);
     if (act === "add-peer") promptAddPeer();
-    if (act === "show-qr") showQr(el.dataset.key);
+    if (act === "show-qr") { const r = el.closest("tr"); const cName = r ? r.querySelector("strong")?.innerText : ""; showQr(el.dataset.key, cName); }
     if (act === "hide-qr") { const qa = document.getElementById("qrPreviewArea"); if (qa) qa.style.display = "none"; }
     if (act === "download-conf") downloadAwgConf(el.dataset.key);
     if (act === "remove-peer") removeAwgPeer(el.dataset.key);
     if (act === "close-hub") { closeAuthModal(); location.reload(); }
+    if (act === "close-qr-modal") closeQrModal();
 });
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -2261,6 +2296,27 @@ cat << EOF > /var/www/html/index.html
             <div id="toastDesc" class="toast-desc">Данные синхронизированы</div>
         </div>
     </div>
+    <div id="qrModal" class="modal-overlay" style="z-index: 150;">
+        <div class="modal-card qr-modal-card">
+            <div class="modal-header">
+                <div>
+                    <h2 id="qrClientTitle">Конфигурация AmneziaWG</h2>
+                    <p>Сканируйте QR-код в мобильном приложении</p>
+                </div>
+                <button id="qrModalClose" class="modal-close" type="button" aria-label="Закрыть" data-action="close-qr-modal">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="qr-display-container">
+                <div class="qr-card-inner-large">
+                    <img id="qrModalImg" src="" class="qr-img-large" alt="AmneziaWG QR Code">
+                    <span class="qr-hint-large">Сканируйте в приложении AmneziaWG</span>
+                </div>
+            </div>
+            <button type="button" id="qrModalCloseBtn" class="btn" style="width: 100%; height: 46px; margin-top: 18px;" data-action="close-qr-modal">Закрыть</button>
+        </div>
+    </div>
+
 
     <footer>&copy; 2026 DataSphere Cloud Systems Inc. Платформа распределенной аналитики и защиты данных.</footer>
     <script src="/assets/js/datasphere.js"></script>
