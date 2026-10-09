@@ -3734,8 +3734,6 @@ H1 = $AWG_H1
 H2 = $AWG_H2
 H3 = $AWG_H3
 H4 = $AWG_H4
-PostUp = iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o $DEFAULT_IF -j MASQUERADE; iptables -t nat -A PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports $NATIVE_AWG_PORT
-PostDown = iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s 10.9.0.0/24 -o $DEFAULT_IF -j MASQUERADE; iptables -t nat -D PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports $NATIVE_AWG_PORT
 
 # --- Client: Test-Client ---
 [Peer]
