@@ -234,10 +234,26 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Rout
 
 ## 9. Приватный DoH AdGuard Home
 
-DNS-сервер полностью изолирован от внешнего неавторизованного доступа: порты `53/udp` и `53/tcp` закрыты фаерволом на WAN-интерфейсе. Доступ открыт исключительно через HTTPS с верификацией персонального токена `ClientID`:
+Служба изолирована на `127.0.0.1:3000` и обслуживается через прокси Nginx с проверкой `ClientID`. Порт 53 закрыт извне.
 
-* **URL панели управления:** `https://dns.yourdomain.online/`
-* **DoH URL для устройств и роутеров:** `https://dns.yourdomain.online/dns-query/home-router`
+* **Панель управления DNS:** `https://dns.yourdomain.online/`
+* **DoH URL для клиентов:** `https://dns.yourdomain.online/dns-query/home-router`
+
+### Настройка роутера OpenWrt (Пакет Podkop / Https-DNS-Proxy):
+1. **Службы** $\to$ **Podkop** $\to$ **Настройки** (вкладка DNS):
+   * Протокол: `DNS через HTTPS (DoH)`;
+   * Строка подключения (URL без https://): `dns.yourdomain.online/dns-query/home-router`;
+   * Bootstrap DNS: `77.88.8.8` (для РФ) или `1.1.1.1` (для Зарубежья).
+2. Сохранить настройки и перезапустить службу Podkop для маршрутизации DNS-запросов через AdGuard Home.
+
+### Настройка роутера Keenetic (KeeneticOS):
+1. **Сетевые правила** $\to$ **Интернет-фильтр** (вкладка «Серверы DNS»).
+2. Добавить DNS-сервер:
+   * Адрес DNS (Bootstrap): `77.88.8.8` или `1.1.1.1` *(не указывать IP своего VPS)*;
+   * Протокол: `DNS-over-HTTPS (DoH)`;
+   * URL-адрес: `https://dns.yourdomain.online/dns-query/home-router`;
+   * SNI: `dns.yourdomain.online`.
+3. Включить опцию «Игнорировать DNS провайдера».
 
 ---
 
@@ -270,31 +286,6 @@ DNS-сервер полностью изолирован от внешнего �
 1. `DNS = 10.9.0.1` — при включённом AdGuard Home (запросы идут в туннель на локальный фильтрующий резолвер).
 2. `DNS = 1.1.1.1, 8.8.8.8` — профиль EU/World.
 3. `DNS = 77.88.8.8, 77.88.8.1` — профиль RU (Яндекс.DNS).
-
----
-
-## 10. Приватный DoH AdGuard Home
-
-Служба изолирована на `127.0.0.1:3000` и обслуживается через прокси Nginx с проверкой `ClientID`. Порт 53 закрыт извне.
-
-* **Панель управления DNS:** `https://dns.yourdomain.online/`
-* **DoH URL для клиентов:** `https://dns.yourdomain.online/dns-query/home-router`
-
-### Настройка роутера OpenWrt (Пакет Podkop / Https-DNS-Proxy):
-1. **Службы** $\to$ **Podkop** $\to$ **Настройки** (вкладка DNS):
-   * Протокол: `DNS через HTTPS (DoH)`;
-   * Строка подключения (URL без https://): `dns.yourdomain.online/dns-query/home-router`;
-   * Bootstrap DNS: `77.88.8.8` (для РФ) или `1.1.1.1` (для Зарубежья).
-2. Сохранить настройки и перезапустить службу Podkop для маршрутизации DNS-запросов через AdGuard Home.
-
-### Настройка роутера Keenetic (KeeneticOS):
-1. **Сетевые правила** $\to$ **Интернет-фильтр** (вкладка «Серверы DNS»).
-2. Добавить DNS-сервер:
-   * Адрес DNS (Bootstrap): `77.88.8.8` или `1.1.1.1` *(не указывать IP своего VPS)*;
-   * Протокол: `DNS-over-HTTPS (DoH)`;
-   * URL-адрес: `https://dns.yourdomain.online/dns-query/home-router`;
-   * SNI: `dns.yourdomain.online`.
-3. Включить опцию «Игнорировать DNS провайдера».
 
 ---
 
