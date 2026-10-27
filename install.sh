@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup Monoscript: Hardened Master Engine v3.6 DataSphere Ultra
+# Production AutoSetup Monoscript: Hardened Master Engine v3.7 MyPrivateCloud Ultra
 # Architecture: Single-IP Ultra Enhanced + Native Kernel AmneziaWG (Bare-Metal)
-# Zero-Leak Frontend: DataSphere Enterprise SSO Hub + Modular WebCrypto Plane
-# Strict OS Gating: Ubuntu 22.04 / 24.04 / 26.04 & Debian 12 / 13
-# Nginx L4 Single-Ingress (TCP 443) + Xray v26.7.28 Pinned + ML-KEM-768 + Vision
-# Dual UDP Speed Pools: Hy2 (20000:35000 -> 443) | AWG Native (35001:49999 -> 8443)
-# AWG3 Golden Matrix: S1=72, S2=56, S3=32, S4=16, Jc=4, Jmin=40, Jmax=70, MTU=1360
-# Universal Inbound & Client Dual-Sync Reconciliation Matrix (Arbitrary N:M Pool)
-# Tier 1-4 Dynamic WAN Interface Engine + Domain Hierarchy Collision Shield
-# Zero-Placeholder Guarantee: Production-Grade Monolithic Script
+# Zero-Leak Frontend: My Private Cloud SSO Hub + Modular WebCrypto Plane
 # ==============================================================================
 
 set -Eeuo pipefail
@@ -59,11 +52,10 @@ trap 'cleanup $LINENO' ERR INT TERM
 
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN}  Hardened Master Engine v3.6 (DataSphere Ultra + Native AmneziaWG)  ${NC}"
-echo -e "${CYAN}  Single-IP Consolidated: Clean Setup / Safe Migration + Nginx L4    ${NC}"
+echo -e "${GREEN}  Hardened Master Engine v3.7 (MyPrivateCloud Ultra + Native AmneziaWG)  ${NC}"
+echo -e "${CYAN}   Clean Setup / Safe Migration + Nginx L4                              ${NC}"
 echo -e "${WHITE}  Xray Core v26.7.28 Pinned + Native H2 xHTTP + ML-KEM-768 + Vision    ${NC}"
 echo -e "${WHITE}  Dual UDP Pools: Hy2 (20000-35000) & AWG Native (35001-49999)      ${NC}"
-echo -e "${WHITE}  AWG3 Golden Matrix: S1=72, S2=56, S3=32, S4=16, MTU 1360 / MSS 1320 ${NC}"
 echo -e "${WHITE}  Stealth SSO Hub: DataSphere In-Memory Portal (3X-UI / AWG / AGH)   ${NC}"
 echo -e "${WHITE}  Ingress Shield: Zero-SNI + Port 80 444 Drop + Live Fallback 9443   ${NC}"
 echo -e "${WHITE}  Universal WAN Engine (Tier 1-4) + Dual-Sync Matrix Reconciliation  ${NC}"
@@ -82,11 +74,10 @@ NEW_USER_PASS=""
 HY2_PORT="443"
 NATIVE_AWG_PORT="8443"
 AWG_V3_PORT="10443"
-AWG_V2_PORT="10444"
-WG_NATIVE_PORT="10445"
 ENABLE_NATIVE_AWG=1
 ENABLE_STEAL=0
 ENABLE_CLASSIC=0
+ENABLE_XHTTP=1
 ENABLE_HY2=0
 ENABLE_HY2_HOP=0
 ENABLE_AWG_HOP=0
@@ -162,6 +153,55 @@ fi
 
 VIRT_TYPE=$(systemd-detect-virt 2>/dev/null || echo "none")
 
+
+patch_amnezia_dkms_kernel_compat() {
+    # На Ubuntu 24.04 (ядра 5.x / 6.x) патч НЕ ТРЕБУЕТСЯ — выходим сразу
+    local k_major
+    k_major=$(uname -r | cut -d. -f1)
+    if [ "${k_major:-0}" -lt 7 ]; then
+        return 0
+    fi
+
+    local dkms_dirs=()
+    shopt -s nullglob
+    dkms_dirs=(/usr/src/amneziawg-*)
+    shopt -u nullglob
+
+    [ "${#dkms_dirs[@]}" -gt 0 ] || return 0
+
+    local root_dir target_header
+    for root_dir in "${dkms_dirs[@]}"; do
+        [ -d "$root_dir" ] || continue
+        target_header=""
+        if [ -f "${root_dir}/compat/compat.h" ]; then
+            target_header="${root_dir}/compat/compat.h"
+        elif [ -f "${root_dir}/src/compat/compat.h" ]; then
+            target_header="${root_dir}/src/compat/compat.h"
+        fi
+        [ -n "$target_header" ] || continue
+
+        if grep -q "__compat_setup_udp_tunnel_sock" "$target_header" 2>/dev/null; then
+            continue
+        fi
+
+        log "Обнаружено ядро 7.0+ ($(uname -r)). Применение патча совместимости для AmneziaWG..."
+        awk '
+        index($0, "setup_udp_tunnel_sock(net, sk, sock_cfg) setup_udp_tunnel_sock(net, sk->sk_socket, sock_cfg)") > 0 {
+            print "/* Kernel 7.0+ compatibility backport */"
+            print "#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)"
+            print "#define setup_udp_tunnel_sock(net, sk, sock_cfg) setup_udp_tunnel_sock(net, sk->sk_socket, sock_cfg)"
+            print "#elif LINUX_VERSION_CODE < KERNEL_VERSION(7, 2, 0)"
+            print "#define __compat_setup_udp_tunnel_sock 1"
+            print "#endif"
+            next
+        }
+        { print }
+        ' "$target_header" > "${target_header}.tmp" && mv -f "${target_header}.tmp" "$target_header"
+        chmod 0644 "$target_header"
+        ok "Заголовочный файл ${target_header} пропатчен под ядро 7.0+."
+    done
+}
+
 wait_for_apt_lock() {
     local max_wait=120
     local count=0
@@ -206,10 +246,30 @@ validate_port() {
 }
 
 validate_path_segment() {
-    if [[ ! "$1" =~ ^[a-zA-Z0-9_/-]+$ ]]; then
-        die "Параметр $2 ('$1') содержит недопустимые символы. Используйте латиницу, цифры, дефис и слэши."
+    local p="${1:-}"
+    if [[ -n "$p" ]] && [[ "$p" =~ ^[a-zA-Z0-9_./-]+$ ]] && [[ ! "$p" =~ \.\. ]]; then
+        return 0
     fi
-    return 0
+    return 1
+}
+
+prompt_path() {
+    local prompt_text="$1"
+    local default_val="$2"
+    local var_name="$3"
+    local input_val=""
+    local p_val=""
+    while true; do
+        echo -en "${prompt_text} [${GREEN}${default_val}${NC}]: "
+        read -r input_val
+        p_val="${input_val:-$default_val}"
+        p_val=$(echo "$p_val" | tr -d '[:space:]')
+        if validate_path_segment "$p_val"; then
+            declare -g "$var_name=$p_val"
+            break
+        fi
+        warn "Недопустимый формат пути: '$p_val'. Допустимы латиница, цифры, дефис, точка и слэш (без '..'). Попробуйте снова."
+    done
 }
 
 # =============================================================
@@ -547,7 +607,7 @@ fi
 
 echo -e "Текущий активный порт SSH: ${GREEN}${SSH_ACTIVE_PORT}${NC}"
 if prompt_yes_no "Сменить порт SSH на нестандартный?" "n"; then
-    prompt_port "Введите новый порт SSH (1024-65535)" "2222" TARGET_SSH_PORT
+    prompt_port "Введите новый порт SSH (1024-65535)" "20022" TARGET_SSH_PORT
 else
     TARGET_SSH_PORT="$SSH_ACTIVE_PORT"
 fi
@@ -607,39 +667,32 @@ if [ -n "$EXISTING_DB_PATH" ]; then
 fi
 
 prompt_port "Внутренний локальный порт панели 3X-UI" "${DETECTED_PANEL_PORT:-10443}" PANEL_PORT
-prompt_default "Секретный URI-путь к веб-панели (без слэшей)" "${DETECTED_PANEL_PATH:-my-3x-panel}" RAW_PATH
-validate_path_segment "$RAW_PATH" "URI панели"
+prompt_path "Секретный URI-путь к веб-панели (без слэшей)" "${DETECTED_PANEL_PATH:-my-3x-panel}" RAW_PATH
 PANEL_PATH="/${RAW_PATH#/}"
 PANEL_PATH="${PANEL_PATH%/}/"
 
 prompt_port "Внутренний порт сервера подписок 3X-UI" "${DETECTED_SUB_PORT:-55443}" SUB_PORT
-prompt_default "Секретный URI-путь подписок (без слэшей)" "${DETECTED_SUB_PATH:-my-post-key}" RAW_SUB_PATH
-validate_path_segment "$RAW_SUB_PATH" "URI подписок"
+prompt_path "Секретный URI-путь подписок (без слэшей)" "${DETECTED_SUB_PATH:-my-post-key}" RAW_SUB_PATH
 SUB_PATH="/${RAW_SUB_PATH#/}"
 SUB_PATH="${SUB_PATH%/}/"
 
 SUB_JSON_PATH="${SUB_PATH}sub-json/"
 SUB_CLASH_PATH="${SUB_PATH}sub-clash/"
 
-prompt_port "Внутренний порт инбаунда VLESS xHTTP (Native H2 Stream-One)" "${DETECTED_XHTTP_PORT:-50443}" XHTTP_STREAM_PORT
-prompt_default "Секретный URI-путь для xHTTP" "${DETECTED_XHTTP_PATH:-Stream-One-Path}" RAW_XHTTP_STREAM_PATH
-validate_path_segment "$RAW_XHTTP_STREAM_PATH" "URI xHTTP"
-XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
-XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
-BASE_XHTTP_PATH="${XHTTP_STREAM_PATH%/}"
+
 
 ADMIN_USER="admin"
 ADMIN_PASS=""
 if [ "$INSTALL_MODE" = "1" ]; then
     prompt_default "Логин администратора панели 3X-UI" "admin" ADMIN_USER
-    DEFAULT_XP="Xui_$(openssl rand -hex 4)"
+    DEFAULT_XP="3X_$(openssl rand -hex 4)"
     prompt_default "Пароль администратора панели 3X-UI" "$DEFAULT_XP" ADMIN_PASS
 else
     ok "В режиме Safe Migration учетные данные администратора панели сохраняются из базы."
 fi
 
 echo
-echo -e "${WHITE}${BOLD}--- ШАГ 4: Настройка протоколов маскировки REALITY ---${NC}"
+echo -e "${WHITE}${BOLD}--- ШАГ 4: Настройка протоколов маскировки REALITY и xHTTP ---${NC}"
 if prompt_yes_no "Включить Steal-Oneself REALITY (Кража у своего поддомена с Anti-Loop Fallback 9443)?" "y"; then
     ENABLE_STEAL=1
 else
@@ -712,6 +765,21 @@ if [ "$ENABLE_STEAL" -eq 1 ]; then
         fi
     done
 fi
+
+if prompt_yes_no "Включить VLESS xHTTP (Native H2 Stream-One + Post-Quantum ML-KEM-768)?" "y"; then
+    ENABLE_XHTTP=1
+    prompt_port "  Внутренний порт инбаунда VLESS xHTTP (Native H2 Stream-One)" "${DETECTED_XHTTP_PORT:-50443}" XHTTP_STREAM_PORT
+    prompt_path "  Секретный URI-путь для xHTTP (без слэшей)" "${DETECTED_XHTTP_PATH:-Stream-One-Path}" RAW_XHTTP_STREAM_PATH
+    XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
+    XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
+    BASE_XHTTP_PATH="${XHTTP_STREAM_PATH%/}"
+else
+    ENABLE_XHTTP=0
+    XHTTP_STREAM_PORT=""
+    XHTTP_STREAM_PATH=""
+    BASE_XHTTP_PATH=""
+fi
+
 
 if prompt_yes_no "Включить Classic External REALITY (Сторонний доверенный SNI)?" "y"; then
     ENABLE_CLASSIC=1
@@ -849,23 +917,7 @@ if [ "$ENABLE_AWG_V3" -eq 1 ]; then
     prompt_port "  Выделенный UDP-порт для AmneziaWG v3.2 (3X-UI)" "10443" AWG_V3_PORT
 fi
 
-if prompt_yes_no "Установить AmneziaWG v2.0 / Legacy в 3X-UI (UDP)?" "y"; then
-    ENABLE_AWG_V2=1
-else
-    ENABLE_AWG_V2=0
-fi
-if [ "$ENABLE_AWG_V2" -eq 1 ]; then
-    prompt_port "  Выделенный UDP-порт для AmneziaWG v2.0 (3X-UI)" "10444" AWG_V2_PORT
-fi
 
-if prompt_yes_no "Установить чистый 3X WireGuard в 3X-UI (UDP)?" "y"; then
-    ENABLE_WG_NATIVE=1
-else
-    ENABLE_WG_NATIVE=0
-fi
-if [ "$ENABLE_WG_NATIVE" -eq 1 ]; then
-    prompt_port "  Выделенный UDP-порт для 3X WireGuard (3X-UI)" "10445" WG_NATIVE_PORT
-fi
 
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 7: Приватный DNS AdGuard Home (DoH) ---${NC}"
@@ -920,6 +972,10 @@ wait_for_apt_lock
 apt-get update -q
 
 if [ "${DO_SYS_UPGRADE:-0}" -eq 1 ]; then
+    patch_amnezia_dkms_kernel_compat
+    if dpkg -s amneziawg-dkms >/dev/null 2>&1 && dpkg -l amneziawg-dkms 2>/dev/null | grep -qE '^i[UHRF]|^r[cF]'; then
+        dpkg --configure -a || true
+    fi
     log "Неинтерактивное обновление системных библиотек и проверка состояния ядра..."
     wait_for_apt_lock
     apt-get upgrade -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
@@ -1342,7 +1398,11 @@ SMOKE_RESPONSE=$(curl -s4 -m 5 "http://127.0.0.1/.well-known/acme-challenge/smok
 rm -f "$SMOKE_FILE"
 
 if [ "$SMOKE_RESPONSE" != "acme-smoke-test-payload-ok" ]; then
-    die "Pre-flight тест отдачи ACME токена завершился сбоем (Ответ: '$SMOKE_RESPONSE'). Проверьте порт 80!"
+    warn "Pre-flight тест отдачи ACME токена вернул: '$SMOKE_RESPONSE'."
+    if ! prompt_yes_no "Продолжить установку, несмотря на предупреждение теста порта 80?" "y"; then
+        warn "Пользователь решил скорректировать окружение. Выход."
+        exit 1
+    fi
 fi
 ok "Pre-flight Loopback Smoke Test успешно пройден: Nginx отдает ACME токены."
 
@@ -1383,7 +1443,18 @@ EOF
         else
             warn "Ошибка выпуска SSL для $dom."
             if [ "$dom" = "$PRIMARY_DOMAIN" ]; then
-                die "Критическая ошибка: SSL главного домена не получен."
+                warn "Не удалось выпустить Let's Encrypt для $PRIMARY_DOMAIN."
+                if prompt_yes_no "Сгенерировать аварийный Self-Signed SSL, чтобы поднять шлюз и продолжить?" "y"; then
+                    mkdir -p "${SSL_BASE_DIR}/$PRIMARY_DOMAIN"
+                    openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+                        -keyout "${SSL_BASE_DIR}/$PRIMARY_DOMAIN/privkey.pem" \
+                        -out "${SSL_BASE_DIR}/$PRIMARY_DOMAIN/fullchain.pem" \
+                        -subj "/CN=$PRIMARY_DOMAIN" >/dev/null 2>&1
+                    ok "Аварийный самоподписанный SSL успешно сгенерирован."
+                else
+                    warn "Установка прервана пользователем из-за отсутствия SSL."
+                    exit 1
+                fi
             fi
         fi
     done
@@ -1473,11 +1544,15 @@ EOF
         )
     fi
 
-    download_asset "$AGH_TAR" "${AGH_URLS[@]}" || die "Не удалось загрузить архив AdGuard Home!"
-    tar -zxvf "$AGH_TAR" -C /opt/ >/dev/null
-    rm -f "$AGH_TAR"
+    if ! download_asset "$AGH_TAR" "${AGH_URLS[@]}"; then
+        warn "Не удалось загрузить AdGuard Home. Модуль AGH отключен, продолжаю установку остальных служб..."
+        ENABLE_AGH=0
+    fi
+    if [ "$ENABLE_AGH" -eq 1 ]; then
+        tar -zxvf "$AGH_TAR" -C /opt/ >/dev/null
+        rm -f "$AGH_TAR"
 
-    AGH_PASS_HASH=$(htpasswd -b -n -B -C 10 "" "$AGH_PASS" | tr -d '\n' | cut -d: -f2)
+        AGH_PASS_HASH=$(htpasswd -b -n -B -C 10 "" "$AGH_PASS" | tr -d '\n' | cut -d: -f2)
 
     if [ "$GEO_PROFILE" = "1" ]; then
         AGH_UPSTREAMS="    - \"[/ru/kz/by/su/xn--p1ai/]https://77.88.8.8:443/dns-query\"
@@ -1512,7 +1587,6 @@ dns:
     - 10.8.1.0/24
     - 10.8.2.0/24
     - 10.8.3.0/24
-    - 10.9.0.0/24
   upstream_dns:
 ${AGH_UPSTREAMS}
 clients:
@@ -1530,7 +1604,6 @@ access:
     - "10.8.1.0/24"
     - "10.8.2.0/24"
     - "10.8.3.0/24"
-    - "10.9.0.0/24"
     - "127.0.0.1"
   disallowed_clients: []
   blocked_hosts: []
@@ -1546,12 +1619,13 @@ EOF
     /opt/AdGuardHome/AdGuardHome -s install >/dev/null 2>&1 || true
     systemctl restart AdGuardHome || true
     ok "AdGuard Home DoH активен на 127.0.0.1:53 и 10.9.0.1:53."
+    fi
 fi
 
 # =============================================================
-#  ВЕБ-МАСКИРОВКА (DataSphere Decoy Shield v3.14 - CSP Compliant)
+#  ВЕБ-МАСКИРОВКА (My Private Cloud Decoy Shield v3.14 - CSP Compliant)
 # =============================================================
-log "Генерация веб-маскировки (DataSphere Decoy Shield v3.14)..."
+log "Генерация веб-маскировки (My Private Cloud Decoy Shield v3.14)..."
 
 cat << 'EOF' > /var/www/html/assets/img/favicon.svg
 <svg viewBox="0 0 100 100" width="100" height="100" xmlns="http://www.w3.org/2000/svg">
@@ -1590,107 +1664,98 @@ Disallow: /telemetry/
 Allow: /
 EOF
 
-cat << 'EOF' > /var/www/html/assets/css/datasphere.css
+cat << 'EOF' > /var/www/html/assets/css/myprivatecloud.css
 :root {
     --bg: #131314;
     --surface: #1e1f20;
     --surface-card: #1e1f20;
     --border: rgba(255, 255, 255, 0.08);
     --accent: #a8c7fa;
-    --accent-purple: #c58af9;
     --text: #e3e3e3;
     --text-muted: #9aa0a6;
     --success: #81c995;
-    --warning: #fdd663;
-    --error: #f28b82;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+    height: 100%;
+}
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Google Sans", sans-serif;
     background-color: var(--bg);
-    background-image: 
-        radial-gradient(circle at 50% -10%, rgba(66, 133, 244, 0.18) 0%, rgba(155, 114, 207, 0.1) 40%, rgba(217, 101, 112, 0.04) 65%, transparent 80%),
-        var(--bg);
-    color: var(--text); line-height: 1.6; overflow-x: hidden; min-height: 100vh;
+    background-image: radial-gradient(circle at 50% -10%, rgba(66, 133, 244, 0.18) 0%, rgba(155, 114, 207, 0.1) 40%, transparent 80%), var(--bg);
+    color: var(--text); line-height: 1.6; overflow-x: hidden;
+    min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column;
+}
+main {
+    flex: 1 0 auto; display: flex; flex-direction: column; justify-content: center; align-items: center; width: 100%;
 }
 header {
     display: flex; justify-content: space-between; align-items: center; padding: 18px 6%;
     border-bottom: 1px solid var(--border); backdrop-filter: blur(20px);
     position: sticky; top: 0; z-index: 50; background: rgba(19, 19, 20, 0.85);
 }
-.logo { font-size: 21px; font-weight: 500; display: flex; align-items: center; gap: 10px; color: #fff; letter-spacing: -0.5px; }
+.logo { font-size: 20px; font-weight: 500; display: flex; align-items: center; gap: 10px; color: #fff; letter-spacing: -0.5px; }
+.header-actions { display: inline-flex; align-items: center; gap: 12px; }
+.lang-switcher {
+    display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px;
+}
+.lang-btn {
+    background: transparent; border: 1px solid transparent; color: var(--text-muted);
+    font-size: 11px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
+    cursor: pointer; transition: all 0.2s ease; user-select: none;
+}
+.lang-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
+.lang-btn.active {
+    color: #fff; background: var(--surface-card); border-color: rgba(168, 199, 250, 0.4);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.hero { text-align: center; padding: 40px 20px; max-width: 900px; margin: 0 auto; width: 100%; }
+.hero h1 {
+    font-size: clamp(30px, 4.5vw, 46px); font-weight: 600; line-height: 1.25; margin-bottom: 24px;
+    letter-spacing: -0.8px; color: #e3e3e3;
+}
+.hero-actions { display: flex; justify-content: center; gap: 14px; margin-bottom: 36px; flex-wrap: wrap; }
+.hero-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 40px; }
+.metric-box { background: var(--surface-card); border: 1px solid var(--border); border-radius: 16px; padding: 18px 12px; text-align: center; }
+.metric-val { font-size: 22px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+.metric-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; margin-top: 10px; text-align: left; }
+.feature-card {
+    background: var(--surface-card); border: 1px solid var(--border); border-radius: 20px; padding: 22px;
+    cursor: pointer; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.feature-card:hover { transform: translateY(-3px); border-color: rgba(168, 199, 250, 0.4); background: #232527; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+.feature-card h3 { font-size: 16px; font-weight: 500; color: #fff; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; }
+.feature-card p { font-size: 13px; color: var(--text-muted); line-height: 1.5; margin: 0; }
+.card-arrow { color: var(--accent); font-size: 16px; transition: transform 0.2s ease; }
+.feature-card:hover .card-arrow { transform: translateX(3px); }
+
 .btn {
     background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
-    padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 500; cursor: pointer;
+    padding: 12px 32px; border-radius: 999px; font-size: 15px; font-weight: 500; cursor: pointer;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2); user-select: none;
 }
-.btn:hover { 
-    transform: translateY(-1px); border-color: rgba(168, 199, 250, 0.4); 
-    background: #242628; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); 
-}
+.btn:hover { transform: translateY(-1px); border-color: rgba(168, 199, 250, 0.4); background: #242628; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); }
 .btn:active { transform: translateY(0); }
-.btn-outline {
-    background: var(--surface-card); border: 1px solid var(--border); color: var(--text);
-    box-shadow: none; border-radius: 999px;
-}
-.btn-outline:hover { background: #242628; border-color: rgba(168, 199, 250, 0.4); }
-.hero { text-align: center; padding: 90px 20px 70px; max-width: 900px; margin: 0 auto; }
-.badge {
-    display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px;
-    background: var(--surface-card); border: 1px solid var(--border);
-    border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--accent); margin-bottom: 24px;
-}
-.badge-dot { width: 7px; height: 7px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); }
-.hero h1 {
-    font-size: clamp(34px, 5vw, 54px); font-weight: 600; line-height: 1.18; margin-bottom: 22px;
-    letter-spacing: -0.8px; color: #d1d5db; 
-}
-.hero p { font-size: clamp(16px, 2vw, 18px); color: var(--text-muted); margin: 0 auto 36px; line-height: 1.65; max-width: 720px; }
-.hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
-.btn-hero-action { padding: 13px 28px; font-size: 15px; }
-.stats-bar { display: flex; justify-content: center; gap: 40px; margin-top: 60px; padding-top: 40px; border-top: 1px solid var(--border); flex-wrap: wrap; }
-.stat-item h4 { font-size: 28px; font-weight: 600; color: #fff; letter-spacing: -0.5px; }
-.stat-item p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
-.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; max-width: 1100px; margin: 40px auto 90px; padding: 0 6%; }
-.feature-card {
-    background: var(--surface-card); padding: 32px 28px; border-radius: 24px; border: 1px solid var(--border);
-    backdrop-filter: blur(12px); transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer;
-    user-select: none; display: flex; flex-direction: column; justify-content: space-between;
-}
-.feature-card:hover {
-    transform: translateY(-4px); border-color: rgba(168, 199, 250, 0.4); background: #242628;
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 20px rgba(155, 114, 207, 0.12);
-}
-.feature-card:active { transform: scale(0.98); }
-.feature-card .icon-box {
-    width: 44px; height: 44px; background: rgba(168, 199, 250, 0.08); border: 1px solid rgba(168, 199, 250, 0.18);
-    border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--accent); margin-bottom: 20px;
-}
-.feature-card h3 { font-size: 18px; font-weight: 500; margin-bottom: 10px; color: #fff; }
-.feature-card p { color: var(--text-muted); line-height: 1.55; font-size: 14px; margin-bottom: 16px; }
-.card-action {
-    display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500;
-    color: var(--accent); transition: gap 0.2s ease;
-}
-.feature-card:hover .card-action { gap: 10px; color: #d3e3fd; }
-
+.btn-outline { background: var(--surface-card); border: 1px solid var(--border); color: var(--text); box-shadow: none; }
 .modal-overlay {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(5, 7, 10, 0.85);
     backdrop-filter: blur(16px); display: flex; align-items: center; justify-content: center;
-    padding: 20px; z-index: 100; opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 20px; z-index: 100; opacity: 0; visibility: hidden; transition: all 0.3s ease;
 }
 .modal-overlay.active { opacity: 1; visibility: visible; }
 .modal-card {
     background: var(--surface); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 28px;
-    width: 100%; max-width: 680px; padding: 36px 32px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
-    transform: translateY(20px); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 100%; max-width: 620px; padding: 36px 32px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+    transform: translateY(20px); transition: transform 0.3s ease;
 }
 .modal-overlay.active .modal-card { transform: translateY(0); }
-.modal-card-detail { max-width: 520px; }
 .modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
-.modal-header h2 { font-size: 22px; font-weight: 500; color: #fff; }
+.modal-header h2 { font-size: 21px; font-weight: 500; color: #fff; }
 .modal-header p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
 .modal-close { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; display: flex; }
 .modal-close:hover { color: #fff; }
@@ -1706,32 +1771,16 @@ header {
     padding: 12px 14px; border-radius: 12px; font-size: 13px; margin-bottom: 20px; display: none; align-items: center; gap: 10px;
 }
 .spinner { width: 18px; height: 18px; border: 2px solid rgba(255, 255, 255, 0.3); border-top: 2px solid #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
-
 .toast-hud {
     position: fixed; bottom: 30px; right: 30px; background: #1e1f20; border: 1px solid rgba(168, 199, 250, 0.3);
     border-radius: 16px; padding: 16px 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
     display: flex; align-items: flex-start; gap: 14px; z-index: 200; max-width: 380px;
-    transform: translateY(100px); opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: translateY(100px); opacity: 0; visibility: hidden; transition: all 0.3s ease;
 }
 .toast-hud.active { transform: translateY(0); opacity: 1; visibility: visible; }
 .toast-icon { flex-shrink: 0; color: var(--success); margin-top: 2px; }
 .toast-title { font-size: 14px; font-weight: 500; color: #fff; margin-bottom: 4px; }
 .toast-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; }
-
-.modal-banner { padding: 14px; border-radius: 14px; margin-bottom: 16px; border: 1px solid transparent; }
-.modal-banner.crypto { background: rgba(168, 199, 250, 0.08); border-color: rgba(168, 199, 250, 0.2); }
-.modal-banner.telemetry { background: rgba(129, 201, 149, 0.08); border-color: rgba(129, 201, 149, 0.2); }
-.modal-banner.ipc { background: rgba(197, 138, 249, 0.08); border-color: rgba(197, 138, 249, 0.2); }
-.banner-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.banner-title { font-weight: 500; color: #fff; }
-.banner-status { font-size: 12px; font-weight: 500; }
-.banner-status.green { color: #81c995; }
-.banner-status.purple { color: #c58af9; }
-.banner-desc { font-size: 13px; color: #9aa0a6; margin: 0; }
-.spec-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
-.spec-item { display: flex; gap: 10px; align-items: flex-start; }
-.spec-check { color: #81c995; font-weight: 500; }
-
 .hub-grid { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
 .hub-card {
     background: #171819; border: 1px solid var(--border); border-radius: 18px; padding: 18px;
@@ -1739,57 +1788,245 @@ header {
     transition: all 0.2s ease; text-decoration: none; color: inherit;
 }
 .hub-card:hover { background: #222325; border-color: rgba(168, 199, 250, 0.4); transform: translateY(-2px); }
-.hub-info h4 { font-size: 16px; font-weight: 500; color: #fff; margin-bottom: 4px; }
+.hub-info h4 { font-size: 15px; font-weight: 500; color: #fff; margin-bottom: 4px; }
 .hub-info p { font-size: 13px; color: var(--text-muted); margin: 0; }
 .hub-arrow { color: var(--accent); font-size: 18px; font-weight: 500; }
 .awg-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
-.awg-table th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 500; white-space: nowrap; }
-.awg-table td { padding: 10px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); white-space: nowrap; }
-.awg-table strong { font-weight: 500; white-space: nowrap; }
+.awg-table th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 500; }
+.awg-table td { padding: 10px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); }
 .status-pill { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .status-pill.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
 .status-pill.offline { background: var(--text-muted); }
-
 .hub-loading { text-align: center; padding: 30px; }
 .spinner-center { margin: 0 auto 10px; }
 .actions-cell { white-space: nowrap; text-align: right; }
-.actions-group { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex-wrap: nowrap; }
-.btn-mini { padding: 4px 10px; font-size: 11px; white-space: nowrap; }
+.actions-group { display: inline-flex; align-items: center; gap: 5px; }
+.btn-mini { padding: 4px 10px; font-size: 11px; }
 .hub-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .btn-toolbar { padding: 6px 14px; font-size: 12px; }
 .hub-meta-box { background: #131314; border: 1px solid var(--border); border-radius: 14px; padding: 12px; font-size: 12px; margin-bottom: 12px; }
 .text-success { color: var(--success); }
 .peers-table-container { max-height: 240px; overflow-y: auto; }
 .peers-empty-td { text-align: center; color: var(--text-muted); padding: 20px; }
-
-footer { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; border-top: 1px solid var(--border); }
-
-/* QR Modal Window Styles */
+footer { margin-top: auto; width: 100%; text-align: center; padding: 24px 20px; color: var(--text-muted); font-size: 13px; border-top: 1px solid var(--border); flex-shrink: 0; }
 .qr-modal-overlay { z-index: 150; }
-.qr-modal-card { max-width: 480px; text-align: center; }
+.qr-modal-card { max-width: 440px; text-align: center; }
 .qr-display-container { display: flex; justify-content: center; align-items: center; margin: 12px 0 6px; }
 .qr-card-inner-large {
     display: inline-flex; flex-direction: column; align-items: center; background: #ffffff;
     border: 1px solid rgba(168, 199, 250, 0.25); border-radius: 24px; padding: 22px;
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
 }
-.qr-img-large { width: clamp(280px, 75vw, 360px); height: clamp(280px, 75vw, 360px); display: block; border-radius: 12px; }
+.qr-img-large { width: clamp(260px, 70vw, 320px); height: clamp(260px, 70vw, 320px); display: block; border-radius: 12px; }
 .qr-hint-large { margin-top: 14px; font-size: 13px; font-weight: 600; color: #1e1f20; }
 .btn-qr-modal-close { width: 100%; height: 46px; margin-top: 18px; }
-
-/* Dynamic Dialog Window Styles */
 .dialog-overlay { z-index: 160; }
 .dialog-card { max-width: 420px; }
 .dialog-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
-
 .btn-full-width-46 { width: 100%; height: 46px; margin-top: 10px; }
-.btn-full-width-44 { width: 100%; height: 44px; margin-top: 24px; }
+
+.modal-banner { border-radius: 14px; padding: 14px; margin-bottom: 16px; border: 1px solid var(--border); }
+.modal-banner.crypto { background: rgba(168, 199, 250, 0.08); border-color: rgba(168, 199, 250, 0.3); }
+.modal-banner.telemetry { background: rgba(129, 201, 149, 0.08); border-color: rgba(129, 201, 149, 0.3); }
+.modal-banner.ipc { background: rgba(218, 180, 242, 0.08); border-color: rgba(218, 180, 242, 0.3); }
+.banner-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.banner-title { font-size: 13px; font-weight: 600; color: #fff; }
+.banner-status.green { color: var(--success); font-size: 12px; font-weight: 600; }
+.banner-status.purple { color: #d0bcff; font-size: 12px; font-weight: 600; }
+.banner-desc { font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.4; }
+.spec-list { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.spec-item { font-size: 13px; color: var(--text); display: flex; gap: 10px; align-items: flex-start; }
+.spec-check { color: var(--success); font-weight: bold; flex-shrink: 0; }
 
 @keyframes spin { 100% { transform: rotate(360deg); } }
+@media (max-width: 600px) {
+    .hero-metrics { grid-template-columns: 1fr; gap: 10px; }
+    .hero { padding: 40px 16px; }
+    .btn { padding: 10px 24px; font-size: 14px; }
+}
 EOF
 
-cat << 'EOF' > /var/www/html/assets/js/datasphere.js
+cat << 'EOF' > /var/www/html/assets/js/myprivatecloud.js
 "use strict";
+
+const I18N = {
+    ru: {
+        doc_title: "My Private Cloud",
+        hero_h1: "Облачная инфраструктура распределения данных",
+        btn_auth: "Авторизация",
+        btn_console: "Консоль",
+        btn_status: "Телеметрия",
+        modal_auth_title: "Авторизация в кластере",
+        modal_auth_desc: "Введите учётные данные для доступа к панели управления",
+        auth_user_label: "Идентификатор узла / Email",
+        auth_user_ph: "admin@privatecloud.internal",
+        auth_key_label: "API Token / Ключ",
+        btn_submit_auth: "Подключиться к кластеру",
+        hub_title: "Центр управления My Private Cloud",
+        hub_desc: "Единый шлюз администрирования сетевых сервисов",
+        hub_xui_title: "Консоль маршрутизации трафика",
+        hub_xui_desc: "L7 Stream Ingress, Quantum-Resistant TLS & Telemetry Multiplexing",
+        hub_awg_title: "Контроллер оверлейной сети",
+        hub_awg_desc: "Интерфейс ядра Linux awg0 (MTU 1360) • Диспетчер клиентов",
+        hub_agh_title: "Шлюз приватного DNS",
+        hub_agh_desc: "Рекурсивный DNS-over-HTTPS с защитой от аналитики и слежки",
+        awg_syncing: "Синхронизация с ядром awg0...",
+        awg_back_hub: "← Назад в Hub",
+        awg_new_client: "+ Новый клиент",
+        awg_meta: "Интерфейс: <strong class=\"text-success\">awg0 (Kernel Overlay)</strong> | Базовый порт: <strong>8443</strong> | Пул: <strong>35001-49999</strong> | MTU: <strong>1360</strong>",
+        th_client: "Клиент",
+        th_ip: "IP-адрес",
+        th_traffic: "Трафик",
+        th_actions: "Действия",
+        peers_empty: "Нет активных пиров в таблице ядра",
+        modal_spec_title: "Спецификация",
+        modal_spec_desc: "Технический аудит подсистемы",
+        btn_close: "Закрыть",
+        btn_cancel: "Отмена",
+        btn_create: "Создать",
+        btn_delete: "Отозвать",
+        qr_modal_title: "Конфигурация подключения",
+        qr_modal_desc: "Сканируйте QR-код в мобильном клиенте",
+        qr_modal_hint: "Сканируйте в приложении",
+        add_peer_title: "Новый сетевой профиль",
+        add_peer_desc: "Создание пира в таблице маршрутизации ядра",
+        add_peer_name_label: "Имя профиля (латиница)",
+        del_peer_title: "Подтверждение отзыва",
+        del_peer_desc: "Отозвать ключ и отключить узел от ядра?",
+        toast_auth_ok_title: "Авторизация успешна",
+        toast_auth_ok_desc: "Сессия подтверждена. Добро пожаловать в центр управления.",
+        toast_err_conn: "Ошибка защищенного соединения с контроллером кластера.",
+        toast_err_unauth: "Недействительный токен кластера или ключ авторизации узла.",
+        toast_cluster_status: "Статус кластера"
+    },
+    en: {
+        doc_title: "My Private Cloud",
+        hero_h1: "Distributed Cloud Data Infrastructure",
+        btn_auth: "Authorization",
+        btn_console: "Console",
+        btn_status: "Telemetry",
+        modal_auth_title: "Cluster Authorization",
+        modal_auth_desc: "Enter node credentials to access management console",
+        auth_user_label: "Node Identifier / Email",
+        auth_user_ph: "admin@privatecloud.internal",
+        auth_key_label: "API Token / Key",
+        btn_submit_auth: "Connect to Cluster",
+        hub_title: "My Private Cloud Control Hub",
+        hub_desc: "Unified network module administration gateway",
+        hub_xui_title: "Traffic Routing Console",
+        hub_xui_desc: "L7 Stream Ingress, Quantum-Resistant TLS & Telemetry Multiplexing",
+        hub_awg_title: "Overlay Network Controller",
+        hub_awg_desc: "High-Throughput Kernel Interface (MTU 1360) • Client Dispatcher",
+        hub_agh_title: "Private Encrypted DNS Gateway",
+        hub_agh_desc: "Private Encrypted Recursive DNS-over-HTTPS Resolution Engine",
+        awg_syncing: "Synchronizing with kernel awg0...",
+        awg_back_hub: "← Back to Hub",
+        awg_new_client: "+ New Client",
+        awg_meta: "Interface: <strong class=\"text-success\">awg0 (Kernel Overlay)</strong> | Base Port: <strong>8443</strong> | Pool: <strong>35001-49999</strong> | MTU: <strong>1360</strong>",
+        th_client: "Client",
+        th_ip: "IP Address",
+        th_traffic: "Traffic",
+        th_actions: "Actions",
+        peers_empty: "No active peers in kernel table",
+        modal_spec_title: "Specification",
+        modal_spec_desc: "Subsystem technical audit",
+        btn_close: "Close",
+        btn_cancel: "Cancel",
+        btn_create: "Create",
+        btn_delete: "Revoke",
+        qr_modal_title: "Connection Profile",
+        qr_modal_desc: "Scan QR code in your mobile client",
+        qr_modal_hint: "Scan in application",
+        add_peer_title: "New Network Profile",
+        add_peer_desc: "Generate peer in kernel routing table",
+        add_peer_name_label: "Profile Name (Latin)",
+        del_peer_title: "Revoke Confirmation",
+        del_peer_desc: "Revoke cryptographic key and disconnect peer?",
+        toast_auth_ok_title: "Authorization Successful",
+        toast_auth_ok_desc: "Session verified. Welcome to Infrastructure Control Hub.",
+        toast_err_conn: "Secure connection error to cluster controller.",
+        toast_err_unauth: "Invalid cluster token or node authorization key.",
+        toast_cluster_status: "Cluster Status"
+    },
+    de: {
+        doc_title: "My Private Cloud",
+        hero_h1: "Verteilte Cloud-Dateninfrastruktur",
+        btn_auth: "Autorisierung",
+        btn_console: "Konsole",
+        btn_status: "Telemetrie",
+        modal_auth_title: "Cluster-Autorisierung",
+        modal_auth_desc: "Geben Sie die Knotenanmeldedaten für das Control Panel ein",
+        auth_user_label: "Knoten-ID / E-Mail",
+        auth_user_ph: "admin@privatecloud.internal",
+        auth_key_label: "API-Token / Schlüssel",
+        btn_submit_auth: "Mit Cluster verbinden",
+        hub_title: "My Private Cloud Steuerzentrale",
+        hub_desc: "Zentrales Administrations-Gateway für Netzwerkdienste",
+        hub_xui_title: "Traffic-Routing-Konsole",
+        hub_xui_desc: "L7-Stream-Ingress, quantenresistentes TLS & Telemetrie-Multiplexing",
+        hub_awg_title: "Overlay-Netzwerk-Controller",
+        hub_awg_desc: "High-Throughput Linux-Kernel-Schnittstelle (MTU 1360) • Client-Verwaltung",
+        hub_agh_title: "Privates verschlüsseltes DNS-Gateway",
+        hub_agh_desc: "Private rekursive DNS-over-HTTPS-Engine mit Tracking-Schutz",
+        awg_syncing: "Synchronisierung mit Kernel awg0...",
+        awg_back_hub: "← Zurück zum Hub",
+        awg_new_client: "+ Neuer Client",
+        awg_meta: "Schnittstelle: <strong class=\"text-success\">awg0 (Kernel Overlay)</strong> | Basisport: <strong>8443</strong> | Pool: <strong>35001-49999</strong> | MTU: <strong>1360</strong>",
+        th_client: "Client",
+        th_ip: "IP-Adresse",
+        th_traffic: "Traffic",
+        th_actions: "Aktionen",
+        peers_empty: "Keine aktiven Peers in der Kernel-Tabelle",
+        modal_spec_title: "Spezifikation",
+        modal_spec_desc: "Technisches Subsystem-Audit",
+        btn_close: "Schließen",
+        btn_cancel: "Abbrechen",
+        btn_create: "Erstellen",
+        btn_delete: "Widerrufen",
+        qr_modal_title: "Verbindungsprofil",
+        qr_modal_desc: "QR-Code mit mobiler App scannen",
+        qr_modal_hint: "In der App scannen",
+        add_peer_title: "Neues Netzwerkprofil",
+        add_peer_desc: "Peer in der Kernel-Routingtabelle anlegen",
+        add_peer_name_label: "Profilname (Lateinisch)",
+        del_peer_title: "Widerruf bestätigen",
+        del_peer_desc: "Schlüssel widerrufen und Knoten trennen?",
+        toast_auth_ok_title: "Autorisierung erfolgreich",
+        toast_auth_ok_desc: "Sitzung bestätigt. Willkommen in der Steuerzentrale.",
+        toast_err_conn: "Sichere Verbindung zum Cluster-Controller fehlgeschlagen.",
+        toast_err_unauth: "Ungültiges Cluster-Token oder Knotenschlüssel.",
+        toast_cluster_status: "Cluster-Status"
+    }
+};
+
+let activeLang = "ru";
+try {
+    activeLang = localStorage.getItem("myprivatecloud_lang") || "ru";
+} catch (_) {}
+
+function applyLanguage(lang) {
+    if (!I18N[lang]) lang = "ru";
+    activeLang = lang;
+    try { localStorage.setItem("myprivatecloud_lang", lang); } catch (_) {}
+    document.documentElement.setAttribute("lang", lang);
+
+    document.querySelectorAll("[data-i18n]").forEach(node => {
+        const key = node.dataset.i18n;
+        if (I18N[lang] && I18N[lang][key]) {
+            if (node.tagName === "INPUT" || node.tagName === "TEXTAREA") {
+                node.placeholder = I18N[lang][key];
+            } else {
+                node.textContent = I18N[lang][key];
+            }
+        }
+    });
+
+    document.querySelectorAll(".lang-btn").forEach(btn => {
+        const match = btn.dataset.lang === lang;
+        btn.classList.toggle("active", match);
+        btn.setAttribute("aria-pressed", match ? "true" : "false");
+    });
+}
 
 function getCryptoEntropy() {
     const arr = new Uint32Array(1);
@@ -1805,66 +2042,68 @@ function randVarCrypto(base, pct, dec) {
     return dec > 0 ? parseFloat(val.toFixed(dec)) : Math.round(val);
 }
 
-function getDynamicData() {
+function getDynamicData(lang) {
+    const l = I18N[lang] ? lang : "ru";
     const nodes = randVarCrypto(148, 10, 0);
     const rtt = (1.05 + getCryptoEntropy() * 0.15).toFixed(1);
     const bus = randVarCrypto(0.048, 15, 3);
     const sla = (99.995 + getCryptoEntropy() * 0.004).toFixed(3);
 
-    return {
-        crypto: {
-            title: "Сквозное квантовое шифрование (Data-in-Transit)",
-            subtitle: "Корпоративный криптографический аудит",
-            content: `
-                <div class="modal-banner crypto">
-                    <div class="banner-head">
-                        <span class="banner-title">Статус криптомодуля:</span>
-                        <span class="banner-status green">● CERTIFIED</span>
-                    </div>
-                    <p class="banner-desc">Аппаратная терминация сессий с защитой от компрометации закрытых ключей.</p>
-                </div>
-                <ul class="spec-list">
-                    <li class="spec-item"><span class="spec-check">✔</span><span><strong>Протоколы:</strong> TLS 1.3 (RFC 8446) / ML-KEM-768 Post-Quantum Key Exchange.</span></li>
-                    <li class="spec-item"><span class="spec-check">✔</span><span><strong>PFS:</strong> Ротация сессионных ключей Curve25519.</span></li>
-                    <li class="spec-item"><span class="spec-check">✔</span><span><strong>Комплаенс:</strong> SOC 2 Type II, ISO/IEC 27001.</span></li>
-                </ul>
-            `
+    const cards = {
+        ru: {
+            crypto: {
+                title: "Сквозное квантовое шифрование (Data-in-Transit)",
+                subtitle: "Корпоративный криптографический аудит",
+                content: `<div class="modal-banner crypto"><div class="banner-head"><span class="banner-title">Статус криптомодуля:</span><span class="banner-status green">● АТТЕСТОВАН</span></div><p class="banner-desc">Аппаратная терминация сессий с защитой от компрометации закрытых ключей.</p></div><ul class="spec-list"><li class="spec-item"><span class="spec-check">✔</span><span><strong>Протоколы:</strong> TLS 1.3 (RFC 8446) / ML-KEM-768 Post-Quantum Key Exchange.</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>PFS:</strong> Ротация сессионных ключей Curve25519.</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>Комплаенс:</strong> FIPS 203, SOC 2 Type II, ISO/IEC 27001.</span></li></ul>`
+            },
+            telemetry: {
+                title: "Распределённая телеметрия Anycast",
+                subtitle: "Мониторинг магистральной сети и доступность SLA",
+                content: `<div class="modal-banner telemetry"><div class="banner-head"><span class="banner-title">Доступность SLA:</span><span class="banner-status green">${sla}% АКТИВНО</span></div><p class="banner-desc">Многопоточный Anycast-конвейер маршрутизации трафика.</p></div><ul class="spec-list"><li class="spec-item"><span class="spec-check">✔</span><span><strong>Связность:</strong> ${nodes} Anycast-узлов (EU, US, ASIA).</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>RTT задержка:</strong> Маршрутизация на границе датацентра &lt; ${rtt} ms.</span></li></ul>`
+            },
+            ipc: {
+                title: "Высокоскоростная IPC-обработка",
+                subtitle: "In-Memory конвейер и архитектура Zero-Copy",
+                content: `<div class="modal-banner ipc"><div class="banner-head"><span class="banner-title">Подсистема ввода-вывода:</span><span class="banner-status purple">● ZERO-COPY RAM</span></div><p class="banner-desc">Изолированные очереди процессов в энергонезависимой памяти.</p></div><ul class="spec-list"><li class="spec-item"><span class="spec-check">✔</span><span><strong>Шина:</strong> Около ${bus} ms при мультиплексировании стримов.</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>Буферы:</strong> somaxconn 65535 сокетное масштабирование.</span></li></ul>`
+            }
         },
-        telemetry: {
-            title: "Распределённая телеметрия Anycast",
-            subtitle: "Мониторинг магистральной сети и доступность SLA",
-            content: `
-                <div class="modal-banner telemetry">
-                    <div class="banner-head">
-                        <span class="banner-title">Доступность SLA:</span>
-                        <span class="banner-status green">${sla}% ACTIVE</span>
-                    </div>
-                    <p class="banner-desc">Многопоточный Anycast-конвейер маршрутизации трафика.</p>
-                </div>
-                <ul class="spec-list">
-                    <li class="spec-item"><span class="spec-check">✔</span><span><strong>Связность:</strong> ${nodes} Anycast-узлов (EU, US, ASIA).</span></li>
-                    <li class="spec-item"><span class="spec-check">✔</span><span><strong>RTT задержка:</strong> Маршрутизация на границе датацентра &lt; ${rtt} ms.</span></li>
-                </ul>
-            `
+        en: {
+            crypto: {
+                title: "End-to-End Quantum Encryption (Data-in-Transit)",
+                subtitle: "Enterprise cryptographic audit",
+                content: `<div class="modal-banner crypto"><div class="banner-head"><span class="banner-title">Crypto Module Status:</span><span class="banner-status green">● CERTIFIED</span></div><p class="banner-desc">Hardware session termination with zero private key exposure.</p></div><ul class="spec-list"><li class="spec-item"><span class="spec-check">✔</span><span><strong>Protocols:</strong> TLS 1.3 (RFC 8446) / ML-KEM-768 Post-Quantum Key Exchange.</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>PFS:</strong> Curve25519 ephemeral key rotation.</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>Compliance:</strong> FIPS 203, SOC 2 Type II, ISO/IEC 27001.</span></li></ul>`
+            },
+            telemetry: {
+                title: "Distributed Anycast Telemetry",
+                subtitle: "Backbone network monitoring & SLA availability",
+                content: `<div class="modal-banner telemetry"><div class="banner-head"><span class="banner-title">SLA Availability:</span><span class="banner-status green">${sla}% ACTIVE</span></div><p class="banner-desc">Multi-threaded Anycast traffic routing pipeline.</p></div><ul class="spec-list"><li class="spec-item"><span class="spec-check">✔</span><span><strong>Connectivity:</strong> ${nodes} Anycast nodes (EU, US, ASIA).</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>RTT Latency:</strong> Datacenter edge routing &lt; ${rtt} ms.</span></li></ul>`
+            },
+            ipc: {
+                title: "High-Throughput IPC Processing",
+                subtitle: "In-Memory pipeline & Zero-Copy architecture",
+                content: `<div class="modal-banner ipc"><div class="banner-head"><span class="banner-title">I/O Subsystem:</span><span class="banner-status purple">● ZERO-COPY RAM</span></div><p class="banner-desc">Isolated process queues in memory.</p></div><ul class="spec-list"><li class="spec-item"><span class="spec-check">✔</span><span><strong>Bus Latency:</strong> ~${bus} ms under stream multiplexing.</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>Buffers:</strong> somaxconn 65535 high-capacity socket scaling.</span></li></ul>`
+            }
         },
-        ipc: {
-            title: "Высокоскоростная IPC-обработка",
-            subtitle: "In-Memory конвейер и архитектура Zero-Copy",
-            content: `
-                <div class="modal-banner ipc">
-                    <div class="banner-head">
-                        <span class="banner-title">Подсистема ввода-вывода:</span>
-                        <span class="banner-status purple">● ZERO-COPY RAM</span>
-                    </div>
-                    <p class="banner-desc">Изолированные очереди процессов в памяти.</p>
-                </div>
-                <ul class="spec-list">
-                    <li class="spec-item"><span class="spec-check">✔</span><span><strong>Шина:</strong> Около ${bus} ms при мультиплексировании стримов.</span></li>
-                    <li class="spec-item"><span class="spec-check">✔</span><span><strong>Буферы:</strong> somaxconn 65535 сокетное масштабирование.</span></li>
-                </ul>
-            `
+        de: {
+            crypto: {
+                title: "Ende-zu-Ende Quantenverschlüsselung (Data-in-Transit)",
+                subtitle: "Kryptografisches Unternehmens-Audit",
+                content: `<div class="modal-banner crypto"><div class="banner-head"><span class="banner-title">Kryptomodul-Status:</span><span class="banner-status green">● ZERTIFIZIERT</span></div><p class="banner-desc">Hardware-Sitzungsterminierung mit absolutem Schutz privater Schlüssel.</p></div><ul class="spec-list"><li class="spec-item"><span class="spec-check">✔</span><span><strong>Protokolle:</strong> TLS 1.3 (RFC 8446) / ML-KEM-768 Post-Quantum Key Exchange.</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>PFS:</strong> Curve25519 ephemere Schlüsselrotation.</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>Compliance:</strong> FIPS 203, SOC 2 Type II, ISO/IEC 27001.</span></li></ul>`
+            },
+            telemetry: {
+                title: "Verteilte Anycast-Telemetrie",
+                subtitle: "Backbone-Netzwerküberwachung & SLA-Verfügbarkeit",
+                content: `<div class="modal-banner telemetry"><div class="banner-head"><span class="banner-title">SLA-Verfügbarkeit:</span><span class="banner-status green">${sla}% AKTIV</span></div><p class="banner-desc">Mehrfädige Anycast-Traffic-Routing-Pipeline.</p></div><ul class="spec-list"><li class="spec-item"><span class="spec-check">✔</span><span><strong>Konnektivität:</strong> ${nodes} Anycast-Knoten (EU, US, ASIA).</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>RTT-Latenz:</strong> Rechenzentrums-Routing &lt; ${rtt} ms.</span></li></ul>`
+            },
+            ipc: {
+                title: "High-Throughput IPC-Verarbeitung",
+                subtitle: "In-Memory-Pipeline & Zero-Copy-Architektur",
+                content: `<div class="modal-banner ipc"><div class="banner-head"><span class="banner-title">E/A-Subsystem:</span><span class="banner-status purple">● ZERO-COPY RAM</span></div><p class="banner-desc">Isolierte Prozesswarteschlangen im Arbeitsspeicher.</p></div><ul class="spec-list"><li class="spec-item"><span class="spec-check">✔</span><span><strong>Bus-Latenz:</strong> ca. ${bus} ms bei Stream-Multiplexing.</span></li><li class="spec-item"><span class="spec-check">✔</span><span><strong>Puffer:</strong> somaxconn 65535 Socket-Skalierung.</span></li></ul>`
+            }
         }
     };
+
+    return cards[l];
 }
 
 let toastTimer = null;
@@ -1879,7 +2118,7 @@ function showToast(title, desc) {
 }
 
 function openDetailModal(type) {
-    const data = getDynamicData()[type];
+    const data = getDynamicData(activeLang)[type];
     if (!data) return;
     document.getElementById("detailTitle").innerText = data.title;
     document.getElementById("detailSubtitle").innerText = data.subtitle;
@@ -1892,14 +2131,15 @@ function closeDetailModal() {
 }
 
 function openAuthModal(title) {
+    const t = I18N[activeLang] || I18N.ru;
     const modalTitle = document.getElementById("modalTitle");
     const errAlert = document.getElementById("errorAlert");
     const authModal = document.getElementById("authModal");
     if (!authModal) return;
-    if (modalTitle) modalTitle.innerText = title || "Авторизация в DataSphere";
+    if (modalTitle) modalTitle.innerText = title || t.modal_auth_title;
     if (errAlert) errAlert.style.display = "none";
     authModal.classList.add("active");
-    setTimeout(() => { document.getElementById("dsUser")?.focus(); }, 100);
+    setTimeout(() => { document.getElementById("cloudUser")?.focus(); }, 100);
 }
 
 function closeAuthModal() {
@@ -1910,22 +2150,23 @@ let authenticatedSession = null;
 let currentAwgPeers = [];
 
 async function fetchClusterStatus() {
+    const t = I18N[activeLang] || I18N.ru;
     if (!authenticatedSession) {
-        openAuthModal("Мониторинг кластера (Требуется ключ)");
+        openAuthModal(t.modal_auth_title);
         return;
     }
     try {
-        const res = await fetch("/api/v1/datasphere/status", {
+        const res = await fetch("/api/v1/myprivatecloud/status", {
             headers: { "Authorization": "Bearer " + authenticatedSession.token }
         });
         if (res.status === 401) {
-            openAuthModal("Мониторинг кластера (Требуется ключ)");
+            openAuthModal(t.modal_auth_title);
             return;
         }
         const data = await res.json();
-        showToast("Статус кластера: " + (data.status || "online").toUpperCase(), `Узлов: ${data.nodes_active || 148} | SLA: 99.998% | Среда: ${data.cluster || "Core"}`);
+        showToast(t.toast_cluster_status + ": " + (data.status || "online").toUpperCase(), `Nodes: ${data.nodes_active || 148} | SLA: 99.998% | Env: ${data.cluster || "Core"}`);
     } catch(e) {
-        openAuthModal("Мониторинг кластера (Требуется ключ)");
+        openAuthModal(t.modal_auth_title);
     }
 }
 
@@ -1934,12 +2175,13 @@ function renderAdminHub(services) {
     const modalBody = document.querySelector("#authModal .modal-card");
     if (!modalBody) return;
 
+    const t = I18N[activeLang] || I18N.ru;
     modalHeader.innerHTML = `
         <div>
-            <h2>DataSphere Infrastructure Hub</h2>
-            <p>Единый центр управления сетевыми модулями</p>
+            <h2>${t.hub_title}</h2>
+            <p>${t.hub_desc}</p>
         </div>
-        <button type="button" class="modal-close" data-action="close-hub" aria-label="Закрыть">
+        <button type="button" class="modal-close" data-action="close-hub" aria-label="${t.btn_close}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
     `;
@@ -1949,8 +2191,8 @@ function renderAdminHub(services) {
         aghCard = `
             <a href="${services.agh_url}" target="_blank" class="hub-card">
                 <div class="hub-info">
-                    <h4>AdGuard Home DNS</h4>
-                    <p>Приватный DNS-over-HTTPS, фильтрация рекламы и сплит-маршрутизация</p>
+                    <h4>${t.hub_agh_title}</h4>
+                    <p>${t.hub_agh_desc}</p>
                 </div>
                 <div class="hub-arrow">&rarr;</div>
             </a>
@@ -1962,8 +2204,8 @@ function renderAdminHub(services) {
         awgCard = `
             <div class="hub-card" data-action="open-awg">
                 <div class="hub-info">
-                    <h4>Нативный сервер AmneziaWG</h4>
-                    <p>Ядро Linux awg0 (Базовый порт :${services.awg_port || '8443'}, пул 35001-49999, MTU 1360) • Управление клиентами</p>
+                    <h4>${t.hub_awg_title}</h4>
+                    <p>${t.hub_awg_desc}</p>
                 </div>
                 <div class="hub-arrow">&rarr;</div>
             </div>
@@ -1971,9 +2213,9 @@ function renderAdminHub(services) {
     }
 
     const formElement = document.getElementById("authForm");
-    if (formElement) formElement.remove();
+    if (formElement) formElement.style.display = "none";
     const errBox = document.getElementById("errorAlert");
-    if (errBox) errBox.remove();
+    if (errBox) errBox.style.display = "none";
 
     let hubContainer = document.getElementById("hubContainer");
     if (!hubContainer) {
@@ -1986,8 +2228,8 @@ function renderAdminHub(services) {
         <div class="hub-grid">
             <a href="${services.panel_url}" target="_blank" class="hub-card">
                 <div class="hub-info">
-                    <h4>Авторизация Панели 3x-ui</h4>
-                    <p>REALITY Steal/Classic, VLESS xHTTP ML-KEM-768, Hysteria 2, подписки</p>
+                    <h4>${t.hub_xui_title}</h4>
+                    <p>${t.hub_xui_desc}</p>
                 </div>
                 <div class="hub-arrow">&rarr;</div>
             </a>
@@ -2001,10 +2243,11 @@ async function openAwgManager() {
     const hubContainer = document.getElementById("hubContainer");
     if (!hubContainer || !authenticatedSession) return;
 
-    hubContainer.innerHTML = '<div class="hub-loading"><div class="spinner spinner-center"></div>Синхронизация с ядром awg0...</div>';
+    const t = I18N[activeLang] || I18N.ru;
+    hubContainer.innerHTML = `<div class="hub-loading"><div class="spinner spinner-center"></div>${t.awg_syncing}</div>`;
 
     try {
-        const res = await fetch("/api/v1/datasphere/awg/peers", {
+        const res = await fetch("/api/v1/myprivatecloud/awg/peers", {
             headers: { "Authorization": "Bearer " + authenticatedSession.token }
         });
         const data = await res.json();
@@ -2031,24 +2274,24 @@ async function openAwgManager() {
 
         hubContainer.innerHTML = `
             <div class="hub-toolbar">
-                <button class="btn btn-outline btn-toolbar" data-action="back-to-hub">&larr; Назад в Hub</button>
-                <button class="btn btn-toolbar" data-action="add-peer">+ Новый клиент</button>
+                <button class="btn btn-outline btn-toolbar" data-action="back-to-hub">${t.awg_back_hub}</button>
+                <button class="btn btn-toolbar" data-action="add-peer">${t.awg_new_client}</button>
             </div>
             <div class="hub-meta-box">
-                Интерфейс: <strong class="text-success">awg0 (Kernel DKMS)</strong> | Базовый порт: <strong>8443</strong> | Пул: <strong>35001-49999</strong> | MTU: <strong>1360</strong>
+                ${t.awg_meta}
             </div>
             
             <div class="peers-table-container">
                 <table class="awg-table">
                     <thead>
-                        <tr><th>Клиент</th><th>IP</th><th>Трафик</th><th>Действия</th></tr>
+                        <tr><th>${t.th_client}</th><th>${t.th_ip}</th><th>${t.th_traffic}</th><th>${t.th_actions}</th></tr>
                     </thead>
-                    <tbody>${rows || '<tr><td colspan="4" class="peers-empty-td">Нет активных пиров</td></tr>'}</tbody>
+                    <tbody>${rows || `<tr><td colspan="4" class="peers-empty-td">${t.peers_empty}</td></tr>`}</tbody>
                 </table>
             </div>
         `;
     } catch(err) {
-        showToast("Ошибка", "Не удалось связаться с контроллером AmneziaWG.");
+        showToast(t.toast_err_conn, "");
     }
 }
 
@@ -2082,7 +2325,7 @@ async function confirmAddPeerAction() {
     if (dialog) dialog.classList.remove("active");
 
     try {
-        const res = await fetch("/api/v1/datasphere/awg/peer/add", {
+        const res = await fetch("/api/v1/myprivatecloud/awg/peer/add", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -2092,13 +2335,11 @@ async function confirmAddPeerAction() {
         });
         const result = await res.json();
         if (result.status === "ok") {
-            showToast("Успешно", `Клиент ${name} добавлен в ядро awg0.`);
+            showToast("OK", `Client ${name} registered.`);
             openAwgManager();
-        } else {
-            showToast("Ошибка", result.error || "Сбой добавления пира.");
         }
     } catch(e) {
-        showToast("Ошибка", "Сбой запроса создания пира.");
+        showToast("Error", "");
     }
 }
 
@@ -2107,10 +2348,10 @@ async function showQr(pubKey, clientName) {
     const img = document.getElementById("qrModalImg");
     const title = document.getElementById("qrClientTitle");
     if (!modal || !img || !authenticatedSession) return;
-    if (title && clientName) title.innerText = "QR-код: " + clientName;
+    if (title && clientName) title.innerText = clientName;
     
     try {
-        const res = await fetch("/api/v1/datasphere/awg/peer/qr?key=" + encodeURIComponent(pubKey), {
+        const res = await fetch("/api/v1/myprivatecloud/awg/peer/qr?key=" + encodeURIComponent(pubKey), {
             headers: { "Authorization": "Bearer " + authenticatedSession.token }
         });
         if (!res.ok) throw new Error("Unauthorized");
@@ -2118,7 +2359,7 @@ async function showQr(pubKey, clientName) {
         img.src = URL.createObjectURL(blob);
         modal.classList.add("active");
     } catch(err) {
-        showToast("Ошибка", "Не удалось загрузить защищенный QR-код.");
+        showToast("Error", "");
     }
 }
 
@@ -2129,17 +2370,17 @@ function closeQrModal() {
 
 async function downloadAwgConf(publicKey) {
     try {
-        const res = await fetch(`/api/v1/datasphere/awg/peer/conf?key=${encodeURIComponent(publicKey)}`, {
+        const res = await fetch(`/api/v1/myprivatecloud/awg/peer/conf?key=${encodeURIComponent(publicKey)}`, {
             headers: { "Authorization": "Bearer " + authenticatedSession.token }
         });
         const confText = await res.text();
         const blob = new Blob([confText], { type: "text/plain" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = `amnezia-${publicKey.substring(0,6)}.conf`;
+        a.download = `cloud-node-${publicKey.substring(0,6)}.conf`;
         a.click();
     } catch(e) {
-        showToast("Ошибка", "Не удалось загрузить конфигурационный файл.");
+        showToast("Error", "");
     }
 }
 
@@ -2156,7 +2397,7 @@ async function confirmDeletePeerAction() {
     if (!pendingDeleteKey || !authenticatedSession) return;
 
     try {
-        await fetch("/api/v1/datasphere/awg/peer/remove", {
+        await fetch("/api/v1/myprivatecloud/awg/peer/remove", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -2164,17 +2405,17 @@ async function confirmDeletePeerAction() {
             },
             body: JSON.stringify({ public_key: pendingDeleteKey })
         });
-        showToast("Удалено", "Пир успешно отозван.");
         openAwgManager();
     } catch(e) {
-        showToast("Ошибка", "Сбой удаления пира.");
+        showToast("Error", "");
     } finally {
         pendingDeleteKey = null;
     }
 }
 
-async function handleDataSphereAuth(e) {
+async function handleCloudAuth(e) {
     e.preventDefault();
+    const t = I18N[activeLang] || I18N.ru;
     const btn = document.getElementById("submitBtn");
     const errBox = document.getElementById("errorAlert");
     const errText = document.getElementById("errorMsg");
@@ -2186,12 +2427,12 @@ async function handleDataSphereAuth(e) {
     }
 
     try {
-        const response = await fetch("/api/v1/datasphere/auth", {
+        const response = await fetch("/api/v1/myprivatecloud/auth", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                principal: document.getElementById("dsUser")?.value || "",
-                secret: document.getElementById("dsKey")?.value || ""
+                principal: document.getElementById("cloudUser")?.value || "",
+                secret: document.getElementById("cloudKey")?.value || ""
             })
         });
         const result = await response.json();
@@ -2199,23 +2440,28 @@ async function handleDataSphereAuth(e) {
         if (response.status === 200 && result.status === "ok") {
             authenticatedSession = result;
             renderAdminHub(result.services);
-            showToast("Авторизация успешна", "Добро пожаловать в центр управления инфраструктурой.");
+            showToast(t.toast_auth_ok_title, t.toast_auth_ok_desc);
         } else {
-            if (errText) errText.innerText = result.error || "Недействительный токен кластера или ключ авторизации узла. Доступ запрещен.";
+            if (errText) errText.innerText = result.error || t.toast_err_unauth;
             if (errBox) errBox.style.display = "flex";
         }
     } catch (err) {
-        if (errText) errText.innerText = "Ошибка защищенного соединения с контроллером кластера.";
+        if (errText) errText.innerText = t.toast_err_conn;
         if (errBox) errBox.style.display = "flex";
     } finally {
         if (btn && !authenticatedSession) {
             btn.disabled = false;
-            btn.innerHTML = "Подключиться к кластеру";
+            btn.innerHTML = t.btn_submit_auth;
         }
     }
 }
 
 document.addEventListener("click", (e) => {
+    const langBtn = e.target.closest(".lang-btn");
+    if (langBtn && langBtn.dataset.lang) {
+        applyLanguage(langBtn.dataset.lang);
+        return;
+    }
     const el = e.target.closest("[data-action]");
     if (!el) return;
     const act = el.dataset.action;
@@ -2247,9 +2493,10 @@ window.addEventListener('DOMContentLoaded', () => {
     if (latElem) latElem.innerText = "< " + dynLat + " ms";
     if (bwElem) bwElem.innerText = dynBw + " Gbps";
     if (slaElem) slaElem.innerText = dynSla + "%";
+    applyLanguage(activeLang);
 
-    document.getElementById("headerConsoleBtn")?.addEventListener("click", () => openAuthModal("Вход в Консоль"));
-    document.getElementById("connectNodeBtn")?.addEventListener("click", () => openAuthModal("Подключение вычислительного узла"));
+    document.getElementById("headerConsoleBtn")?.addEventListener("click", () => openAuthModal());
+    document.getElementById("connectNodeBtn")?.addEventListener("click", () => openAuthModal());
     document.getElementById("netStatusBtn")?.addEventListener("click", fetchClusterStatus);
     
     document.getElementById("cardCrypto")?.addEventListener("click", () => openDetailModal("crypto"));
@@ -2260,12 +2507,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById("detailModalClose")?.addEventListener("click", closeDetailModal);
     document.getElementById("detailModalOk")?.addEventListener("click", closeDetailModal);
     
-    document.getElementById("authForm")?.addEventListener("submit", handleDataSphereAuth);
-
-    const sessionEntropy = new Uint8Array(16);
-    window.crypto.getRandomValues(sessionEntropy);
-    const tokenHex = Array.from(sessionEntropy, b => b.toString(16).padStart(2, '0')).join('');
-    document.cookie = "datasphere_session=" + tokenHex + "; path=/; max-age=86400; Secure; SameSite=Strict";
+    document.getElementById("authForm")?.addEventListener("submit", handleCloudAuth);
 });
 
 window.addEventListener('keydown', (e) => {
@@ -2279,109 +2521,81 @@ window.addEventListener('keydown', (e) => {
 });
 EOF
 
-cat << EOF > /var/www/html/index.html
+cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DataSphere Analytics — Enterprise Data Plane</title>
+    <title data-i18n="doc_title">My Private Cloud</title>
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
-    <link rel="stylesheet" href="/assets/css/datasphere.css">
+    <link rel="stylesheet" href="/assets/css/myprivatecloud.css">
 </head>
 <body>
     <header>
         <div class="logo">
-            <img src="/assets/img/favicon.svg" alt="DataSphere Logo" width="28" height="28">
-            <span>DataSphere</span>
+            <img src="/assets/img/favicon.svg" alt="Cloud Logo" width="28" height="28">
+            <span>My Private Cloud</span>
         </div>
-        <button id="headerConsoleBtn" class="btn" type="button">Консоль</button>
+        <div class="header-actions">
+            <div class="lang-switcher" role="group" aria-label="Language Selector">
+                <button type="button" class="lang-btn active" data-lang="ru" aria-pressed="true">RU</button>
+                <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+                <button type="button" class="lang-btn" data-lang="de" aria-pressed="false">DE</button>
+            </div>
+        </div>
     </header>
     <main>
         <section class="hero">
-            <div class="badge"><span class="badge-dot"></span><span>DataSphere Edge Engine v3.14 — Доступность <span id="heroSla">99.998%</span></span></div>
-            <h1>Инфраструктура распределённых данных нового поколения</h1>
-            <p>Корпоративная аналитическая среда с аппаратным ускорением сетевого стека, сквозным TLS 1.3 / ML-KEM-768 шифрованием и Anycast-маршрутизацией узлов.</p>
+            <h1 data-i18n="hero_h1">Облачная инфраструктура распределения данных</h1>
             <div class="hero-actions">
-                <button id="connectNodeBtn" class="btn btn-hero-action" type="button">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                    Подключить узел
-                </button>
-                <button id="netStatusBtn" class="btn btn-outline btn-hero-action" type="button">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                    Статус сети
-                </button>
-            </div>
-            <div class="stats-bar">
-                <div class="stat-item"><h4 id="heroLatency">&lt; 1.1 ms</h4><p>Средняя задержка ядра</p></div>
-                <div class="stat-item"><h4 id="heroBandwidth">98.4 Gbps</h4><p>Пропускная способность</p></div>
-                <div class="stat-item"><h4>TLS 1.3 / H2</h4><p>Аппаратное шифрование</p></div>
-            </div>
-        </section>
-        <section class="features">
-            <div id="cardCrypto" class="feature-card" tabindex="0">
-                <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
-                <h3>Сквозное квантовое шифрование</h3>
-                <p>Передача пакетов осуществляется с аппаратным криптоускорением TLS 1.3 и защитой от перехвата на пограничных маршрутизаторах.</p>
-                <span class="card-action">Аудит протоколов &rarr;</span>
-            </div>
-            <div id="cardTelemetry" class="feature-card" tabindex="0">
-                <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
-                <h3>Распределённая телеметрия</h3>
-                <p>Многопоточный конвейер аналитики агрегирует метрики узлов в реальном времени с нулевой деградацией пропускной способности.</p>
-                <span class="card-action">Anycast-магистраль &rarr;</span>
-            </div>
-            <div id="cardIpc" class="feature-card" tabindex="0">
-                <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6"/></svg></div>
-                <h3>Изоляция сокетов IPC</h3>
-                <p>Все процессы ввода-вывода распределяются по энергонезависимым сегментам оперативной памяти с прямой маршрутизацией через Unix-сокеты.</p>
-                <span class="card-action">In-Memory конвейер &rarr;</span>
+                <button id="connectNodeBtn" class="btn" type="button" data-i18n="btn_auth">Авторизация</button>
             </div>
         </section>
     </main>
+
+    <div id="detailModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div>
+                    <h2 id="detailTitle" data-i18n="modal_spec_title">Спецификация</h2>
+                    <p id="detailSubtitle" data-i18n="modal_spec_desc">Технический аудит подсистемы</p>
+                </div>
+                <button id="detailModalClose" class="modal-close" type="button" aria-label="Close">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="detailContent"></div>
+            <button type="button" id="detailModalOk" class="btn btn-full-width-46" data-i18n="btn_close">Закрыть</button>
+        </div>
+    </div>
 
     <div id="authModal" class="modal-overlay">
         <div class="modal-card">
             <div class="modal-header">
                 <div>
-                    <h2 id="modalTitle">Авторизация в DataSphere</h2>
-                    <p>Введите учётные данные для доступа к консоли</p>
+                    <h2 id="modalTitle" data-i18n="modal_auth_title">Авторизация</h2>
+                    <p data-i18n="modal_auth_desc">Введите учётные данные для доступа к панели</p>
                 </div>
-                <button id="authModalClose" class="modal-close" type="button" aria-label="Закрыть">
+                <button id="authModalClose" class="modal-close" type="button" aria-label="Close">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div id="errorAlert" class="alert-box">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <span id="errorMsg">Ошибка аутентификации</span>
+                <span id="errorMsg">Ошибка</span>
             </div>
             <form id="authForm">
                 <div class="form-group">
-                    <label for="dsUser">Идентификатор узла / Email</label>
-                    <input type="text" id="dsUser" class="form-control" placeholder="cluster-admin@datasphere.cloud" required autocomplete="username">
+                    <label for="cloudUser" data-i18n="auth_user_label">Идентификатор узла / Email</label>
+                    <input type="text" id="cloudUser" class="form-control" data-i18n="auth_user_ph" placeholder="admin@privatecloud.internal" required autocomplete="username">
                 </div>
                 <div class="form-group">
-                    <label for="dsKey">API Token / Ключ</label>
-                    <input type="password" id="dsKey" class="form-control" placeholder="••••••••••••••••" required autocomplete="current-password">
+                    <label for="cloudKey" data-i18n="auth_key_label">API Token / Ключ</label>
+                    <input type="password" id="cloudKey" class="form-control" placeholder="••••••••••••••••" required autocomplete="current-password">
                 </div>
-                <button type="submit" id="submitBtn" class="btn btn-full-width-46">Подключиться к кластеру</button>
+                <button type="submit" id="submitBtn" class="btn btn-full-width-46" data-i18n="btn_submit_auth">Подключиться к кластеру</button>
             </form>
-        </div>
-    </div>
-
-    <div id="detailModal" class="modal-overlay">
-        <div class="modal-card modal-card-detail">
-            <div class="modal-header">
-                <div>
-                    <h2 id="detailTitle">Архитектурный узел</h2>
-                    <p id="detailSubtitle">Спецификация и статус безопасности подсистемы</p>
-                </div>
-                <button id="detailModalClose" class="modal-close" type="button" aria-label="Закрыть">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                </button>
-            </div>
-            <div id="detailContent"></div>
-            <button id="detailModalOk" class="btn btn-full-width-44" type="button">Понятно</button>
         </div>
     </div>
 
@@ -2390,8 +2604,8 @@ cat << EOF > /var/www/html/index.html
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
         <div>
-            <div id="toastTitle" class="toast-title">Оповещение</div>
-            <div id="toastDesc" class="toast-desc">Данные синхронизированы</div>
+            <div id="toastTitle" class="toast-title">Notification</div>
+            <div id="toastDesc" class="toast-desc">Synchronized</div>
         </div>
     </div>
     
@@ -2399,20 +2613,20 @@ cat << EOF > /var/www/html/index.html
         <div class="modal-card qr-modal-card">
             <div class="modal-header">
                 <div>
-                    <h2 id="qrClientTitle">Конфигурация AmneziaWG</h2>
-                    <p>Сканируйте QR-код в мобильном приложении</p>
+                    <h2 id="qrClientTitle" data-i18n="qr_modal_title">Конфигурация подключения</h2>
+                    <p data-i18n="qr_modal_desc">Сканируйте QR-код в мобильном клиенте</p>
                 </div>
-                <button id="qrModalClose" class="modal-close" type="button" aria-label="Закрыть" data-action="close-qr-modal">
+                <button id="qrModalClose" class="modal-close" type="button" aria-label="Close" data-action="close-qr-modal">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="qr-display-container">
                 <div class="qr-card-inner-large">
-                    <img id="qrModalImg" src="" class="qr-img-large" alt="AmneziaWG QR Code">
-                    <span class="qr-hint-large">Сканируйте в приложении AmneziaWG</span>
+                    <img id="qrModalImg" src="" class="qr-img-large" alt="Network QR Code">
+                    <span class="qr-hint-large" data-i18n="qr_modal_hint">Сканируйте в приложении</span>
                 </div>
             </div>
-            <button type="button" id="qrModalCloseBtn" class="btn btn-qr-modal-close" data-action="close-qr-modal">Закрыть</button>
+            <button type="button" id="qrModalCloseBtn" class="btn btn-qr-modal-close" data-action="close-qr-modal" data-i18n="btn_close">Закрыть</button>
         </div>
     </div>
 
@@ -2420,20 +2634,20 @@ cat << EOF > /var/www/html/index.html
         <div class="modal-card dialog-card">
             <div class="modal-header">
                 <div>
-                    <h2>Новый клиент AmneziaWG</h2>
-                    <p>Создание профиля в ядре awg0</p>
+                    <h2 data-i18n="add_peer_title">Новый сетевой профиль</h2>
+                    <p data-i18n="add_peer_desc">Создание профиля в таблице маршрутизации</p>
                 </div>
-                <button type="button" class="modal-close" data-action="cancel-add-peer" aria-label="Закрыть">
+                <button type="button" class="modal-close" data-action="cancel-add-peer" aria-label="Close">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="form-group">
-                <label for="newPeerName">Имя клиента (латиница)</label>
+                <label for="newPeerName" data-i18n="add_peer_name_label">Имя профиля (латиница)</label>
                 <input type="text" id="newPeerName" class="form-control" placeholder="Client-1">
             </div>
             <div class="dialog-actions">
-                <button type="button" class="btn btn-outline" data-action="cancel-add-peer">Отмена</button>
-                <button type="button" class="btn" data-action="confirm-add-peer">Создать</button>
+                <button type="button" class="btn btn-outline" data-action="cancel-add-peer" data-i18n="btn_cancel">Отмена</button>
+                <button type="button" class="btn" data-action="confirm-add-peer" data-i18n="btn_create">Создать</button>
             </div>
         </div>
     </div>
@@ -2442,22 +2656,22 @@ cat << EOF > /var/www/html/index.html
         <div class="modal-card dialog-card">
             <div class="modal-header">
                 <div>
-                    <h2>Подтверждение удаления</h2>
-                    <p>Отозвать ключ и удалить пир из ядра?</p>
+                    <h2 data-i18n="del_peer_title">Подтверждение отзыва</h2>
+                    <p data-i18n="del_peer_desc">Отозвать ключ и отключить узел?</p>
                 </div>
-                <button type="button" class="modal-close" data-action="cancel-delete-peer" aria-label="Закрыть">
+                <button type="button" class="modal-close" data-action="cancel-delete-peer" aria-label="Close">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="dialog-actions">
-                <button type="button" class="btn btn-outline" data-action="cancel-delete-peer">Отмена</button>
-                <button type="button" class="btn" data-action="confirm-delete-peer">Удалить</button>
+                <button type="button" class="btn btn-outline" data-action="cancel-delete-peer" data-i18n="btn_cancel">Отмена</button>
+                <button type="button" class="btn" data-action="confirm-delete-peer" data-i18n="btn_delete">Удалить</button>
             </div>
         </div>
     </div>
 
-    <footer>&copy; 2026 DataSphere Cloud Systems Inc. Платформа распределенной аналитики и защиты данных.</footer>
-    <script src="/assets/js/datasphere.js"></script>
+    <footer>&copy; 2026 My Private Cloud</footer>
+    <script src="/assets/js/myprivatecloud.js"></script>
 </body>
 </html>
 EOF
@@ -2485,7 +2699,32 @@ fi
 
 PANEL_PORT="${PANEL_PORT//[!0-9]/}"
 SUB_PORT="${SUB_PORT//[!0-9]/}"
-XHTTP_STREAM_PORT="${XHTTP_STREAM_PORT//[!0-9]/}"
+XHTTP_UPSTREAM_LINE=""
+XHTTP_BADBOT_MAP_LINE=""
+XHTTP_NGINX_LOC_BLOCK=""
+
+if [ "${ENABLE_XHTTP:-0}" -eq 1 ]; then
+    XHTTP_STREAM_PORT="${XHTTP_STREAM_PORT//[!0-9]/}"
+    if [ -z "$XHTTP_STREAM_PORT" ]; then XHTTP_STREAM_PORT="50443"; fi
+    XHTTP_UPSTREAM_LINE="upstream xray_xhttp_stream { server 127.0.0.1:${XHTTP_STREAM_PORT}; keepalive 64; }"
+    XHTTP_BADBOT_MAP_LINE="~^.*:[01]:${BASE_XHTTP_PATH} 0;"
+    XHTTP_NGINX_LOC_BLOCK="    location ^~ ${BASE_XHTTP_PATH} {
+        if (\$request_method != POST) { return 404; }
+        proxy_http_version 2;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$ak_real_ip;
+        proxy_set_header X-Forwarded-For \$ak_real_ip;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        tcp_nodelay on;
+        proxy_socket_keepalive on;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        client_max_body_size 0;
+        proxy_pass http://xray_xhttp_stream;
+    }"
+fi
 if [ -z "$PANEL_PORT" ]; then PANEL_PORT="10443"; fi
 if [ -z "$SUB_PORT" ]; then SUB_PORT="55443"; fi
 if [ -z "$XHTTP_STREAM_PORT" ]; then XHTTP_STREAM_PORT="50443"; fi
@@ -2535,7 +2774,7 @@ http {
 
     upstream panel_3xui { server 127.0.0.1:$PANEL_PORT; keepalive 30; }
     upstream sub_backend { server 127.0.0.1:$SUB_PORT; keepalive 30; }
-    upstream xray_xhttp_stream { server 127.0.0.1:$XHTTP_STREAM_PORT; keepalive 64; }
+    $XHTTP_UPSTREAM_LINE
     upstream datasphere_core_backend { server 127.0.0.1:20443; keepalive 16; }
 
     access_log off;
@@ -2594,7 +2833,7 @@ http {
         ~^.*:[01]:/favicon\.(ico|svg)\$ 0;
         ~^.*:[01]:/assets/ 0;
         ~^.*:[01]:/dns-query 0;
-        ~^.*:[01]:/api/v1/datasphere/ 0;
+        ~^.*:[01]:/api/v1/myprivatecloud/ 0;
         ~^.*:[01]:${PANEL_PATH} 0;
         ~^.*:[01]:${SUB_PATH} 0;
         ~^.*:[01]:${SUB_JSON_PATH} 0;
@@ -2602,7 +2841,7 @@ http {
         ~^.*:[01]:/sub/ 0;
         ~^.*:[01]:/json/ 0;
         ~^.*:[01]:/clash/ 0;
-        ~^.*:[01]:${BASE_XHTTP_PATH} 0;
+        $XHTTP_BADBOT_MAP_LINE
         ~^(?:1:[01]|0:1): 1;
         default 0;
     }
@@ -2861,24 +3100,9 @@ server {
         gzip off;
     }
 
-        location ^~ ${BASE_XHTTP_PATH} {
-        if (\$request_method != POST) { return 404; }
-        proxy_http_version 2;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Real-IP \$ak_real_ip;
-        proxy_set_header X-Forwarded-For \$ak_real_ip;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_request_buffering off;
-        proxy_buffering off;
-        tcp_nodelay on;
-        proxy_socket_keepalive on;
-        proxy_read_timeout 1h;
-        proxy_send_timeout 1h;
-        client_max_body_size 0;
-        proxy_pass http://xray_xhttp_stream;
-    }
+        $XHTTP_NGINX_LOC_BLOCK
 
-    location ^~ /api/v1/datasphere/ {
+    location ^~ /api/v1/myprivatecloud/ {
         proxy_pass http://datasphere_core_backend;
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
@@ -2942,7 +3166,7 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
 
-    location ^~ /api/v1/datasphere/ {
+    location ^~ /api/v1/myprivatecloud/ {
         proxy_pass http://datasphere_core_backend;
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
@@ -2951,22 +3175,7 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    location ^~ ${BASE_XHTTP_PATH} {
-        if (\$request_method != POST) { return 404; }
-        proxy_http_version 2;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Real-IP \$ak_real_ip;
-        proxy_set_header X-Forwarded-For \$ak_real_ip;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_request_buffering off;
-        proxy_buffering off;
-        tcp_nodelay on;
-        proxy_socket_keepalive on;
-        proxy_read_timeout 1h;
-        proxy_send_timeout 1h;
-        client_max_body_size 0;
-        proxy_pass http://xray_xhttp_stream;
-    }
+    $XHTTP_NGINX_LOC_BLOCK
 
     location = ${PANEL_PATH%/} { return 301 ${PANEL_PATH}; }
     location ^~ ${PANEL_PATH} {
@@ -3073,7 +3282,12 @@ if [ ! -x "/usr/local/x-ui/x-ui" ]; then
         )
     fi
 
-    download_asset "$UI_SCRIPT" "${UI_URLS[@]}" || die "Не удалось загрузить инсталлятор 3X-UI!"
+    while ! download_asset "$UI_SCRIPT" "${UI_URLS[@]}"; do
+        warn "Не удалось загрузить инсталлятор 3X-UI."
+        if ! prompt_yes_no "Повторить попытку загрузки 3X-UI?" "y"; then
+            exit 1
+        fi
+    done
     printf "n\n" | bash "$UI_SCRIPT" >/tmp/3xui_install.log 2>&1
     rm -f "$UI_SCRIPT"
     /usr/local/x-ui/x-ui setting -webBasePath "${RAW_PATH}" -port "${PANEL_PORT}" >/dev/null 2>&1 || true
@@ -3124,7 +3338,12 @@ else
     )
 fi
 
-download_asset "$XRAY_ZIP" "${XRAY_URLS[@]}" || die "Не удалось загрузить бинарник Xray-core!"
+while ! download_asset "$XRAY_ZIP" "${XRAY_URLS[@]}"; do
+        warn "Не удалось загрузить бинарник Xray-core (${TARGET_XRAY_VERSION})."
+        if ! prompt_yes_no "Повторить попытку загрузки Xray-core?" "y"; then
+            exit 1
+        fi
+    done
 
 XRAY_EXTRACT_DIR="/tmp/xray_unpack"
 rm -rf "$XRAY_EXTRACT_DIR"
@@ -3164,15 +3383,23 @@ fi
 DETECTED_XRAY_VER=$("$XRAY_BIN" version 2>/dev/null | head -n1 | awk '{print $2}' || echo "v26.7.28")
 ok "Активная версия Xray: ${GREEN}${DETECTED_XRAY_VER}${NC}"
 
-log "Генерация постквантового ключа VLESS Encryption (ML-KEM-768)..."
-vl_out=$("$XRAY_BIN" vlessenc 2>&1)
-VLESS_DECRYPTION=$(echo "$vl_out" | grep '"decryption":' | tail -n1 | awk -F'"' '{print $4}' || true)
-VLESS_ENCRYPTION=$(echo "$vl_out" | grep '"encryption":' | tail -n1 | awk -F'"' '{print $4}' || true)
+VLESS_DECRYPTION=""
+VLESS_ENCRYPTION=""
+if [ "${ENABLE_XHTTP:-0}" -eq 1 ]; then
+    log "Генерация постквантового ключа VLESS Encryption (ML-KEM-768)..."
+    vl_out=$("$XRAY_BIN" vlessenc 2>&1)
+    VLESS_DECRYPTION=$(echo "$vl_out" | grep '"decryption":' | tail -n1 | awk -F'"' '{print $4}' || true)
+    VLESS_ENCRYPTION=$(echo "$vl_out" | grep '"encryption":' | tail -n1 | awk -F'"' '{print $4}' || true)
 
-if [[ ! "$VLESS_DECRYPTION" =~ ^mlkem768 ]] || [ -z "$VLESS_ENCRYPTION" ]; then
-    die "Ошибка генерации ключа VLESS Encryption! Xray вернул: $vl_out"
+    if [[ ! "$VLESS_DECRYPTION" =~ ^mlkem768 ]] || [ -z "$VLESS_ENCRYPTION" ]; then
+        warn "Ошибка генерации ключа VLESS Encryption! Xray вернул: $vl_out"
+        if ! prompt_yes_no "Продолжить без постквантового шифрования xHTTP?" "n"; then
+            exit 1
+        fi
+    else
+        ok "Ключ ML-KEM-768 успешно сгенерирован!"
+    fi
 fi
-ok "Ключ ML-KEM-768 успешно сгенерирован!"
 
 STEAL_CONFIG_DATA=""
 for p in "${STEAL_PORTS_LIST[@]:-}"; do
@@ -3190,10 +3417,11 @@ for cp in "${CLASSIC_PORTS_LIST[@]:-}"; do
     CLASSIC_CONFIG_DATA="${CLASSIC_CONFIG_DATA}${cp}=${snis_joined};"
 done
 
+export ENABLE_XHTTP="${ENABLE_XHTTP:-0}"
 export DB_PATH PRIMARY_DOMAIN PANEL_PORT PANEL_PATH SUB_PORT SUB_PATH SUB_CLASH_PATH
 export XHTTP_STREAM_PORT XHTTP_STREAM_PATH ENABLE_STEAL STEAL_CONFIG_DATA
 export ENABLE_CLASSIC CLASSIC_CONFIG_DATA ENABLE_HY2 HY2_PORT ENABLE_AWG_V3 AWG_V3_PORT
-export ENABLE_AWG_V2 AWG_V2_PORT ENABLE_WG_NATIVE WG_NATIVE_PORT ADMIN_USER ADMIN_PASS
+export ADMIN_USER ADMIN_PASS
 export SSL_BASE_DIR VLESS_DECRYPTION VLESS_ENCRYPTION
 export STEAL_DOMAINS_STR="${STEAL_DOMAINS[*]:-}" INSTALL_MODE ENABLE_AGH GEO_PROFILE ENABLE_AWG_HOP
 
@@ -3253,7 +3481,7 @@ sub_port = os.environ["SUB_PORT"]
 sub_path = os.environ["SUB_PATH"]
 sub_json_path = f"{sub_path}sub-json/"
 sub_clash_path = os.environ.get("SUB_CLASH_PATH", f"{sub_path}sub-clash/")
-xhttp_port = int(os.environ["XHTTP_STREAM_PORT"])
+xhttp_port = int(os.environ["XHTTP_STREAM_PORT"]) if os.environ.get("XHTTP_STREAM_PORT", "").isdigit() else 0
 xhttp_path = os.environ["XHTTP_STREAM_PATH"]
 admin_u = os.environ["ADMIN_USER"]
 admin_p = os.environ["ADMIN_PASS"]
@@ -3359,7 +3587,7 @@ settings_data = {
     "timeLocation": "Europe/Moscow",
     "trafficResetDay": "1",
     "sessionMaxAge": "3600",
-    "trustedProxyCIDRs": "127.0.0.1/32,10.8.1.0/24,10.8.2.0/24,10.8.3.0/24,10.9.0.0/24",
+    "trustedProxyCIDRs": "127.0.0.1/32,10.8.1.0/24,10.9.0.0/24",
     "realityScanCandidates": "www.cloudflare.com:443,www.microsoft.com:443,www.amazon.com:443,aws.amazon.com:443,www.samsung.com:443,www.nvidia.com:443,www.amd.com:443,www.intel.com:443,www.sony.com:443,dl.google.com:443",
     "restartXrayOnClientDisable": "true",
     "xrayOutboundTestUrl": "https://www.google.com/generate_204",
@@ -3379,7 +3607,7 @@ for k, v in settings_data.items():
 freedom_final_rules = []
 if enable_agh:
     freedom_final_rules.append({"action": "allow", "ip": ["127.0.0.1", "10.9.0.1"], "port": "53"})
-freedom_final_rules.append({"action": "allow", "ip": ["10.8.1.0/24", "10.8.2.0/24", "10.8.3.0/24", "10.9.0.0/24"]})
+freedom_final_rules.append({"action": "allow", "ip": ["10.8.1.0/24", "10.9.0.0/24"]})
 freedom_final_rules.append({"action": "block", "ip": ["geoip:private"]})
 freedom_final_rules.append({"action": "allow"})
 
@@ -3388,7 +3616,7 @@ routing_rules = [
 ]
 if enable_agh:
     routing_rules.append({"ip": ["127.0.0.1", "10.9.0.1"], "outboundTag": "direct", "port": "53", "ruleTag": "xui-dns-allow", "type": "field"})
-routing_rules.append({"ip": ["10.8.1.0/24", "10.8.2.0/24", "10.8.3.0/24", "10.9.0.0/24"], "outboundTag": "direct", "type": "field"})
+routing_rules.append({"ip": ["10.8.1.0/24", "10.9.0.0/24"], "outboundTag": "direct", "type": "field"})
 routing_rules.append({"ip": ["geoip:private"], "outboundTag": "blocked", "type": "field"})
 routing_rules.append({"outboundTag": "blocked", "protocol": ["bittorrent"], "type": "field"})
 
@@ -3470,10 +3698,6 @@ reality_hex_sid = secrets.token_hex(8)
 def_r_priv, def_r_pub = gen_reality_keypair()
 def_wg_s_priv, def_wg_s_pub = gen_wg_keypair()
 def_wg_c_priv, def_wg_c_pub = gen_wg_keypair()
-def_wg_s2_priv, def_wg_s2_pub = gen_wg_keypair()
-def_wg_c2_priv, def_wg_c2_pub = gen_wg_keypair()
-def_wg_nat_s_priv, def_wg_nat_s_pub = gen_wg_keypair()
-def_wg_nat_c_priv, def_wg_nat_c_pub = gen_wg_keypair()
 
 now_ms = int(time.time() * 1000)
 
@@ -3487,6 +3711,13 @@ client_reality_dict = {
 
 client_xhttp_dict = dict(client_reality_dict)
 client_xhttp_dict["flow"] = "xtls-rprx-vision"
+
+ib1_id = None
+ib2_id = None
+ib3_id = None
+ib4_id = None
+ib5_id = None
+vision_inbound_ids = set()
 
 active_inbound_ids = []
 
@@ -3601,7 +3832,6 @@ def register_or_get_inbound(port, proto, tag, remark, s_obj_def, st_obj_def, lis
         active_inbound_ids.append(inbound_id)
         return inbound_id
 
-ib1_id = ib2_id = ib3_id = ib4_id = ib5_id = ib6_id = ib7_id = None
 
 # 1. Steal-Oneself REALITY (Tri-Sync Remark)
 if os.environ.get("ENABLE_STEAL") == "1":
@@ -3633,6 +3863,7 @@ if os.environ.get("ENABLE_STEAL") == "1":
             "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "sni": primary_steal_sni, "remark": remark}]
         }
         ib1_id = register_or_get_inbound(p, "vless", tag, remark, s_obj, st_obj)
+        vision_inbound_ids.add(ib1_id)
 
 # 2. Classic REALITY (Tri-Sync Remark)
 if os.environ.get("ENABLE_CLASSIC") == "1":
@@ -3664,26 +3895,29 @@ if os.environ.get("ENABLE_CLASSIC") == "1":
             "externalProxy": [{"dest": domain, "port": 443, "forceTls": "same", "sni": primary_sni, "remark": remark}]
         }
         ib2_id = register_or_get_inbound(p, "vless", tag, remark, c_obj, ct_obj)
+        vision_inbound_ids.add(ib2_id)
 
 # 3. VLESS xHTTP (Native H2 Stream-One) + ML-KEM-768 (Tri-Sync Remark)
-remark_xhttp = f"VLESS xHTTP ({domain})"
-x_obj = {
-    "clients": [client_xhttp_dict],
-    "decryption": vless_dekey,
-    "encryption": vless_enkey
-}
-xt_obj = {
-    "network": "xhttp",
-    "xhttpSettings": {
-        "path": xhttp_path, "host": domain, "mode": "stream-one", "noSSEHeader": True,
-        "xPaddingBytes": "120-1120", "xPaddingObfsMode": True, "xPaddingKey": "X-Amz-Meta-Trace",
-        "xmux": {"maxConcurrency": "0", "maxConnections": "1-3", "cMaxReuseTimes": "300-600", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000", "hKeepAlivePeriod": 600},
-        "enableXmux": True
-    },
-    "security": "none",
-    "externalProxy": [{"dest": domain, "port": 443, "forceTls": "tls", "sni": domain, "fingerprint": "firefox", "alpn": ["h2"], "remark": remark_xhttp}]
-}
-ib3_id = register_or_get_inbound(xhttp_port, "vless", "in-xhttp-stream", remark_xhttp, x_obj, xt_obj)
+if os.environ.get("ENABLE_XHTTP") == "1" and xhttp_port > 0 and xhttp_path:
+    remark_xhttp = f"VLESS xHTTP ({domain})"
+    x_obj = {
+        "clients": [client_xhttp_dict],
+        "decryption": vless_dekey,
+        "encryption": vless_enkey
+    }
+    xt_obj = {
+        "network": "xhttp",
+        "xhttpSettings": {
+            "path": xhttp_path, "host": domain, "mode": "stream-one", "noSSEHeader": True,
+            "xPaddingBytes": "120-1120", "xPaddingObfsMode": True, "xPaddingKey": "X-Amz-Meta-Trace",
+            "xmux": {"maxConcurrency": "0", "maxConnections": "1-3", "cMaxReuseTimes": "300-600", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000", "hKeepAlivePeriod": 600},
+            "enableXmux": True
+        },
+        "security": "none",
+        "externalProxy": [{"dest": domain, "port": 443, "forceTls": "tls", "sni": domain, "fingerprint": "firefox", "alpn": ["h2"], "remark": remark_xhttp}]
+    }
+    ib3_id = register_or_get_inbound(xhttp_port, "vless", "in-xhttp-stream", remark_xhttp, x_obj, xt_obj)
+    vision_inbound_ids.add(ib3_id)
 
 # 4. Hysteria 2 (Tri-Sync Remark)
 if os.environ.get("ENABLE_HY2") == "1":
@@ -3742,70 +3976,6 @@ if os.environ.get("ENABLE_AWG_V3") == "1":
     a3t_obj = {"externalProxy": [{"dest": domain, "port": a3p, "remark": remark_awg3}]}
     ib5_id = register_or_get_inbound(a3p, "amneziawg", "in-awg-v3", remark_awg3, a3_obj, a3t_obj, listen="0.0.0.0")
 
-# 6. AmneziaWG v2.0 (3X-UI) (Tri-Sync Remark)
-if os.environ.get("ENABLE_AWG_V2") == "1":
-    a2p = int(os.environ["AWG_V2_PORT"])
-    remark_awg2 = f"AmneziaWG v2.0 ({domain})"
-    a2_client = dict(client_reality_dict)
-    a2_client["allowedIPs"] = ["10.8.2.3/32"]
-    a2_client["privateKey"] = def_wg_c2_priv
-    a2_client["publicKey"] = def_wg_c2_pub
-    a2_client.pop("flow", None)
-    a2_obj = {
-        "clients": [a2_client],
-        "server": {
-            "h1": "149419586", "h2": "878791997", "h3": "1251051976", "h4": "1657628296",
-            "jc": 4, "jmin": 40, "jmax": 70, "s1": 72, "s2": 56, "s3": 32, "s4": 16,
-            "mtu": 1360, "primaryDns": awg3_dns_prim, "secondaryDns": awg3_dns_sec,
-            "privateKey": def_wg_s2_priv, "publicKey": def_wg_s2_pub,
-            "randomTrailers": False, "disableCookies": True, "contentPaddingAddition": "0",
-            "keepaliveTimeout": "20-25", "rekeyAfterTime": "300-500", "rekeyTimeout": "10-15",
-            "rejectAfterTime": "600-900", "maxHandshakeAttempts": "10-15",
-            "subnetCidr": 24, "subnetIp": "10.8.2.0"
-        }
-    }
-    a2t_obj = {"externalProxy": [{"dest": domain, "port": a2p, "remark": remark_awg2}]}
-    ib6_id = register_or_get_inbound(a2p, "amneziawg", "in-awg-v2-legacy", remark_awg2, a2_obj, a2t_obj, listen="0.0.0.0")
-
-# 7. 3X WireGuard (3X-UI) (Tri-Sync Remark)
-if os.environ.get("ENABLE_WG_NATIVE") == "1":
-    wgp = int(os.environ["WG_NATIVE_PORT"])
-    remark_wg = f"WireGuard Native ({domain})"
-    wg_peer = {
-        "privateKey": def_wg_nat_c_priv,
-        "publicKey": def_wg_nat_c_pub,
-        "allowedIPs": ["10.8.3.3/32"],
-        "keepAlive": 25,
-        "email": test_email
-    }
-    wg_s_obj = {
-        "secretKey": def_wg_nat_s_priv,
-        "peers": [wg_peer],
-        "mtu": 1420,
-        "noKernelTun": False
-    }
-    wg_st_obj = {
-        "externalProxy": [{"dest": domain, "port": wgp, "remark": remark_wg}]
-    }
-    ib7_id = register_or_get_inbound(wgp, "wireguard", "in-wireguard-native", remark_wg, wg_s_obj, wg_st_obj, listen="0.0.0.0")
-
-    if install_mode == "1" or not os.path.exists("/root/wireguard-client.conf"):
-        wg_dns_str = awg3_dns_prim if geo_profile == "1" else "1.1.1.1, 8.8.8.8"
-        wg_conf_content = f"""[Interface]
-PrivateKey = {def_wg_nat_c_priv}
-Address = 10.8.3.3/32
-DNS = {wg_dns_str}
-MTU = 1420
-
-[Peer]
-PublicKey = {def_wg_nat_s_pub}
-Endpoint = {domain}:{wgp}
-AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25
-"""
-        with open("/root/wireguard-client.conf", "w") as f_wg:
-            f_wg.write(wg_conf_content)
-        os.chmod("/root/wireguard-client.conf", 0o600)
 
 if "clients" in tables:
     cur.execute("PRAGMA table_info(clients)")
@@ -3831,7 +4001,7 @@ if "clients" in tables:
 
         if "client_inbounds" in tables and client_global_id:
             active_inbound_links = [
-                (ib_id, "xtls-rprx-vision" if ib_id in [ib1_id, ib2_id, ib3_id] else "")
+                (ib_id, "xtls-rprx-vision" if ib_id in vision_inbound_ids else "")
                 for ib_id in active_inbound_ids if ib_id is not None
             ]
             for ib_id, flow_val in active_inbound_links:
@@ -3968,10 +4138,14 @@ if install_mode == "1":
     if ib3_id is not None:
         r3 = f"VLESS xHTTP ({domain})"
         add_host_entry(str(uuid.uuid4()), ib3_id, r3, domain, 443, "tls", sni=domain, path=xhttp_path, alpn=json.dumps(["h2"]), fp="firefox", sort_order=2)
+    if ib4_id is not None:
+        add_host_entry(str(uuid.uuid4()), ib4_id, f"Hysteria 2 ({domain})", domain, int(os.environ.get("HY2_PORT", 443)), "tls", alpn=json.dumps(["h3"]), sort_order=3)
+    if ib5_id is not None:
+        add_host_entry(str(uuid.uuid4()), ib5_id, f"AmneziaWG v3.2 ({domain})", domain, int(os.environ.get("AWG_V3_PORT", 10443)), "same", sort_order=4)
 elif install_mode == "2":
-    cur.execute("SELECT id, remark, settings, stream_settings, protocol FROM inbounds")
+    cur.execute("SELECT id, remark, settings, stream_settings, protocol, port FROM inbounds")
     ib_rows = cur.fetchall()
-    for cur_ib_id, cur_ib_remark, ib_s_raw, ib_st_raw, ib_proto in ib_rows:
+    for cur_ib_id, cur_ib_remark, ib_s_raw, ib_st_raw, ib_proto, cur_ib_port in ib_rows:
         st_info = json.loads(ib_st_raw) if ib_st_raw else {}
         rs_sni = ""
         if "realitySettings" in st_info:
@@ -3987,7 +4161,7 @@ elif install_mode == "2":
         else:
             # Новый инбаунд регистрируется в hosts только как техническая точка входа (клиенты не привязываются)
             sec_v = "tls" if (ib_proto == "vless" and "xhttp" in str(ib_st_raw)) else "same"
-            add_host_entry(str(uuid.uuid4()), cur_ib_id, cur_ib_remark, domain, 443, sec_v, sni=rs_sni or domain, fp="firefox")
+            add_host_entry(str(uuid.uuid4()), cur_ib_id, cur_ib_remark, domain, cur_ib_port, sec_v, sni=rs_sni or domain, fp="firefox")
 
     if ib3_id is not None:
         cur.execute("SELECT id FROM hosts WHERE inbound_id = ?", (ib3_id,))
@@ -4054,13 +4228,15 @@ if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
         apt-get install -y build-essential dkms "linux-headers-$(uname -r)" -q < /dev/null || true
         log "Импорт официального репозитория AmneziaWG по HTTPS (порт 443)..."
         mkdir -p /etc/apt/keyrings
-        curl -fsSL --connect-timeout 8 -m 20 "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x75C9DD72C799870E310542E24166F2C257290828" | gpg --dearmor --yes -o /etc/apt/keyrings/amnezia.gpg 2>/dev/null || true
-        if [ -s /etc/apt/keyrings/amnezia.gpg ]; then
-            echo "deb [signed-by=/etc/apt/keyrings/amnezia.gpg] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu noble main" > /etc/apt/sources.list.d/amnezia.list
-            wait_for_apt_lock
-            apt-get update -q -o Dir::Etc::sourcelist="sources.list.d/amnezia.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1 || apt-get update -q || true
-            wait_for_apt_lock
-            DEBIAN_FRONTEND=noninteractive apt-get install -y amneziawg-dkms amneziawg-tools -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" < /dev/null || true
+        rm -f /etc/apt/keyrings/amnezia.gpg /etc/apt/sources.list.d/amnezia.list
+        if curl -fsSL --connect-timeout 8 -m 20 "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x4166F2C257290828" | gpg --dearmor -o /etc/apt/keyrings/amnezia.gpg 2>/dev/null; then
+            if [ -s /etc/apt/keyrings/amnezia.gpg ]; then
+                echo "deb [signed-by=/etc/apt/keyrings/amnezia.gpg] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu noble main" > /etc/apt/sources.list.d/amnezia.list
+                wait_for_apt_lock
+                apt-get update -q -o Dir::Etc::sourcelist="sources.list.d/amnezia.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1 || true
+                wait_for_apt_lock
+                DEBIAN_FRONTEND=noninteractive apt-get install -y amneziawg-dkms amneziawg-tools -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" < /dev/null || true
+            fi
         fi
     fi
 
@@ -4098,6 +4274,7 @@ AUTOINSTALL="yes"
 MAKE[0]="'make' -C $kernel_source_dir M=$dkms_tree/$PACKAGE_NAME/$PACKAGE_VERSION/build KCFLAGS='-Wno-incompatible-pointer-types -Wno-error=incompatible-pointer-types -Wno-error' EXTRA_CFLAGS='-Wno-incompatible-pointer-types -Wno-error=incompatible-pointer-types -Wno-error'"
 EOF_DKMS
             dkms remove amneziawg/1.0.0 --all 2>/dev/null || true
+            patch_amnezia_dkms_kernel_compat
             dkms add -m amneziawg -v 1.0.0 2>/dev/null || true
             dkms build -m amneziawg -v 1.0.0 -k "$(uname -r)" >/dev/null 2>&1 || dkms build -m amneziawg -v 1.0.0 >/dev/null 2>&1 || true
             dkms install -m amneziawg -v 1.0.0 -k "$(uname -r)" >/dev/null 2>&1 || dkms install -m amneziawg -v 1.0.0 >/dev/null 2>&1 || true
@@ -4119,10 +4296,12 @@ EOF_DKMS
     modprobe amneziawg 2>/dev/null || true
 
     if ! command -v awg >/dev/null 2>&1; then
-        die "Утилита awg не найдена. Сборка amneziawg-tools завершилась сбоем."
+        warn "Утилита awg не найдена. Нативный AmneziaWG awg0 отключен, остальные службы продолжают работу."
+        ENABLE_NATIVE_AWG=0
     fi
 
-    mkdir -p /etc/amnezia/amneziawg
+    if [ "$ENABLE_NATIVE_AWG" -eq 1 ]; then
+        mkdir -p /etc/amnezia/amneziawg
     chmod 700 /etc/amnezia /etc/amnezia/amneziawg
 
     if [ -f /etc/amnezia/amneziawg/awg0.conf ]; then
@@ -4252,19 +4431,20 @@ EOF
     awg-quick down awg0 2>/dev/null || true
     systemctl stop awg-quick@awg0 2>/dev/null || true
     systemctl enable awg-quick@awg0 >/dev/null 2>&1 || true
-    systemctl restart awg-quick@awg0 || true
-    ok "Нативный сервер AmneziaWG активен на сокете :${NATIVE_AWG_PORT}/udp (awg0)."
+        systemctl restart awg-quick@awg0 || true
+        ok "Нативный сервер AmneziaWG активен на сокете :${NATIVE_AWG_PORT}/udp (awg0)."
+    fi
 fi
 
 # =============================================================
-#  ФАЗА 5: МНОГОПОТОЧНЫЙ ПИТОН-ДЕМОН DATASPHERE CORE (SSO & AWG)
+#  ФАЗА 5: МНОГОПОТОЧНЫЙ ПИТОН-ДЕМОН MY PRIVATE CLOUD CORE GATEWAY
 # =============================================================
-log "Развёртывание управляющего микросервиса DataSphere Core (Loopback 20443)..."
+log "Развёртывание управляющего микросервиса My Private Cloud Core (Loopback 20443)..."
 
-cat << 'EOF_CORE_PY' > /usr/local/bin/datasphere-core.py
+cat << 'EOF_CORE_PY' > /usr/local/bin/myprivatecloud-core.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import http.server, socketserver, json, os, subprocess, hmac, secrets, re, time, sqlite3, urllib.parse, base64, fcntl, threading
+import http.server, socketserver, json, os, subprocess, hmac, secrets, re, time, sqlite3, urllib.parse, base64, fcntl, threading, shutil
 try:
     import bcrypt
 except ImportError:
@@ -4362,13 +4542,16 @@ def load_clients():
         save_clients(clients)
         
         if os.path.exists(CONF_PATH):
-            with open(CONF_PATH, "r") as f:
+            with open(CONF_PATH, "r+") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 text = f.read()
-            text = re.sub(r'\[Peer\][\s\S]*', '', text).strip()
-            text += f"\n\n# --- Client: Test-Client ---\n[Peer]\nPublicKey = {pub}\nAllowedIPs = {ip}\n"
-            with open(CONF_PATH, "w") as f:
-                f.write(text)
-            subprocess.run(["awg", "set", "awg0", "peer", pub, "allowed-ips", ip], capture_output=True)
+                if pub not in text:
+                    text = text.rstrip() + f"\n\n# --- Client: Test-Client ---\n[Peer]\nPublicKey = {pub}\nAllowedIPs = {ip}\n"
+                    f.seek(0)
+                    f.write(text)
+                    f.truncate()
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            if shutil.which("awg"): subprocess.run(["awg", "set", "awg0", "peer", pub, "allowed-ips", ip], capture_output=True)
     return clients
 
 def save_clients(clients):
@@ -4383,6 +4566,7 @@ def save_clients(clients):
         pass
 
 def verify_credentials(user, pwd):
+    import hashlib
     for db_path in DB_PATHS:
         if not os.path.exists(db_path):
             continue
@@ -4404,24 +4588,14 @@ def verify_credentials(user, pwd):
                             return True
                     except Exception:
                         pass
+                elif len(db_hash) == 64 and all(c in "0123456789abcdefABCDEF" for c in db_hash):
+                    pwd_sha256 = hashlib.sha256(pwd.encode('utf-8')).hexdigest()
+                    if hmac.compare_digest(pwd_sha256.lower(), db_hash.lower()):
+                        return True
                 elif hmac.compare_digest(pwd, db_hash):
                     return True
         except Exception:
             pass
-
-    cred_file = "/root/vpn_credentials.txt"
-    if os.path.exists(cred_file):
-        try:
-            with open(cred_file, "r", encoding="utf-8") as f:
-                content = f.read()
-            m_u = re.search(r"Логин администратора:\s*([^\n\r]+)", content)
-            m_p = re.search(r"Пароль администратора:\s*([^\n\r]+)", content)
-            if m_u and m_p:
-                if hmac.compare_digest(user, m_u.group(1).strip()) and hmac.compare_digest(pwd, m_p.group(1).strip()):
-                    return True
-        except Exception:
-            pass
-
     return False
 
 def get_panel_path():
@@ -4446,12 +4620,12 @@ def get_panel_path():
 def build_client_conf(pub_key, host):
     srv = {}
     if os.path.exists(CONF_PATH):
-        with open(CONF_PATH, "r") as f:
+        with open(CONF_PATH, "r", encoding="utf-8", errors="ignore") as f:
             c_text = f.read()
         for k in ["MTU", "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "ListenPort", "PrivateKey"]:
-            m = re.search(rf"^{k}\s*=\s*([^\s\n\r]+)", c_text, re.M)
+            m = re.search(r"^\s*" + k + r"\s*=\s*(\S+)", c_text, re.M | re.I)
             if m:
-                srv[k] = m.group(1).strip()
+                srv[k.upper()] = m.group(1).strip()
     
     clients = load_clients()
     c_info = clients.get(pub_key)
@@ -4461,7 +4635,7 @@ def build_client_conf(pub_key, host):
     c_priv = c_info.get("private_key", "")
     c_ip = c_info.get("ip", "10.9.0.2/32")
 
-    s_priv = srv.get("PrivateKey", "")
+    s_priv = srv.get("PRIVATEKEY", "")
     s_pub = ""
     if s_priv:
         try:
@@ -4479,30 +4653,30 @@ def build_client_conf(pub_key, host):
         dns_ip = "1.1.1.1"
 
     dest_endpoint = host.split(':')[0] if host else PRIMARY_DOMAIN
-    port_val = srv.get('ListenPort', NATIVE_AWG_PORT)
-    return f"""[Interface]
+    port_val = srv.get('LISTENPORT', NATIVE_AWG_PORT)
+    return f'''[Interface]
 Address = {c_ip}
 PrivateKey = {c_priv}
 DNS = {dns_ip}
 MTU = {srv.get('MTU', '1360')}
-Jc = {srv.get('Jc', '4')}
-Jmin = {srv.get('Jmin', '40')}
-Jmax = {srv.get('Jmax', '70')}
+Jc = {srv.get('JC', '4')}
+Jmin = {srv.get('JMIN', '40')}
+Jmax = {srv.get('JMAX', '70')}
 S1 = {srv.get('S1', '72')}
 S2 = {srv.get('S2', '56')}
 S3 = {srv.get('S3', '32')}
 S4 = {srv.get('S4', '16')}
-H1 = {srv.get('H1', '149419586')}
-H2 = {srv.get('H2', '878791997')}
-H3 = {srv.get('H3', '1251051976')}
-H4 = {srv.get('H4', '1657628296')}
+H1 = {srv.get('H1', '1407978111')}
+H2 = {srv.get('H2', '1980238350')}
+H3 = {srv.get('H3', '315765535')}
+H4 = {srv.get('H4', '529409274')}
 
 [Peer]
 PublicKey = {s_pub}
 Endpoint = {dest_endpoint}:{port_val}
-AllowedIPs = 0.0.0.0/0, ::/0
+AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
-"""
+'''
 
 def clean_expired_sessions():
     now = time.time()
@@ -4539,7 +4713,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
 
-        if self.path == "/api/v1/datasphere/auth":
+        if self.path == "/api/v1/myprivatecloud/auth":
             user = data.get("principal", "").strip()
             pwd = data.get("secret", "").strip()
 
@@ -4574,7 +4748,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
             return
 
-        if self.path == "/api/v1/datasphere/awg/peer/add":
+        if self.path == "/api/v1/myprivatecloud/awg/peer/add":
             name = re.sub(r'[^a-zA-Z0-9_-]', '', data.get("name", "Client")).strip()
             if not name:
                 name = "Client"
@@ -4596,8 +4770,11 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
 
             client_ip = f"10.9.0.{next_ip}/32"
             new_peer = f"\n# --- Client: {name} ---\n[Peer]\nPublicKey = {pub}\nAllowedIPs = {client_ip}\n"
+            
             with open(CONF_PATH, "a") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 f.write(new_peer)
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
             subprocess.run(["awg", "set", "awg0", "peer", pub, "allowed-ips", client_ip], capture_output=True)
             
@@ -4613,17 +4790,20 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"status": "ok", "public_key": pub, "ip": client_ip, "name": name, "priv_key": priv})
             return
 
-        if self.path == "/api/v1/datasphere/awg/peer/remove":
+        if self.path == "/api/v1/myprivatecloud/awg/peer/remove":
             pub = urllib.parse.unquote(data.get("public_key", "")).strip()
             if pub and re.match(r'^[A-Za-z0-9+/=]{40,50}$', pub):
                 subprocess.run(["awg", "set", "awg0", "peer", pub, "remove"], capture_output=True)
                 if os.path.exists(CONF_PATH):
-                    with open(CONF_PATH, "r") as f:
+                    with open(CONF_PATH, "r+") as f:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                         text = f.read()
-                    pattern = rf"(# --- Client: .*?---\n)?\[Peer\]\nPublicKey\s*=\s*{re.escape(pub)}[\s\S]*?(?=\n\[Peer\]|\n# ---|$)"
-                    text = re.sub(pattern, "", text)
-                    with open(CONF_PATH, "w") as f:
+                        pattern = rf"(# --- Client: .*?---\n)?\[Peer\]\nPublicKey\s*=\s*{re.escape(pub)}[\s\S]*?(?=\n\[Peer\]|\n# ---|$)"
+                        text = re.sub(pattern, "", text)
+                        f.seek(0)
                         f.write(text.strip() + "\n")
+                        f.truncate()
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                 
                 clients = load_clients()
                 if pub in clients:
@@ -4635,20 +4815,20 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         self._send_json({"status": "error", "error": "Not Found"}, code=404)
 
     def do_GET(self):
-        if self.path == "/api/v1/datasphere/status":
+        if self.path == "/api/v1/myprivatecloud/status":
             if not self._auth_valid():
                 self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
                 return
             self._send_json({
                 "status": "online",
-                "cluster": "datasphere-edge-ultra",
+                "cluster": "myprivatecloud-edge-ultra",
                 "nodes_active": 148,
                 "telemetry_rate": "99.998%",
                 "version": "3.14.0"
             })
             return
 
-        if self.path.startswith("/api/v1/datasphere/awg/peer/qr"):
+        if self.path.startswith("/api/v1/myprivatecloud/awg/peer/qr"):
             if not self._auth_valid():
                 self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
                 return
@@ -4678,7 +4858,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(img_out)
             return
 
-        if self.path.startswith("/api/v1/datasphere/awg/peer/conf"):
+        if self.path.startswith("/api/v1/myprivatecloud/awg/peer/conf"):
             if not self._auth_valid():
                 self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
                 return
@@ -4699,7 +4879,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body_conf.encode("utf-8"))
             return
 
-        if self.path.startswith("/api/v1/datasphere/awg/peers"):
+        if self.path.startswith("/api/v1/myprivatecloud/awg/peers"):
             if not self._auth_valid():
                 self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
                 return
@@ -4754,11 +4934,11 @@ if __name__ == "__main__":
     server = ThreadedTCPServer(("127.0.0.1", 20443), CoreHandler)
     server.serve_forever()
 EOF_CORE_PY
-chmod 755 /usr/local/bin/datasphere-core.py
+chmod 755 /usr/local/bin/myprivatecloud-core.py
 
-cat << EOF > /etc/systemd/system/datasphere-core.service
+cat << EOF > /etc/systemd/system/myprivatecloud-core.service
 [Unit]
-Description=DataSphere Core In-Memory Gateway Daemon
+Description=My Private Cloud Core Gateway Daemon
 After=network.target
 
 [Service]
@@ -4770,13 +4950,13 @@ Environment="PRIMARY_DOMAIN=$PRIMARY_DOMAIN"
 Environment="PANEL_PATH=$PANEL_PATH"
 Environment="AGH_DOMAIN=${AGH_DOMAIN:-}"
 Environment="NATIVE_AWG_PORT=$NATIVE_AWG_PORT"
-ExecStart=/usr/bin/python3 /usr/local/bin/datasphere-core.py
+ExecStart=/usr/bin/python3 /usr/local/bin/myprivatecloud-core.py
 Restart=always
 RestartSec=3
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=false
-ReadWritePaths=/etc/amnezia/amneziawg /etc/x-ui /root /tmp
+ProtectHome=read-only
+ReadWritePaths=/etc/amnezia/amneziawg /tmp /etc/x-ui
 LimitNOFILE=1048576
 LimitNPROC=512
 
@@ -4785,9 +4965,9 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable datasphere-core >/dev/null 2>&1 || true
-systemctl restart datasphere-core || true
-ok "Служба DataSphere Core SSO Gateway запущена на 127.0.0.1:20443."
+systemctl enable myprivatecloud-core >/dev/null 2>&1 || true
+systemctl restart myprivatecloud-core || true
+ok "Служба My Private Cloud Core SSO Gateway запущена на 127.0.0.1:20443."
 
 # =============================================================
 #  ФАЗА 6: СЕТЕВОЙ ШЛЮЗ NAT, TCP MSS CLAMPING И ИЗОЛЯЦИЯ UFW
@@ -4838,15 +5018,8 @@ if [ "${ENABLE_AWG_V3:-0}" -eq 1 ]; then
     ufw allow "${AWG_V3_PORT}/udp" comment '3X-UI AWG v3.2' >/dev/null 2>&1 || true
 fi
 
-if [ "${ENABLE_AWG_V2:-0}" -eq 1 ]; then
-    ufw allow "${AWG_V2_PORT}/udp" comment '3X-UI AWG v2.0' >/dev/null 2>&1 || true
-fi
 
-if [ "${ENABLE_WG_NATIVE:-0}" -eq 1 ]; then
-    ufw allow "${WG_NATIVE_PORT}/udp" comment '3X-UI WireGuard Native' >/dev/null 2>&1 || true
-fi
-
-export ENABLE_HY2_HOP HY2_PORT ENABLE_NATIVE_AWG NATIVE_AWG_PORT ENABLE_AWG_HOP ENABLE_AWG_V3 ENABLE_AWG_V2 ENABLE_WG_NATIVE DEFAULT_IF
+export ENABLE_HY2_HOP HY2_PORT ENABLE_NATIVE_AWG NATIVE_AWG_PORT ENABLE_AWG_HOP ENABLE_AWG_V3 DEFAULT_IF
 python3 - << 'EOF_UFW_PYTHON'
 # -*- coding: utf-8 -*-
 import os, sys, re
@@ -4871,8 +5044,6 @@ awg_native = os.environ.get("ENABLE_NATIVE_AWG") == "1"
 nawg_p = os.environ.get("NATIVE_AWG_PORT", "8443")
 awg_hop = os.environ.get("ENABLE_AWG_HOP") == "1"
 awg3 = os.environ.get("ENABLE_AWG_V3") == "1"
-awg2 = os.environ.get("ENABLE_AWG_V2") == "1"
-wg_nat = os.environ.get("ENABLE_WG_NATIVE") == "1"
 
 nat_rules = ["*nat", ":PREROUTING ACCEPT [0:0]", ":POSTROUTING ACCEPT [0:0]", ":OUTPUT ACCEPT [0:0]"]
 if enable_hop:
@@ -4883,10 +5054,6 @@ if awg_native:
     nat_rules.append(f"-A POSTROUTING -s 10.9.0.0/24 -o {default_if} -j MASQUERADE")
 if awg3:
     nat_rules.append(f"-A POSTROUTING -s 10.8.1.0/24 -o {default_if} -j MASQUERADE")
-if awg2:
-    nat_rules.append(f"-A POSTROUTING -s 10.8.2.0/24 -o {default_if} -j MASQUERADE")
-if wg_nat:
-    nat_rules.append(f"-A POSTROUTING -s 10.8.3.0/24 -o {default_if} -j MASQUERADE")
 nat_rules.append("COMMIT\n")
 
 nat_part = "# START HARDENED NAT\n" + "\n".join(nat_rules) + "\n# END HARDENED NAT\n\n"
@@ -4906,12 +5073,6 @@ if awg_native:
 if awg3:
     forward_rules.append("-A ufw-before-forward -s 10.8.1.0/24 -j ACCEPT")
     forward_rules.append(f"-A ufw-before-forward -i {default_if} -d 10.8.1.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
-if awg2:
-    forward_rules.append("-A ufw-before-forward -s 10.8.2.0/24 -j ACCEPT")
-    forward_rules.append(f"-A ufw-before-forward -i {default_if} -d 10.8.2.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
-if wg_nat:
-    forward_rules.append("-A ufw-before-forward -s 10.8.3.0/24 -j ACCEPT")
-    forward_rules.append(f"-A ufw-before-forward -i {default_if} -d 10.8.3.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
 forward_rules.append("# END HARDENED FORWARD\n")
 forward_block = "\n".join(forward_rules)
 
@@ -4940,10 +5101,6 @@ mangle_part = f"""# START HARDENED MANGLE
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.9.0.0/24 -j TCPMSS --set-mss 1320
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.1.0/24 -j TCPMSS --set-mss 1320
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.1.0/24 -j TCPMSS --set-mss 1320
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.2.0/24 -j TCPMSS --set-mss 1320
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.2.0/24 -j TCPMSS --set-mss 1320
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.3.0/24 -j TCPMSS --set-mss 1380
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.3.0/24 -j TCPMSS --set-mss 1380
 -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 COMMIT
 # END HARDENED MANGLE
@@ -4955,7 +5112,10 @@ with open(rules_file, "w") as f:
     f.write(final_body)
 EOF_UFW_PYTHON
 
-DENIED_PORTS=("$PANEL_PORT" "$SUB_PORT" "$XHTTP_STREAM_PORT" 9443 3000 20443)
+DENIED_PORTS=("$PANEL_PORT" "$SUB_PORT" 9443 3000 20443)
+if [ "${ENABLE_XHTTP:-0}" -eq 1 ] && [ -n "${XHTTP_STREAM_PORT:-}" ]; then
+    DENIED_PORTS+=("$XHTTP_STREAM_PORT")
+fi
 for p in "${ALL_REALITY_PORTS[@]:-}"; do
     if [ -n "$p" ]; then
         DENIED_PORTS+=("$p")
@@ -4987,7 +5147,7 @@ fi
 CRED_FILE="/root/vpn_credentials.txt"
 cat << EOF > "$CRED_FILE"
 =====================================================================
-  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА (Single-IP Ultra Enhanced v3.6)
+  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА ( Ultra Enhanced v3.7)
   ОС: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
   Ядро Xray-core: ${DETECTED_XRAY_VER} (Pinned)
   Режим:          $([ "$INSTALL_MODE" = "2" ] && echo "Safe Migration" || echo "Clean Setup")
@@ -5046,15 +5206,6 @@ $([ "${ENABLE_AWG_V3:-0}" -eq 1 ] && echo "[ AMNEZIAWG v3.2 (3X-UI) ]
 Порт / Хост:           ${PRIMARY_DOMAIN}:${AWG_V3_PORT:-10443}
 Стандарт скорости:     MTU 1360 | MSS 1320 | Jc 4 | S1 72 | S2 56 | S3 32 | S4 16
 ")
-$([ "${ENABLE_AWG_V2:-0}" -eq 1 ] && echo "[ AMNEZIAWG v2.0 / LEGACY (3X-UI) ]
-Порт / Хост:           ${PRIMARY_DOMAIN}:${AWG_V2_PORT:-10444}
-Стандарт скорости:     MTU 1360 | MSS 1320 | Jc 4 | S1 72 | S2 56 | S3 32 | S4 16
-")
-$([ "${ENABLE_WG_NATIVE:-0}" -eq 1 ] && echo "[ 3X WIREGUARD (3X-UI) ]
-Порт / Хост:           ${PRIMARY_DOMAIN}:${WG_NATIVE_PORT:-10445}
-Конфиг файл (.conf):   /root/wireguard-client.conf
-MTU / Clamping:        MTU 1420 | MSS 1380
-")
 [ СЕТЕВЫЕ ПАРАМЕТРЫ ]
 Основной хост:         ${PRIMARY_DOMAIN} (IP: ${WAN_IP:-auto})
 Сетевой адаптер (WAN): ${DEFAULT_IF}
@@ -5069,7 +5220,7 @@ chmod 600 "$CRED_FILE"
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА В РЕЖИМЕ SINGLE-IP (v3.6 ULTRA)!         ${NC}"
+echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА (v3.7 MyPrivateCloud ULTRA)!            ${NC}"
 echo -e "${GREEN}=====================================================================${NC}"
 echo -e "  Сайт-маскировка DataSphere:  ${CYAN}https://${PRIMARY_DOMAIN}/${NC}"
 echo -e "  Скрытый SSO Hub:             ${WHITE}Кнопка «Консоль» в шапке сайта${NC}"
@@ -5107,7 +5258,9 @@ echo -e "  ${WHITE}Zero-SNI Shield:${NC}             ${GREEN}ssl_reject_handshak
 echo -e "  ${WHITE}Порт 80:${NC}                     ${GREEN}Только ACME, сканеры сбрасываются (444)${NC}"
 echo -e "  ${WHITE}Anti-Loop Fallback 9443:${NC}     ${GREEN}Proxy_Protocol v1 + Живой Nginx (Декой DataSphere)${NC}"
 echo -e "  ${WHITE}L4 Stream Ingress:${NC}           ${GREEN}Строго порт 443/tcp (Порт 8443 освобожден под UDP)${NC}"
+if [ "${ENABLE_XHTTP:-0}" -eq 1 ]; then
 echo -e "  ${WHITE}VLESS xHTTP Inbound:${NC}         ${GREEN}Строго привязан к ${PRIMARY_DOMAIN} (H2 Stream-One)${NC}"
+fi
 echo -e "  ${WHITE}Hysteria 2 Hopping Пул:${NC}      ${GREEN}Порты 20000:35000/udp -> :443/udp${NC}"
 if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
     if [ "${ENABLE_AWG_HOP:-0}" -eq 1 ]; then
@@ -5117,7 +5270,7 @@ echo -e "  ${WHITE}AmneziaWG Native Режим:${NC}      ${GREEN}Одиночн
 fi
 fi
 echo -e "  ${WHITE}AWG3 Golden Matrix:${NC}          ${GREEN}S1=72 | S2=56 | S3=32 | S4=16 | MTU 1360 | MSS 1320${NC}"
-echo -e "  ${WHITE}3X-UI Выделенный UDP Стек:${NC}   ${GREEN}AWG v3.2 (:10443) | AWG v2.0 (:10444) | WG (:10445)${NC}"
+echo -e "  ${WHITE}3X-UI Выделенный UDP Стек:${NC}   ${GREEN}AmneziaWG v3.2 (:10443/udp)${NC}"
 echo -e "  ${WHITE}Zero-Leak In-Memory Hub:${NC}     ${GREEN}Разметка меню строится в RAM только после 200 OK${NC}"
 echo
 echo -e "  Все доступы сохранены в файл: ${CYAN}${CRED_FILE}${NC} (chmod 600)"
