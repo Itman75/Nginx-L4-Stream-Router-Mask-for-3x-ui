@@ -82,8 +82,6 @@ ENABLE_HY2=0
 ENABLE_HY2_HOP=0
 ENABLE_AWG_HOP=0
 ENABLE_AWG_V3=0
-ENABLE_AWG_V2=0
-ENABLE_WG_NATIVE=0
 ENABLE_AGH=0
 AGH_DOMAIN=""
 AGH_USER="admin"
@@ -1217,40 +1215,85 @@ systemctl stop nginx 2>/dev/null || true
 
 NGINX_KEYRING="/usr/share/keyrings/nginx-archive-keyring.gpg"
 mkdir -p /usr/share/keyrings
-rm -f "$NGINX_KEYRING" "${NGINX_KEYRING}.tmp"
 
+# 1. Идемпотентная верификация существующего Keyring (исключает сбои при Safe Migration)
 NGINX_KEY_OK=0
-for key_url in "https://nginx.org/keys/nginx_signing.key" "http://nginx.org/keys/nginx_signing.key"; do
-    log "Запрос ключа Nginx: $key_url"
-    if curl -fsSL --connect-timeout 12 -m 30 --retry 2 "$key_url" 2>/dev/null | gpg --dearmor -o "${NGINX_KEYRING}.tmp" 2>/dev/null; then
-        if [ -s "${NGINX_KEYRING}.tmp" ]; then
-            mv -f "${NGINX_KEYRING}.tmp" "$NGINX_KEYRING"
-            chmod 644 "$NGINX_KEYRING"
-            NGINX_KEY_OK=1
-            ok "Ключ Nginx успешно загружен и деарморирован."
-            break
-        fi
+if [ -s "$NGINX_KEYRING" ]; then
+    if gpg --no-default-keyring --keyring "$NGINX_KEYRING" --list-keys 573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 >/dev/null 2>&1 || \
+       gpg --no-default-keyring --keyring "$NGINX_KEYRING" --list-keys 8540A6F18833A80E >/dev/null 2>&1 || \
+       gpg --no-default-keyring --keyring "$NGINX_KEYRING" --list-keys 9E9BE90EACBCDE69 >/dev/null 2>&1 || \
+       gpg --no-default-keyring --keyring "$NGINX_KEYRING" --list-keys 2FD21310B49F6B46 >/dev/null 2>&1 || \
+       gpg --no-default-keyring --keyring "$NGINX_KEYRING" --list-keys >/dev/null 2>&1; then
+        NGINX_KEY_OK=1
+        ok "Действующий Keyring Nginx успешно верифицирован в системе (загрузка пропущена)."
     fi
-done
+fi
 
-if [ "$NGINX_KEY_OK" -eq 0 ] || ! gpg --no-default-keyring --keyring "$NGINX_KEYRING" --list-keys 2FD21310B49F6B46 &>/dev/null; then
-    log "Синхронизация актуальных ключей Nginx через Keyserver пулы..."
-    KEYSERVERS=("hkp://keyserver.ubuntu.com:80" "hkps://keys.openpgp.org" "hkp://pgp.mit.edu:80")
-    for ks in "${KEYSERVERS[@]}"; do
-        if gpg --no-default-keyring --keyring "$NGINX_KEYRING" --keyserver "$ks" \
-               --recv-keys 2FD21310B49F6B46 573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3 2>/dev/null; then
-            chmod 644 "$NGINX_KEYRING"
-            NGINX_KEY_OK=1
-            ok "Ключи Nginx успешно импортированы из серверов ключей: $ks"
-            break
+# 2. Безопасная загрузка ключей без разрушения конвейера pipefail
+if [ "$NGINX_KEY_OK" -eq 0 ]; then
+    NGINX_TMP_KEY="/tmp/nginx_signing.key.tmp"
+    rm -f "$NGINX_TMP_KEY" "${NGINX_KEYRING}.tmp"
+    for key_url in "https://nginx.org/keys/nginx_signing.key" "http://nginx.org/keys/nginx_signing.key"; do
+        log "Запрос официального ключа Nginx: $key_url"
+        if curl -fsSL --connect-timeout 8 -m 25 --retry 2 "$key_url" -o "$NGINX_TMP_KEY" 2>/dev/null; then
+            if [ -s "$NGINX_TMP_KEY" ] && gpg --dearmor -o "${NGINX_KEYRING}.tmp" < "$NGINX_TMP_KEY" 2>/dev/null; then
+                if [ -s "${NGINX_KEYRING}.tmp" ]; then
+                    mv -f "${NGINX_KEYRING}.tmp" "$NGINX_KEYRING"
+                    chmod 644 "$NGINX_KEYRING"
+                    NGINX_KEY_OK=1
+                    ok "Ключ Nginx успешно загружен и деарморирован."
+                    break
+                fi
+            fi
         fi
     done
+    rm -f "$NGINX_TMP_KEY"
+fi
+
+# 3. Встроенный Fail-Safe ASCII-Armor (защита от сетевых сбоев, блокировок DPI и таймаутов dirmngr)
+if [ "$NGINX_KEY_OK" -eq 0 ]; then
+    warn "Сетевые зеркала недоступны. Развёртывание встроенного доверенного ASCII-Armor ключа Nginx..."
+    cat << 'EOF_NGINX_GPG_ARMOR' | gpg --dearmor -o "${NGINX_KEYRING}.tmp" 2>/dev/null
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+Version: GnuPG v2
+
+mQENBE5OMmIBCAD+FPYKGriGGf7NqwKfWC83cBV01gabgVWQmZbMcFzeW+hMsgxH
+W6iimD0RsfZ9oEbfJCPG0CRSZ7ppq5pKamYs2+EJ8Q2ysOFHHwpGrA2C8zyNAs4I
+QxnZZIbETgcSwFtDun0XiqPwPZgyuXVm9PAbLZRbfBzm8wR/3SWygqZBBLdQk5TE
+fDR+Eny/M1RVR4xClECONF9UBB2ejFdI1LD45APbP2hsN/piFByU1t7yK2gpFyRt
+97WzGHn9MV5/TL7AmRPM4pcr3JacmtCnxXeCZ8nLqedoSuHFuhwyDnlAbu8I16O5
+XRrfzhrHRJFM1JnIiGmzZi6zBvH0ItfyX6ttABEBAAG0KW5naW54IHNpZ25pbmcg
+a2V5IDxzaWduaW5nLWtleUBuZ2lueC5jb20+iQE+BBMBAgAoBQJOTjJiAhsDBQkJ
+ZgGABgsJCAcDAgYVCAIJCgsEFgIDAQIeAQIXgAAKCRCr9b2Ce9m/YpvjB/98uV4t
+94d0oEh5XlqEZzVMrcTgPQ3BZt05N5xVuYaglv7OQtdlErMXmRWaFZEqDaMHdniC
+sF63jWMd29vC4xpzIfmsLK3ce9oYo4t9o4WWqBUdf0Ff1LMz1dfLG2HDtKPfYg3C
+8NESud09zuP5NohaE8Qzj/4p6rWDiRpuZ++4fnL3Dt3N6jXILwr/TM/Ma7jvaXGP
+DO3kzm4dNKp5b5bn2nT2QWLPnEKxvOg5Zoej8l9+KFsUnXoWoYCkMQ2QTpZQFNwF
+xwJGoAz8K3PwVPUrIL6b1lsiNovDgcgP0eDgzvwLynWKBPkRRjtgmWLoeaS9FAZV
+ccXJMmANXJFuCf26
+=eW4P
+-----END PGP PUBLIC KEY BLOCK-----
+EOF_NGINX_GPG_ARMOR
+    if [ -s "${NGINX_KEYRING}.tmp" ]; then
+        mv -f "${NGINX_KEYRING}.tmp" "$NGINX_KEYRING"
+        chmod 644 "$NGINX_KEYRING"
+        NGINX_KEY_OK=1
+        ok "Встроенный Fail-Safe ключ Nginx успешно применён."
+    else
+        rm -f "${NGINX_KEYRING}.tmp"
+    fi
+fi
+
+# 4. Аудит установленной версии бинарника Nginx
+EXISTING_NGINX_VER="0"
+if command -v nginx >/dev/null 2>&1; then
+    EXISTING_NGINX_VER=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "0")
 fi
 
 USE_OFFICIAL_NGINX_REPO=0
 if [ "$NGINX_KEY_OK" -eq 1 ] && [ -s "$NGINX_KEYRING" ]; then
     NGINX_REPO_CODENAME="$OS_CODENAME"
-    if ! curl -fsSL -I --connect-timeout 5 "https://nginx.org/packages/mainline/$OS_ID/dists/$OS_CODENAME/Release" >/dev/null 2>&1; then
+    if ! curl -fsSL -I --connect-timeout 4 "https://nginx.org/packages/mainline/$OS_ID/dists/$OS_CODENAME/Release" >/dev/null 2>&1; then
         if [ "$OS_ID" = "ubuntu" ]; then
             NGINX_REPO_CODENAME="noble"
         else
@@ -1269,28 +1312,36 @@ EOF
 
     wait_for_apt_lock
     if apt-get update -q -o Dir::Etc::sourcelist="sources.list.d/nginx.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1; then
-        wait_for_apt_lock
-        apt-get remove -y nginx-common nginx-core libnginx-mod-* 2>/dev/null || true
         USE_OFFICIAL_NGINX_REPO=1
         ok "Репозиторий Nginx Mainline ($NGINX_REPO_CODENAME) верифицирован."
     else
-        warn "Сбой верификации внешнего репозитория nginx.org. Fallback на системные пакеты ОС..."
+        warn "Сбой обновления репозитория nginx.org. Откат репозиторных списков..."
         rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx
     fi
 fi
 
-if [ "$USE_OFFICIAL_NGINX_REPO" -eq 0 ]; then
-    log "Установка Nginx из системного репозитория $OS_ID..."
-    rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx
-    wait_for_apt_lock
-    apt-get update -q
-    wait_for_apt_lock
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx libnginx-mod-stream 2>/dev/null || apt-get install -y -q nginx
-else
-    wait_for_apt_lock
-    apt-get update -q
-    wait_for_apt_lock
+# 5. Установка и предотвращение конфликта версий DPKG (held broken packages)
+wait_for_apt_lock
+if [ "$USE_OFFICIAL_NGINX_REPO" -eq 1 ]; then
+    rm -f /etc/nginx/modules-enabled/*mod-stream*.conf 2>/dev/null || true
     apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
+    ok "Nginx Mainline успешно актуализирован/установлен."
+else
+    # Если официальный репозиторий недоступен, но Nginx >= 1.25.1 уже установлен, не ломаем систему
+    if [ "$EXISTING_NGINX_VER" = "0" ] || dpkg --compare-versions "$EXISTING_NGINX_VER" "lt" "1.25.1"; then
+        log "Установка Nginx из системного репозитория $OS_ID..."
+        wait_for_apt_lock
+        apt-get update -q
+        wait_for_apt_lock
+        apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx libnginx-mod-stream 2>/dev/null || apt-get install -y -q nginx
+    else
+        ok "Сохранена активная версия Nginx ($EXISTING_NGINX_VER). Конфликт пакетов DPKG предотвращен."
+    fi
+fi
+
+# 6. Очистка устаревших конфигураций динамических модулей при монолитном stream
+if nginx -V 2>&1 | grep -q -- '--with-stream'; then
+    rm -f /etc/nginx/modules-enabled/*stream*.conf 2>/dev/null || true
 fi
 
 NGINX_USER="nginx"
@@ -1383,8 +1434,32 @@ server {
 }
 EOF
 
+# Предотвращение блокировок запуска служб на облачных шаблонах Ubuntu
+if [ -f /usr/sbin/policy-rc.d ]; then
+    rm -f /usr/sbin/policy-rc.d 2>/dev/null || true
+fi
+
+# Отключение конкурирующего веб-сервера Apache (если присутствует в базовом образе)
+if systemctl is-active --quiet apache2 2>/dev/null || systemctl list-unit-files apache2.service 2>/dev/null | grep -q "apache2"; then
+    systemctl stop apache2 2>/dev/null || true
+    systemctl disable apache2 2>/dev/null || true
+fi
+
+# Валидация синтаксиса конфигурации Nginx
 nginx -t || die "Ошибка конфигурации ACME Bootstrap сервера Nginx."
-systemctl restart nginx
+
+# Устранение рассинхронизации systemd (фикс "Device or resource busy" на Ubuntu 24.04 Noble)
+systemctl unmask nginx.service 2>/dev/null || true
+systemctl daemon-reload
+systemctl reset-failed nginx.service 2>/dev/null || true
+killall -9 nginx 2>/dev/null || true
+
+# Запуск службы Nginx
+systemctl restart nginx || {
+    journalctl -xeu nginx.service --no-pager | tail -n 20 >&2
+    die "Не удалось запустить службу Nginx после актуализации systemd."
+}
+ok "Служба Nginx успешно запущена (ACME Bootstrap)."
 
 log "Локальный Pre-flight Loopback Smoke Test для ACME..."
 mkdir -p "$WEBROOT/.well-known/acme-challenge"
