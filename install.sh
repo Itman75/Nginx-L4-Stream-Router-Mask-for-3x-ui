@@ -228,12 +228,36 @@ wait_for_apt_lock() {
     return 0
 }
 
-log "Первичная подготовка системных утилит..."
+log "Первичная подготовка системных утилит (Low-Memory Profile: 1 GB RAM)..."
 wait_for_apt_lock
+dpkg --configure -a >/dev/null 2>&1 || true
+
+# Очистка кэша APT для освобождения буферов памяти перед установкой
+apt-get clean -q >/dev/null 2>&1 || true
 apt-get update -q >/dev/null 2>&1 || true
 wait_for_apt_lock
-apt-get install -y curl bc bind9-dnsutils iproute2 openssl gawk python3 python3-bcrypt xxd unzip jq sqlite3 bsdextrautils gnupg dirmngr psmisc software-properties-common qrencode libmnl-dev make gcc build-essential -q >/dev/null 2>&1 || true
-ok "Базовые утилиты готовы к работе."
+
+# Минимально необходимый набор: исключены компиляторы, dirmngr, apache2-utils, bc и тяжелые зависимости
+BASE_BOOTSTRAP_PKGS=(
+    curl iproute2 openssl gawk python3 python3-bcrypt
+    unzip jq sqlite3 gnupg psmisc ca-certificates
+)
+
+apt-get install -y "${BASE_BOOTSTRAP_PKGS[@]}" -q --no-install-recommends >/dev/null 2>&1 || true
+
+# Контрольная проверка наличия критических утилит
+MISSING_CRITICAL=()
+for tool in curl sqlite3 jq openssl python3 awk ip ss; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        MISSING_CRITICAL+=("$tool")
+    fi
+done
+
+if [ "${#MISSING_CRITICAL[@]}" -gt 0 ]; then
+    die "Критические базовые утилиты не установлены: ${MISSING_CRITICAL[*]}. Проверьте доступ к сети и репозиториям APT."
+fi
+
+ok "Базовые утилиты готовы к работе (минимальный footprint)."
 
 validate_port() {
     local p="${1:-}"
@@ -1038,12 +1062,12 @@ net.ipv4.tcp_keepalive_probes = 5
 net.ipv4.tcp_max_tw_buckets = 524288
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_slow_start_after_idle = 0
-net.core.rmem_max = 67108864
-net.core.wmem_max = 67108864
-net.core.rmem_default = 33554432
-net.core.wmem_default = 33554432
-net.ipv4.tcp_rmem = 4096 87380 67108864
-net.ipv4.tcp_wmem = 4096 65536 67108864
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.rmem_default = 262144
+net.core.wmem_default = 262144
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
 net.ipv4.udp_rmem_min = 16384
 net.ipv4.udp_wmem_min = 16384
 net.ipv4.udp_mem = 65536 131072 262144
@@ -2832,8 +2856,8 @@ http {
     resolver 77.88.8.8 1.1.1.1 ipv6=off valid=300s;
     resolver_timeout 5s;
 
-    http2_recv_buffer_size 16m;
-    http2_max_concurrent_streams 512;
+    http2_recv_buffer_size 1m;
+    http2_max_concurrent_streams 128;
 
     keepalive_timeout 300s;
     keepalive_requests 100000;
@@ -4271,6 +4295,15 @@ if [ -f "$DB_PATH" ]; then
     chmod 644 "${DB_PATH}-wal" 2>/dev/null || true
     chmod 644 "${DB_PATH}-shm" 2>/dev/null || true
 fi
+
+# Лимитирование потребления памяти сборщиком мусора Go (GOMEMLIMIT для 1 GB RAM)
+mkdir -p /etc/systemd/system/x-ui.service.d/
+cat << 'EOF_XUI_MEM' > /etc/systemd/system/x-ui.service.d/10-memory-limit.conf
+[Service]
+Environment="GOMEMLIMIT=160MiB"
+Environment="GOGC=80"
+EOF_XUI_MEM
+systemctl daemon-reload
 
 systemctl restart x-ui
 sleep 2
