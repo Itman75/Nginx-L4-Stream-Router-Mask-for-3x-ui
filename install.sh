@@ -58,7 +58,6 @@ echo -e "${WHITE}  Xray Core v26.7.28 Pinned + Native H2 xHTTP + ML-KEM-768 + Vi
 echo -e "${WHITE}  Dedicated UDP: Hy2 (:443), AWG Native (:8443), AWG v3 (:10443)      ${NC}"
 echo -e "${WHITE}  Stealth SSO Hub: MyPrivateCloud In-Memory Portal (3X-UI / AWG / AGH)   ${NC}"
 echo -e "${WHITE}  Ingress Shield: Zero-SNI + Port 80 444 Drop + Live Fallback 9443   ${NC}"
-echo -e "${WHITE}  Universal WAN Engine (Tier 1-4) + Dual-Sync Matrix Reconciliation  ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
 
 if [ "$EUID" -ne 0 ]; then
