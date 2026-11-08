@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # ==============================================================================
-# Production AutoSetup Monoscript: Hardened Master Engine v3.7 MyPrivateCloud Ultra
+# Production AutoSetup Monoscript: Hardened Master Engine v3.8 MyPrivateCloud Ultra
 # Architecture: Single-IP Ultra Enhanced + Native Kernel AmneziaWG (Bare-Metal)
 # Zero-Leak Frontend: My Private Cloud SSO Hub + Modular WebCrypto Plane
 # ==============================================================================
@@ -42,7 +42,7 @@ cleanup() {
     local exit_code=$?
     trap - ERR EXIT INT TERM
     systemctl start x-ui 2>/dev/null || true
-    rm -f /tmp/vpn_unified_creds.txt /tmp/3xui_install.log /tmp/xray-*.zip /tmp/agh.tar.gz /tmp/nginx_prev_sni_map.txt 2>/dev/null || true
+    rm -rf /tmp/xray_unpack /usr/local/bin/myprivatecloud_core.py.tmp* /tmp/vpn_unified_creds.txt /tmp/3xui_install.log /tmp/xray-*.zip /tmp/agh.tar.gz /tmp/nginx_prev_sni_map.txt 2>/dev/null || true
     if [ "$exit_code" -ne 0 ]; then
         echo -e "\n${RED}[X] Скрипт аварийно прерван на строке ${1:-unknown} (код: ${exit_code}).${NC}" >&2
     fi
@@ -52,11 +52,11 @@ trap 'cleanup $LINENO' ERR INT TERM
 
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================================${NC}"
-echo -e "${GREEN}  Hardened Master Engine v3.7 (MyPrivateCloud Ultra + Native AmneziaWG)  ${NC}"
+echo -e "${GREEN}  Hardened Master Engine v3.8 (MyPrivateCloud Ultra + Native AmneziaWG)  ${NC}"
 echo -e "${CYAN}   Clean Setup / Safe Migration + Nginx L4                              ${NC}"
 echo -e "${WHITE}  Xray Core v26.7.28 Pinned + Native H2 xHTTP + ML-KEM-768 + Vision    ${NC}"
-echo -e "${WHITE}  Dual UDP Pools: Hy2 (20000-35000) & AWG Native (35001-49999)      ${NC}"
-echo -e "${WHITE}  Stealth SSO Hub: DataSphere In-Memory Portal (3X-UI / AWG / AGH)   ${NC}"
+echo -e "${WHITE}  Dedicated UDP: Hy2 (:443), AWG Native (:8443), AWG v3 (:10443)      ${NC}"
+echo -e "${WHITE}  Stealth SSO Hub: MyPrivateCloud In-Memory Portal (3X-UI / AWG / AGH)   ${NC}"
 echo -e "${WHITE}  Ingress Shield: Zero-SNI + Port 80 444 Drop + Live Fallback 9443   ${NC}"
 echo -e "${WHITE}  Universal WAN Engine (Tier 1-4) + Dual-Sync Matrix Reconciliation  ${NC}"
 echo -e "${CYAN}=====================================================================${NC}"
@@ -79,8 +79,6 @@ ENABLE_STEAL=0
 ENABLE_CLASSIC=0
 ENABLE_XHTTP=1
 ENABLE_HY2=0
-ENABLE_HY2_HOP=0
-ENABLE_AWG_HOP=0
 ENABLE_AWG_V3=0
 ENABLE_AGH=0
 AGH_DOMAIN=""
@@ -94,7 +92,9 @@ SSL_ENGINE_CHOICE="1"
 SSL_BASE_DIR="/etc/letsencrypt/live"
 DO_SYS_UPGRADE=0
 INSTALL_EXTRA_UTILS=0
-ENABLE_BBR_IPV6=0
+ENABLE_BBR_TUNING=1
+DISABLE_IPV6=0
+ENABLE_AUTO_UPDATE=0
 BLOCK_PING=0
 CHANGE_ROOT_PASS=0
 CREATE_USER=0
@@ -103,12 +103,16 @@ EXISTING_DB_PATH=""
 export EXISTING_DB_PATH
 
 rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx /usr/share/keyrings/nginx-archive-keyring.gpg.tmp 2>/dev/null || true
+if [ -f /etc/apt/sources.list.d/amnezia.list ] && [ ! -s /etc/apt/keyrings/amnezia.gpg ]; then
+    rm -f /etc/apt/sources.list.d/amnezia.list 2>/dev/null || true
+fi
 if [ -f /usr/share/keyrings/nginx-archive-keyring.gpg ] && [ ! -s /usr/share/keyrings/nginx-archive-keyring.gpg ]; then
     rm -f /usr/share/keyrings/nginx-archive-keyring.gpg 2>/dev/null || true
 fi
 
 mkdir -p /etc/needrestart/conf.d
-echo "\$nrconf{restart} = 'a';" > /etc/needrestart/conf.d/99-disable-auto-restart.conf 2>/dev/null || true
+printf "%s\n" "\$nrconf{restart} = 'a';" > /etc/needrestart/conf.d/99-disable-auto-restart.conf.tmp 2>/dev/null || true
+    mv -f /etc/needrestart/conf.d/99-disable-auto-restart.conf.tmp /etc/needrestart/conf.d/99-disable-auto-restart.conf 2>/dev/null || true
 
 if [ -f /etc/os-release ]; then
     # shellcheck source=/dev/null
@@ -150,6 +154,72 @@ else
 fi
 
 VIRT_TYPE=$(systemd-detect-virt 2>/dev/null || echo "none")
+
+# =============================================================
+#  ДИНАМИЧЕСКИЙ ТИРИНГ РЕСУРСОВ И МНОГОЯДЕРНАЯ ОПТИМИЗАЦИЯ
+# =============================================================
+TOTAL_RAM_MB=$(free -m 2>/dev/null | awk '/Mem:/ {print $2}' || echo "1024")
+CPU_CORES=$(nproc 2>/dev/null || echo "1")
+
+# Расчет 16-ричной битовой маски ядер для сетевого стека RPS/XPS
+if [ "$CPU_CORES" -le 64 ]; then
+    CPU_MASK=$(printf '%x' "$(( (1 << CPU_CORES) - 1 ))")
+else
+    CPU_MASK="ffffffff"
+fi
+
+# Динамический расчет квот оперативной памяти и воркеров
+if [ "$TOTAL_RAM_MB" -lt 1500 ]; then
+    # Low-Memory Profile (1 GB RAM)
+    XUI_GOMEMLIMIT="90MiB"
+    XUI_GOGC="50"
+    XUI_MEM_HIGH="110M"
+    XUI_MEM_MAX="140M"
+    AGH_GOMEMLIMIT="40MiB"
+    AGH_MEM_HIGH="55M"
+    AGH_MEM_MAX="70M"
+    FASTAPI_MEM_HIGH="90M"
+    FASTAPI_MEM_MAX="150M"
+    FASTAPI_WORKERS="1"
+elif [ "$TOTAL_RAM_MB" -lt 3500 ]; then
+    # Standard Profile (2 GB RAM)
+    XUI_GOMEMLIMIT="350MiB"
+    XUI_GOGC="80"
+    XUI_MEM_HIGH="450M"
+    XUI_MEM_MAX="600M"
+    AGH_GOMEMLIMIT="100MiB"
+    AGH_MEM_HIGH="150M"
+    AGH_MEM_MAX="200M"
+    FASTAPI_MEM_HIGH="120M"
+    FASTAPI_MEM_MAX="180M"
+    FASTAPI_WORKERS="1"
+elif [ "$TOTAL_RAM_MB" -lt 7500 ]; then
+    # High-Load Profile (4 GB RAM)
+    XUI_GOMEMLIMIT="1024MiB"
+    XUI_GOGC="100"
+    XUI_MEM_HIGH="1400M"
+    XUI_MEM_MAX="1800M"
+    AGH_GOMEMLIMIT="250MiB"
+    AGH_MEM_HIGH="350M"
+    AGH_MEM_MAX="450M"
+    FASTAPI_MEM_HIGH="150M"
+    FASTAPI_MEM_MAX="250M"
+    FASTAPI_WORKERS="1"
+else
+    # Enterprise Profile (8 GB+ RAM)
+    XUI_GOMEMLIMIT="2048MiB"
+    XUI_GOGC="100"
+    XUI_MEM_HIGH="2800M"
+    XUI_MEM_MAX="3500M"
+    AGH_GOMEMLIMIT="500MiB"
+    AGH_MEM_HIGH="700M"
+    AGH_MEM_MAX="900M"
+    FASTAPI_MEM_HIGH="180M"
+    FASTAPI_MEM_MAX="280M"
+    FASTAPI_WORKERS="1"
+fi
+
+ok "Аппаратный профиль: ${GREEN}${CPU_CORES} vCPU${NC} / ${GREEN}${TOTAL_RAM_MB} MB RAM${NC} (Xray: ${XUI_GOMEMLIMIT}, RPS-маска: 0x${CPU_MASK})"
 
 
 patch_amnezia_dkms_kernel_compat() {
@@ -460,7 +530,7 @@ benchmark_sni() {
         rtt=$(LC_ALL=C curl -s -o /dev/null -w "%{time_connect}" --connect-timeout 2 --tlsv1.3 "https://${sni}" 2>/dev/null || echo "0")
         local is_valid=0
         if [ -n "$rtt" ] && [ "$rtt" != "0" ]; then
-            is_valid=$(echo "$rtt > 0.001" | bc -l 2>/dev/null || echo "0")
+            is_valid=$(awk "BEGIN {print ($rtt > 0.001) ? 1 : 0}" 2>/dev/null || echo "0")
         fi
 
         if [ "$is_valid" = "1" ]; then
@@ -548,18 +618,22 @@ prompt_default "Выберите сетевой профиль" "$DEFAULT_GEO_PR
 
 if [ "$GEO_PROFILE" = "1" ]; then
     log "Активация сетевой стратегии для РФ (Яндекс DNS Primary)..."
-    cat << 'EOF' > /etc/resolv.conf
+    cat << 'EOF' > /etc/resolv.conf.tmp
 nameserver 77.88.8.8
 nameserver 77.88.8.1
 nameserver 8.8.8.8
 EOF
+mv -f /etc/resolv.conf.tmp /etc/resolv.conf
+chmod 0644 /etc/resolv.conf 2>/dev/null || true
 else
     log "Активация сетевой стратегии для зарубежного сервера (Cloudflare Primary)..."
-    cat << 'EOF' > /etc/resolv.conf
+    cat << 'EOF' > /etc/resolv.conf.tmp
 nameserver 1.1.1.1
 nameserver 8.8.8.8
 nameserver 9.9.9.9
 EOF
+mv -f /etc/resolv.conf.tmp /etc/resolv.conf
+chmod 0644 /etc/resolv.conf 2>/dev/null || true
 fi
 
 echo
@@ -615,10 +689,22 @@ else
     INSTALL_EXTRA_UTILS=0
 fi
 
-if prompt_yes_no "Включить TCP BBR, somaxconn, MTU probing и отключить IPv6?" "y"; then
-    ENABLE_BBR_IPV6=1
+if prompt_yes_no "Включить сетевой тюнинг ядра (TCP BBR, somaxconn, буферы, MTU probing)?" "y"; then
+    ENABLE_BBR_TUNING=1
 else
-    ENABLE_BBR_IPV6=0
+    ENABLE_BBR_TUNING=0
+fi
+
+if prompt_yes_no "Отключить стек IPv6 в ядре и фаерволе?" "n"; then
+    DISABLE_IPV6=1
+else
+    DISABLE_IPV6=0
+fi
+
+if prompt_yes_no "Включить еженедельное автообновление ОС/ядра и пересборку AWG (с сохранением клиентов)?" "y"; then
+    ENABLE_AUTO_UPDATE=1
+else
+    ENABLE_AUTO_UPDATE=0
 fi
 
 if prompt_yes_no "Блокировать входящие ICMP (Ping) запросы в фаерволе?" "n"; then
@@ -863,6 +949,7 @@ if [ "$ENABLE_CLASSIC" -eq 1 ]; then
     done
 fi
 
+
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 5: Дополнительные SSL-домены ---${NC}"
 while true; do
@@ -885,26 +972,12 @@ while true; do
 done
 
 echo
-echo -e "${WHITE}${BOLD}--- ШАГ 6: Скоростные UDP VPN туннели и портовые пулы ---${NC}"
+echo -e "${WHITE}${BOLD}--- ШАГ 6: Выделенные порты UDP VPN туннелей ---${NC}"
 if prompt_yes_no "Установить Hysteria 2 (UDP)?" "y"; then
     ENABLE_HY2=1
+    prompt_port "  Внешний UDP-порт для Hysteria 2" "443" HY2_PORT
 else
     ENABLE_HY2=0
-fi
-
-if [ "$ENABLE_HY2" -eq 1 ]; then
-    prompt_port "  Внешний UDP-порт для Hysteria 2" "443" HY2_PORT
-    echo -e "  ${WHITE}Режим работы портов Hysteria 2:${NC}"
-    echo -e "    1) ${GREEN}Одиночный порт :${HY2_PORT}/udp${NC}"
-    echo -e "    2) ${GREEN}Скоростной пул Hopping :${HY2_PORT} + диапазон 20000-35000/udp${NC}"
-    prompt_default "  Выберите вариант (1 или 2)" "2" HY2_MODE_CHOICE
-    if [ "$HY2_MODE_CHOICE" = "2" ]; then
-        ENABLE_HY2_HOP=1
-        ok "  Hysteria 2 Hopping пул 20000:35000 активирован"
-    else
-        ENABLE_HY2_HOP=0
-        ok "  Выбран одиночный порт ${HY2_PORT}/udp"
-    fi
 fi
 
 if [ "$VIRT_TYPE" = "lxc" ] || [ "$VIRT_TYPE" = "openvz" ] || [ "$VIRT_TYPE" = "docker" ]; then
@@ -913,18 +986,7 @@ if [ "$VIRT_TYPE" = "lxc" ] || [ "$VIRT_TYPE" = "openvz" ] || [ "$VIRT_TYPE" = "
 else
     if prompt_yes_no "Установить НА ТЕХНОЛОГИЯХ ЯДРА нативный сервер AmneziaWG (Bare-Metal awg0)?" "y"; then
         ENABLE_NATIVE_AWG=1
-        prompt_port "  Базовый UDP-порт для нативного сервера AmneziaWG awg0" "8443" NATIVE_AWG_PORT
-        echo -e "  ${WHITE}Режим работы портов AmneziaWG (awg0):${NC}"
-        echo -e "    1) ${GREEN}Одиночный порт :${NATIVE_AWG_PORT}/udp${NC}"
-        echo -e "    2) ${GREEN}Скоростной пул Hopping :${NATIVE_AWG_PORT} + диапазон 35001-49999/udp [Рекомендуется]${NC}"
-        prompt_default "  Выберите вариант (1 или 2)" "2" AWG_MODE_CHOICE
-        if [ "$AWG_MODE_CHOICE" = "2" ]; then
-            ENABLE_AWG_HOP=1
-            ok "  Скоростной пул AmneziaWG 35001-49999/udp привязан к порту :${NATIVE_AWG_PORT}/udp"
-        else
-            ENABLE_AWG_HOP=0
-            ok "  Выбран одиночный порт :${NATIVE_AWG_PORT}/udp"
-        fi
+        prompt_port "  Выделенный UDP-порт для нативного сервера AmneziaWG awg0" "8443" NATIVE_AWG_PORT
     else
         ENABLE_NATIVE_AWG=0
     fi
@@ -932,14 +994,10 @@ fi
 
 if prompt_yes_no "Установить AmneziaWG v3.2 в 3X-UI (UDP)?" "y"; then
     ENABLE_AWG_V3=1
+    prompt_port "  Выделенный UDP-порт для AmneziaWG v3.2 (3X-UI)" "10443" AWG_V3_PORT
 else
     ENABLE_AWG_V3=0
 fi
-if [ "$ENABLE_AWG_V3" -eq 1 ]; then
-    prompt_port "  Выделенный UDP-порт для AmneziaWG v3.2 (3X-UI)" "10443" AWG_V3_PORT
-fi
-
-
 
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 7: Приватный DNS AdGuard Home (DoH) ---${NC}"
@@ -1011,10 +1069,9 @@ fi
 log "Установка системного набора утилит..."
 wait_for_apt_lock
 CORE_PKGS=(
-    curl wget bash sudo systemd openssl gawk lsb-release gnupg bind9-dnsutils
-    socat cron ufw iptables iproute2 tar apache2-utils fail2ban python3 python3-systemd
-    python3-bcrypt ca-certificates build-essential jq tmux net-tools bc xxd unzip sqlite3
-    bsdextrautils dirmngr psmisc qrencode libmnl-dev make gcc
+    curl iproute2 bind9-dnsutils ca-certificates ufw iptables systemd
+    sudo bash psmisc openssl gnupg sqlite3 jq unzip gawk tar
+    python3 python3-bcrypt qrencode
 )
 apt-get install -y "${CORE_PKGS[@]}" -q || true
 
@@ -1026,20 +1083,23 @@ fi
 ok "Системные утилиты установлены."
 
 mkdir -p /etc/systemd/journald.conf.d/
-cat << 'EOF' > /etc/systemd/journald.conf.d/00-volatile.conf
+cat << 'EOF' > /etc/systemd/journald.conf.d/00-volatile.conf.tmp
 [Journal]
 Storage=volatile
-RuntimeMaxUse=64M
+RuntimeMaxUse=16M
+RuntimeMaxFileSize=4M
 MaxRetentionSec=1day
 EOF
+mv -f /etc/systemd/journald.conf.d/00-volatile.conf.tmp /etc/systemd/journald.conf.d/00-volatile.conf
+chmod 0644 /etc/systemd/journald.conf.d/00-volatile.conf 2>/dev/null || true
 systemctl restart systemd-journald 2>/dev/null || true
 ok "Политика Zero-Log активирована в RAM (systemd-journald Storage=volatile)."
 
-if [ "${ENABLE_BBR_IPV6:-0}" -eq 1 ]; then
-    log "Настройка TCP BBR, fq, somaxconn, Path MTU probing, loose rp_filter и отключение IPv6..."
+if [ "${ENABLE_BBR_TUNING:-0}" -eq 1 ]; then
+    log "Настройка TCP BBR, fq, somaxconn, Path MTU probing и loose rp_filter..."
     modprobe tcp_bbr 2>/dev/null || true
     mkdir -p /etc/sysctl.d/
-    cat << EOF > /etc/sysctl.d/99-hardened-network.conf
+    cat << EOF > /etc/sysctl.d/99-hardened-network.conf.tmp
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 net.ipv4.ip_forward = 1
@@ -1048,9 +1108,6 @@ net.ipv4.tcp_syncookies = 1
 net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
 net.ipv4.conf.${DEFAULT_IF}.rp_filter = 2
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
 net.ipv4.ip_local_port_range = 1024 65535
 net.core.netdev_max_backlog = 100000
 net.core.somaxconn = 65535
@@ -1062,34 +1119,84 @@ net.ipv4.tcp_keepalive_probes = 5
 net.ipv4.tcp_max_tw_buckets = 524288
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_slow_start_after_idle = 0
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
-net.core.rmem_default = 262144
-net.core.wmem_default = 262144
-net.ipv4.tcp_rmem = 4096 87380 16777216
-net.ipv4.tcp_wmem = 4096 65536 16777216
-net.ipv4.udp_rmem_min = 16384
-net.ipv4.udp_wmem_min = 16384
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+net.core.rmem_default = 131072
+net.core.wmem_default = 131072
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+net.ipv4.udp_rmem_min = 8192
+net.ipv4.udp_wmem_min = 8192
 net.ipv4.udp_mem = 65536 131072 262144
 vm.swappiness = 10
-fs.file-max = 2097152
+fs.file-max = 524288
 net.ipv4.tcp_fastopen = 3
-net.netfilter.nf_conntrack_max = 1048576
+net.netfilter.nf_conntrack_max = 524288
 net.netfilter.nf_conntrack_udp_timeout = 30
 net.netfilter.nf_conntrack_udp_timeout_stream = 120
 net.ipv4.tcp_notsent_lowat = 16384
 net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_mtu_probe_floor = 1024
 net.ipv4.tcp_orphan_retries = 2
-fs.inotify.max_user_watches = 524288
-fs.inotify.max_user_instances = 8192
-vm.dirty_ratio = 6
-vm.dirty_background_ratio = 3
+fs.inotify.max_user_watches = 131072
+fs.inotify.max_user_instances = 2048
+vm.dirty_ratio = 20
+vm.dirty_background_ratio = 10
+vm.vfs_cache_pressure = 100
 EOF
+mv -f /etc/sysctl.d/99-hardened-network.conf.tmp /etc/sysctl.d/99-hardened-network.conf
+chmod 0644 /etc/sysctl.d/99-hardened-network.conf 2>/dev/null || true
+    if [ "${DISABLE_IPV6:-0}" -eq 1 ]; then
+        log "Отключение стека IPv6 в sysctl (/etc/sysctl.d/99-hardened-network.conf)..."
+        cat << 'EOF_IPV6' >> /etc/sysctl.d/99-hardened-network.conf
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+EOF_IPV6
+    else
+        cat << 'EOF_IPV6' >> /etc/sysctl.d/99-hardened-network.conf
+net.ipv6.conf.all.disable_ipv6 = 0
+net.ipv6.conf.default.disable_ipv6 = 0
+net.ipv6.conf.lo.disable_ipv6 = 0
+EOF_IPV6
+    fi
     sysctl --system >/dev/null 2>&1 || true
+    log "Настройка сквозной балансировки прерываний сетевой карты (RPS/XPS, маска: 0x$CPU_MASK)..."
+    for f in /sys/class/net/"$DEFAULT_IF"/queues/rx-*/rps_cpus /sys/class/net/"$DEFAULT_IF"/queues/tx-*/xps_cpus; do
+        if [ -e "$f" ]; then echo "$CPU_MASK" > "$f" 2>/dev/null || true; fi
+    done
+
+    cat << EOF > /etc/systemd/system/network-rps.service.tmp
+[Unit]
+Description=Network RPS/XPS Multi-Core Scaling on $DEFAULT_IF
+After=network.target
+
+[Service]
+Type=simple
+User=root
+MemoryHigh=$FASTAPI_MEM_HIGH
+MemoryMax=$FASTAPI_MEM_MAX
+Environment="ENABLE_AGH=${ENABLE_AGH:-0}"
+Environment="GEO_PROFILE=$GEO_PROFILE"
+Environment="PRIMARY_DOMAIN=$PRIMARY_DOMAIN"
+Environment="PANEL_PATH=$PANEL_PATH"
+Environment="AGH_DOMAIN=${AGH_DOMAIN:-}"
+Environment="NATIVE_AWG_PORT=$NATIVE_AWG_PORT"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+Environment="PYTHONPATH=/usr/local/bin"
+ExecStart=/opt/myprivatecloud/venv/bin/uvicorn myprivatecloud_core:app --app-dir /usr/local/bin --host 127.0.0.1 --port 20443 --workers $FASTAPI_WORKERS
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    mv -f /etc/systemd/system/network-rps.service.tmp /etc/systemd/system/network-rps.service
+    chmod 0644 /etc/systemd/system/network-rps.service 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable --now network-rps.service >/dev/null 2>&1 || true
 fi
 
-cat << 'EOF' > /etc/security/limits.d/99-proxy-limits.conf
+cat << 'EOF' > /etc/security/limits.d/99-proxy-limits.conf.tmp
 * soft nofile 1048576
 * hard nofile 1048576
 root soft nofile 1048576
@@ -1099,6 +1206,8 @@ www-data hard nofile 1048576
 nginx soft nofile 1048576
 nginx hard nofile 1048576
 EOF
+mv -f /etc/security/limits.d/99-proxy-limits.conf.tmp /etc/security/limits.d/99-proxy-limits.conf
+chmod 0644 /etc/security/limits.d/99-proxy-limits.conf 2>/dev/null || true
 ok "Ядро и лимиты успешно оптимизированы."
 
 log "Настройка параметров безопасности SSH..."
@@ -1161,11 +1270,13 @@ systemctl disable ssh.socket 2>/dev/null || true
 systemctl enable "$SSH_SERVICE.service" 2>/dev/null || true
 
 mkdir -p /etc/ssh/sshd_config.d/
-cat << EOF > /etc/ssh/sshd_config.d/99-hardening.conf
+cat << EOF > /etc/ssh/sshd_config.d/99-hardening.conf.tmp
 Port $TARGET_SSH_PORT
 AddressFamily inet
 PubkeyAuthentication yes
 EOF
+mv -f /etc/ssh/sshd_config.d/99-hardening.conf.tmp /etc/ssh/sshd_config.d/99-hardening.conf
+chmod 0644 /etc/ssh/sshd_config.d/99-hardening.conf 2>/dev/null || true
 
 if [ "$KEYS_APPLIED" -eq 1 ]; then
     if prompt_yes_no "Отключить вход по паролю SSH?" "n"; then
@@ -1187,7 +1298,9 @@ else
     systemctl restart "$SSH_SERVICE.service" || true
 fi
 
-cat << EOF > /etc/fail2ban/jail.local
+if command -v fail2ban-client >/dev/null 2>&1; then
+    mkdir -p /etc/fail2ban
+    cat << EOF > /etc/fail2ban/jail.local.tmp
 [sshd]
 enabled = true
 port = $TARGET_SSH_PORT
@@ -1196,9 +1309,12 @@ findtime = 10m
 bantime = 1h
 backend = systemd
 EOF
-systemctl enable fail2ban >/dev/null 2>&1 || true
-systemctl restart fail2ban || true
-ok "Служба Fail2ban активна."
+mv -f /etc/fail2ban/jail.local.tmp /etc/fail2ban/jail.local
+chmod 0644 /etc/fail2ban/jail.local 2>/dev/null || true
+    systemctl enable fail2ban >/dev/null 2>&1 || true
+    systemctl restart fail2ban 2>/dev/null || true
+    ok "Служба Fail2ban активна."
+fi
 
 # =============================================================
 #  ФАЗА 2: ВНЕШНИЙ ШЛЮЗ NGINX MAINLINE, SSL И ADGUARD HOME DOH
@@ -1328,11 +1444,13 @@ if [ "$NGINX_KEY_OK" -eq 1 ] && [ -s "$NGINX_KEYRING" ]; then
     echo "deb [signed-by=$NGINX_KEYRING] https://nginx.org/packages/mainline/$OS_ID $NGINX_REPO_CODENAME nginx" \
         | tee /etc/apt/sources.list.d/nginx.list >/dev/null
 
-    cat << EOF > /etc/apt/preferences.d/99nginx
+    cat << EOF > /etc/apt/preferences.d/99nginx.tmp
 Package: nginx*
 Pin: origin nginx.org
 Pin-Priority: 900
 EOF
+mv -f /etc/apt/preferences.d/99nginx.tmp /etc/apt/preferences.d/99nginx
+chmod 0644 /etc/apt/preferences.d/99nginx 2>/dev/null || true
 
     wait_for_apt_lock
     if apt-get update -q -o Dir::Etc::sourcelist="sources.list.d/nginx.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1; then
@@ -1347,7 +1465,7 @@ fi
 # 5. Установка и предотвращение конфликта версий DPKG (held broken packages)
 wait_for_apt_lock
 if [ "$USE_OFFICIAL_NGINX_REPO" -eq 1 ]; then
-    rm -f /etc/nginx/modules-enabled/*mod-stream*.conf 2>/dev/null || true
+    rm -f /etc/nginx/modules-enabled/*stream*.conf 2>/dev/null || true
     apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
     ok "Nginx Mainline успешно актуализирован/установлен."
 else
@@ -1364,7 +1482,7 @@ else
 fi
 
 # 6. Очистка устаревших конфигураций динамических модулей при монолитном stream
-if nginx -V 2>&1 | grep -q -- '--with-stream'; then
+if nginx -V 2>&1 | grep -qE -- '--with-stream($|[^-=])'; then
     rm -f /etc/nginx/modules-enabled/*stream*.conf 2>/dev/null || true
 fi
 
@@ -1386,7 +1504,7 @@ chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT" /var/cache/nginx /var/www/mirror /
 
 if [ ! -s /etc/nginx/mime.types ] || ! grep -q "text/css" /etc/nginx/mime.types 2>/dev/null; then
     log "Синтез канонической таблицы MIME-типов (/etc/nginx/mime.types)..."
-    cat << 'EOF_MIME' > /etc/nginx/mime.types
+    cat << 'EOF_MIME' > /etc/nginx/mime.types.tmp
 types {
     text/html                             html htm shtml;
     text/css                              css;
@@ -1418,12 +1536,15 @@ types {
     application/octet-stream              bin exe dll deb dmg iso img msi msp msm;
 }
 EOF_MIME
+mv -f /etc/nginx/mime.types.tmp /etc/nginx/mime.types
+chmod 0644 /etc/nginx/mime.types 2>/dev/null || true
     chmod 644 /etc/nginx/mime.types
 fi
 
-cat << EOF > /etc/nginx/nginx.conf
+cat << EOF > /etc/nginx/nginx.conf.tmp
 user $NGINX_USER;
 worker_processes auto;
+worker_cpu_affinity auto;
 pid /run/nginx.pid;
 error_log /var/log/nginx/error.log warn;
 
@@ -1439,8 +1560,10 @@ http {
     include /etc/nginx/conf.d/*.conf;
 }
 EOF
+mv -f /etc/nginx/nginx.conf.tmp /etc/nginx/nginx.conf
+chmod 0644 /etc/nginx/nginx.conf 2>/dev/null || true
 
-cat << 'EOF' > /etc/nginx/conf.d/00-acme.conf
+cat << EOF > /etc/nginx/conf.d/00-acme.conf.tmp
 server {
     listen 80 default_server;
     server_name _;
@@ -1449,7 +1572,7 @@ server {
 
     location ^~ /.well-known/acme-challenge/ {
         default_type "text/plain";
-        try_files $uri =404;
+        try_files \$uri =404;
     }
 
     location / {
@@ -1457,6 +1580,8 @@ server {
     }
 }
 EOF
+mv -f /etc/nginx/conf.d/00-acme.conf.tmp /etc/nginx/conf.d/00-acme.conf
+chmod 0644 /etc/nginx/conf.d/00-acme.conf 2>/dev/null || true
 
 # Предотвращение блокировок запуска служб на облачных шаблонах Ubuntu
 if [ -f /usr/sbin/policy-rc.d ]; then
@@ -1512,17 +1637,21 @@ if [ "$SSL_ENGINE_CHOICE" = "1" ]; then
 
     mkdir -p /etc/letsencrypt
     if [ -n "$LE_EMAIL" ]; then
-        cat << EOF > /etc/letsencrypt/cli.ini
+        cat << EOF > /etc/letsencrypt/cli.ini.tmp
 email = $LE_EMAIL
 agree-tos = true
 non-interactive = true
 EOF
+mv -f /etc/letsencrypt/cli.ini.tmp /etc/letsencrypt/cli.ini
+chmod 0644 /etc/letsencrypt/cli.ini 2>/dev/null || true
     else
-        cat << EOF > /etc/letsencrypt/cli.ini
+        cat << EOF > /etc/letsencrypt/cli.ini.tmp
 register-unsafely-without-email = true
 agree-tos = true
 non-interactive = true
 EOF
+mv -f /etc/letsencrypt/cli.ini.tmp /etc/letsencrypt/cli.ini
+chmod 0644 /etc/letsencrypt/cli.ini 2>/dev/null || true
     fi
 
     for dom in "${ALL_DOMAINS[@]}"; do
@@ -1559,13 +1688,15 @@ EOF
     done
 
     mkdir -p /etc/letsencrypt/renewal-hooks/deploy/
-    cat << 'EOF' > /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
+    cat << 'EOF' > /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh.tmp
 #!/bin/bash
 chmod 755 /etc/letsencrypt /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
 chmod 644 /etc/letsencrypt/live/*/* 2>/dev/null || true
 find /etc/letsencrypt/live/ -name "privkey.pem" -exec chmod 600 {} + 2>/dev/null || true
 systemctl reload nginx
 EOF
+mv -f /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh.tmp /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
+chmod 0644 /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh 2>/dev/null || true
     chmod +x /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
 else
     log "Выпуск SSL через acme.sh..."
@@ -1600,23 +1731,30 @@ if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
     log "Установка AdGuard Home (DoH + Split-DNS)..."
     if systemctl is-active --quiet systemd-resolved 2>/dev/null || systemctl list-unit-files systemd-resolved.service 2>/dev/null | grep -q "systemd-resolved"; then
         mkdir -p /etc/systemd/resolved.conf.d
-        cat << 'EOF' > /etc/systemd/resolved.conf.d/adguard-disable-stub.conf
+        cat << 'EOF' > /etc/systemd/resolved.conf.d/adguard-disable-stub.conf.tmp
 [Resolve]
 DNSStubListener=no
 EOF
+mv -f /etc/systemd/resolved.conf.d/adguard-disable-stub.conf.tmp /etc/systemd/resolved.conf.d/adguard-disable-stub.conf
+chmod 0644 /etc/systemd/resolved.conf.d/adguard-disable-stub.conf 2>/dev/null || true
         systemctl restart systemd-resolved 2>/dev/null || true
+        sleep 1
     fi
 
     if [ "$GEO_PROFILE" = "1" ]; then
-        cat << 'EOF' > /etc/resolv.conf
+        cat << 'EOF' > /etc/resolv.conf.tmp
 nameserver 77.88.8.8
 nameserver 77.88.8.1
 EOF
+mv -f /etc/resolv.conf.tmp /etc/resolv.conf
+chmod 0644 /etc/resolv.conf 2>/dev/null || true
     else
-        cat << 'EOF' > /etc/resolv.conf
+        cat << 'EOF' > /etc/resolv.conf.tmp
 nameserver 1.1.1.1
 nameserver 8.8.8.8
 EOF
+mv -f /etc/resolv.conf.tmp /etc/resolv.conf
+chmod 0644 /etc/resolv.conf 2>/dev/null || true
     fi
 
     ARCH=$(uname -m)
@@ -1651,7 +1789,7 @@ EOF
         tar -zxvf "$AGH_TAR" -C /opt/ >/dev/null
         rm -f "$AGH_TAR"
 
-        AGH_PASS_HASH=$(htpasswd -b -n -B -C 10 "" "$AGH_PASS" | tr -d '\n' | cut -d: -f2)
+        AGH_PASS_HASH=$(AGH_PASS="$AGH_PASS" python3 -c "import bcrypt, os; print(bcrypt.hashpw(os.environ['AGH_PASS'].encode('utf-8'), bcrypt.gensalt(10)).decode('utf-8'))")
 
     if [ "$GEO_PROFILE" = "1" ]; then
         AGH_UPSTREAMS="    - \"[/ru/kz/by/su/xn--p1ai/]https://77.88.8.8:443/dns-query\"
@@ -1668,7 +1806,7 @@ EOF
     fi
 
     if [ "$INSTALL_MODE" = "1" ] || [ ! -f /opt/AdGuardHome/AdGuardHome.yaml ]; then
-        cat << EOF > /opt/AdGuardHome/AdGuardHome.yaml
+        cat << EOF > /opt/AdGuardHome/AdGuardHome.yaml.tmp
 http:
   address: 127.0.0.1:3000
   doh:
@@ -1676,16 +1814,31 @@ http:
 users:
   - name: ${AGH_USER}
     password: "${AGH_PASS_HASH}"
+querylog:
+  enabled: false
+  file_enabled: false
+  interval: 2160h
+  size_memory: 0
+stats:
+  enabled: false
+  interval: 2160h
 dns:
   bind_hosts:
     - 127.0.0.1
     - 10.9.0.1
   port: 53
+  bootstrap_dns:
+    - 9.9.9.11
+    - 8.8.4.4
+    - 1.0.0.1
+  ratelimit: 0
+  cache_size: 65536
   trusted_proxies:
     - 127.0.0.1
     - 10.8.1.0/24
     - 10.8.2.0/24
     - 10.8.3.0/24
+    - 10.9.0.0/24
   upstream_dns:
 ${AGH_UPSTREAMS}
 clients:
@@ -1703,6 +1856,7 @@ access:
     - "10.8.1.0/24"
     - "10.8.2.0/24"
     - "10.8.3.0/24"
+    - "10.9.0.0/24"
     - "127.0.0.1"
   disallowed_clients: []
   blocked_hosts: []
@@ -1711,10 +1865,23 @@ tls:
   allow_unencrypted_doh: true
 schema_version: 28
 EOF
+mv -f /opt/AdGuardHome/AdGuardHome.yaml.tmp /opt/AdGuardHome/AdGuardHome.yaml
+chmod 0644 /opt/AdGuardHome/AdGuardHome.yaml 2>/dev/null || true
     else
         ok "Конфигурация AdGuard Home сохранена без перезаписи."
     fi
 
+    mkdir -p /etc/systemd/system/AdGuardHome.service.d/
+    cat << EOF > /etc/systemd/system/AdGuardHome.service.d/10-memory.conf.tmp
+[Service]
+Environment="GOMEMLIMIT=$AGH_GOMEMLIMIT"
+Environment="GODEBUG=madvdontneed=1"
+MemoryHigh=$AGH_MEM_HIGH
+MemoryMax=$AGH_MEM_MAX
+EOF
+mv -f /etc/systemd/system/AdGuardHome.service.d/10-memory.conf.tmp /etc/systemd/system/AdGuardHome.service.d/10-memory.conf
+chmod 0644 /etc/systemd/system/AdGuardHome.service.d/10-memory.conf 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
     /opt/AdGuardHome/AdGuardHome -s install >/dev/null 2>&1 || true
     systemctl restart AdGuardHome || true
     ok "AdGuard Home DoH активен на 127.0.0.1:53 и 10.9.0.1:53."
@@ -1722,11 +1889,11 @@ EOF
 fi
 
 # =============================================================
-#  ВЕБ-МАСКИРОВКА (My Private Cloud Decoy Shield v3.14 - CSP Compliant)
+#  ВЕБ-МАСКИРОВКА (My Private Cloud Decoy Shield v3.16 - CSP Compliant)
 # =============================================================
-log "Генерация веб-маскировки (My Private Cloud Decoy Shield v3.14)..."
+log "Генерация веб-маскировки (My Private Cloud Decoy Shield v3.16)..."
 
-cat << 'EOF' > /var/www/html/assets/img/favicon.svg
+cat << 'EOF' > /var/www/html/assets/img/favicon.svg.tmp
 <svg viewBox="0 0 100 100" width="100" height="100" xmlns="http://www.w3.org/2000/svg">
     <clipPath id="circleMask"><circle cx="50" cy="50" r="48"/></clipPath>
     <g clip-path="url(#circleMask)">
@@ -1751,19 +1918,23 @@ cat << 'EOF' > /var/www/html/assets/img/favicon.svg
     <circle cx="50" cy="50" r="48" fill="none" stroke="#000000" stroke-width="5"/>
 </svg>
 EOF
+mv -f /var/www/html/assets/img/favicon.svg.tmp /var/www/html/assets/img/favicon.svg
+chmod 0644 /var/www/html/assets/img/favicon.svg 2>/dev/null || true
 
 ln -sf /var/www/html/assets/img/favicon.svg /var/www/html/favicon.svg
 ln -sf /var/www/html/assets/img/favicon.svg /var/www/html/favicon.ico
 
-cat << 'EOF' > /var/www/html/robots.txt
+cat << 'EOF' > /var/www/html/robots.txt.tmp
 User-agent: *
 Disallow: /api/
 Disallow: /console/
 Disallow: /telemetry/
 Allow: /
 EOF
+mv -f /var/www/html/robots.txt.tmp /var/www/html/robots.txt
+chmod 0644 /var/www/html/robots.txt 2>/dev/null || true
 
-cat << 'EOF' > /var/www/html/assets/css/myprivatecloud.css
+cat << 'EOF' > /var/www/html/assets/css/myprivatecloud.css.tmp
 :root {
     --bg: #131314;
     --surface: #1e1f20;
@@ -1944,8 +2115,10 @@ footer { margin-top: auto; width: 100%; text-align: center; padding: 24px 20px; 
     .btn { padding: 10px 24px; font-size: 14px; }
 }
 EOF
+mv -f /var/www/html/assets/css/myprivatecloud.css.tmp /var/www/html/assets/css/myprivatecloud.css
+chmod 0644 /var/www/html/assets/css/myprivatecloud.css 2>/dev/null || true
 
-cat << 'EOF' > /var/www/html/assets/js/myprivatecloud.js
+cat << 'EOF' > /var/www/html/assets/js/myprivatecloud.js.tmp
 "use strict";
 
 const I18N = {
@@ -1963,21 +2136,21 @@ const I18N = {
         btn_submit_auth: "Подключиться к кластеру",
         hub_title: "Центр управления My Private Cloud",
         hub_desc: "Единый шлюз администрирования сетевых сервисов",
-        hub_xui_title: "Консоль маршрутизации трафика",
-        hub_xui_desc: "L7 Stream Ingress, Quantum-Resistant TLS & Telemetry Multiplexing",
-        hub_awg_title: "Контроллер оверлейной сети",
-        hub_awg_desc: "Интерфейс ядра Linux awg0 (MTU 1360) • Диспетчер клиентов",
-        hub_agh_title: "Шлюз приватного DNS",
-        hub_agh_desc: "Рекурсивный DNS-over-HTTPS с защитой от аналитики и слежки",
-        awg_syncing: "Синхронизация с ядром awg0...",
+        hub_xui_title: "Консоль балансировки потоков",
+        hub_xui_desc: "L7 Stream Ingress, Post-Quantum TLS & Edge Multiplexing",
+        hub_awg_title: "Контроллер вычислительной сети (Compute Fabric)",
+        hub_awg_desc: "Интерфейс распределенной виртуальной шины • Диспетчер узлов",
+        hub_agh_title: "Шлюз защищенного каталога имен",
+        hub_agh_desc: "Рекурсивный сервис разрешения имен с криптографической защитой целостности",
+        awg_syncing: "Синхронизация с таблицей сетевых узлов...",
         awg_back_hub: "← Назад в Hub",
-        awg_new_client: "+ Новый клиент",
-        awg_meta: "Интерфейс: <strong class=\"text-success\">awg0 (Kernel Overlay)</strong> | Базовый порт: <strong>8443</strong> | Пул: <strong>35001-49999</strong> | MTU: <strong>1360</strong>",
-        th_client: "Клиент",
+        awg_new_client: "+ Новый узел",
+        awg_meta: "Подсистема: <strong class=\"text-success\">Compute Node Mesh (Fabric 0)</strong> | Порт шлюза: <strong>8443</strong> | MTU: <strong>1360</strong>",
+        th_client: "Узел / Клиент",
         th_ip: "IP-адрес",
         th_traffic: "Трафик",
         th_actions: "Действия",
-        peers_empty: "Нет активных пиров в таблице ядра",
+        peers_empty: "Нет активных узлов в таблице распределения",
         modal_spec_title: "Спецификация",
         modal_spec_desc: "Технический аудит подсистемы",
         btn_close: "Закрыть",
@@ -1985,13 +2158,13 @@ const I18N = {
         btn_create: "Создать",
         btn_delete: "Отозвать",
         qr_modal_title: "Конфигурация подключения",
-        qr_modal_desc: "Сканируйте QR-код в мобильном клиенте",
-        qr_modal_hint: "Сканируйте в приложении",
-        add_peer_title: "Новый сетевой профиль",
-        add_peer_desc: "Создание пира в таблице маршрутизации ядра",
+        qr_modal_desc: "Считайте токен узла доверенным клиентом",
+        qr_modal_hint: "Считайте в мобильном приложении",
+        add_peer_title: "Новый профиль узла",
+        add_peer_desc: "Регистрация узла в таблице распределения ядра",
         add_peer_name_label: "Имя профиля (латиница)",
         del_peer_title: "Подтверждение отзыва",
-        del_peer_desc: "Отозвать ключ и отключить узел от ядра?",
+        del_peer_desc: "Отозвать ключ и отключить узел от защищенной шины?",
         toast_auth_ok_title: "Авторизация успешна",
         toast_auth_ok_desc: "Сессия подтверждена. Добро пожаловать в центр управления.",
         toast_err_conn: "Ошибка защищенного соединения с контроллером кластера.",
@@ -2012,21 +2185,21 @@ const I18N = {
         btn_submit_auth: "Connect to Cluster",
         hub_title: "My Private Cloud Control Hub",
         hub_desc: "Unified network module administration gateway",
-        hub_xui_title: "Traffic Routing Console",
-        hub_xui_desc: "L7 Stream Ingress, Quantum-Resistant TLS & Telemetry Multiplexing",
-        hub_awg_title: "Overlay Network Controller",
-        hub_awg_desc: "High-Throughput Kernel Interface (MTU 1360) • Client Dispatcher",
-        hub_agh_title: "Private Encrypted DNS Gateway",
-        hub_agh_desc: "Private Encrypted Recursive DNS-over-HTTPS Resolution Engine",
-        awg_syncing: "Synchronizing with kernel awg0...",
+        hub_xui_title: "Stream Balancing Console",
+        hub_xui_desc: "L7 Stream Ingress, Post-Quantum TLS & Edge Multiplexing",
+        hub_awg_title: "Distributed Compute Mesh Controller",
+        hub_awg_desc: "High-Throughput Kernel Interface (MTU 1360) • Node Dispatcher",
+        hub_agh_title: "Secure Directory Resolution Gateway",
+        hub_agh_desc: "Encrypted Recursive Name Resolution Engine with Integrity Verification",
+        awg_syncing: "Synchronizing network node table...",
         awg_back_hub: "← Back to Hub",
-        awg_new_client: "+ New Client",
-        awg_meta: "Interface: <strong class=\"text-success\">awg0 (Kernel Overlay)</strong> | Base Port: <strong>8443</strong> | Pool: <strong>35001-49999</strong> | MTU: <strong>1360</strong>",
-        th_client: "Client",
+        awg_new_client: "+ New Node",
+        awg_meta: "Subsystem: <strong class=\"text-success\">Compute Node Mesh (Fabric 0)</strong> | Gateway Port: <strong>8443</strong> | MTU: <strong>1360</strong>",
+        th_client: "Node / Client",
         th_ip: "IP Address",
         th_traffic: "Traffic",
         th_actions: "Actions",
-        peers_empty: "No active peers in kernel table",
+        peers_empty: "No active nodes in allocation table",
         modal_spec_title: "Specification",
         modal_spec_desc: "Subsystem technical audit",
         btn_close: "Close",
@@ -2034,13 +2207,13 @@ const I18N = {
         btn_create: "Create",
         btn_delete: "Revoke",
         qr_modal_title: "Connection Profile",
-        qr_modal_desc: "Scan QR code in your mobile client",
-        qr_modal_hint: "Scan in application",
-        add_peer_title: "New Network Profile",
-        add_peer_desc: "Generate peer in kernel routing table",
+        qr_modal_desc: "Scan configuration token in your client",
+        qr_modal_hint: "Scan in trusted application",
+        add_peer_title: "New Node Profile",
+        add_peer_desc: "Register node in kernel allocation table",
         add_peer_name_label: "Profile Name (Latin)",
         del_peer_title: "Revoke Confirmation",
-        del_peer_desc: "Revoke cryptographic key and disconnect peer?",
+        del_peer_desc: "Revoke cryptographic key and disconnect node?",
         toast_auth_ok_title: "Authorization Successful",
         toast_auth_ok_desc: "Session verified. Welcome to Infrastructure Control Hub.",
         toast_err_conn: "Secure connection error to cluster controller.",
@@ -2061,21 +2234,21 @@ const I18N = {
         btn_submit_auth: "Mit Cluster verbinden",
         hub_title: "My Private Cloud Steuerzentrale",
         hub_desc: "Zentrales Administrations-Gateway für Netzwerkdienste",
-        hub_xui_title: "Traffic-Routing-Konsole",
-        hub_xui_desc: "L7-Stream-Ingress, quantenresistentes TLS & Telemetrie-Multiplexing",
-        hub_awg_title: "Overlay-Netzwerk-Controller",
-        hub_awg_desc: "High-Throughput Linux-Kernel-Schnittstelle (MTU 1360) • Client-Verwaltung",
-        hub_agh_title: "Privates verschlüsseltes DNS-Gateway",
-        hub_agh_desc: "Private rekursive DNS-over-HTTPS-Engine mit Tracking-Schutz",
-        awg_syncing: "Synchronisierung mit Kernel awg0...",
+        hub_xui_title: "Stream-Balancing-Konsole",
+        hub_xui_desc: "L7-Stream-Ingress, Post-Quantum-TLS & Edge-Multiplexing",
+        hub_awg_title: "Verteilter Compute-Mesh-Controller",
+        hub_awg_desc: "High-Throughput Linux-Kernel-Schnittstelle (MTU 1360) • Knoten-Verwaltung",
+        hub_agh_title: "Sicheres Verzeichnisauflösungs-Gateway",
+        hub_agh_desc: "Verschlüsselte rekursive Namensauflösungs-Engine mit Integritätsschutz",
+        awg_syncing: "Netzwerkknotentabelle wird synchronisiert...",
         awg_back_hub: "← Zurück zum Hub",
-        awg_new_client: "+ Neuer Client",
-        awg_meta: "Schnittstelle: <strong class=\"text-success\">awg0 (Kernel Overlay)</strong> | Basisport: <strong>8443</strong> | Pool: <strong>35001-49999</strong> | MTU: <strong>1360</strong>",
-        th_client: "Client",
+        awg_new_client: "+ Neuer Knoten",
+        awg_meta: "Subsystem: <strong class=\"text-success\">Compute Node Mesh (Fabric 0)</strong> | Gateway-Port: <strong>8443</strong> | MTU: <strong>1360</strong>",
+        th_client: "Knoten / Client",
         th_ip: "IP-Adresse",
         th_traffic: "Traffic",
         th_actions: "Aktionen",
-        peers_empty: "Keine aktiven Peers in der Kernel-Tabelle",
+        peers_empty: "Keine aktiven Knoten in der Zuweisungstabelle",
         modal_spec_title: "Spezifikation",
         modal_spec_desc: "Technisches Subsystem-Audit",
         btn_close: "Schließen",
@@ -2083,10 +2256,10 @@ const I18N = {
         btn_create: "Erstellen",
         btn_delete: "Widerrufen",
         qr_modal_title: "Verbindungsprofil",
-        qr_modal_desc: "QR-Code mit mobiler App scannen",
-        qr_modal_hint: "In der App scannen",
-        add_peer_title: "Neues Netzwerkprofil",
-        add_peer_desc: "Peer in der Kernel-Routingtabelle anlegen",
+        qr_modal_desc: "Scannen Sie das Token mit Ihrer App",
+        qr_modal_hint: "In vertrauenswürdiger App scannen",
+        add_peer_title: "Neues Knotenprofil",
+        add_peer_desc: "Knoten in der Kernel-Zuweisungstabelle registrieren",
         add_peer_name_label: "Profilname (Lateinisch)",
         del_peer_title: "Widerruf bestätigen",
         del_peer_desc: "Schlüssel widerrufen und Knoten trennen?",
@@ -2594,7 +2767,6 @@ window.addEventListener('DOMContentLoaded', () => {
     if (slaElem) slaElem.innerText = dynSla + "%";
     applyLanguage(activeLang);
 
-    document.getElementById("headerConsoleBtn")?.addEventListener("click", () => openAuthModal());
     document.getElementById("connectNodeBtn")?.addEventListener("click", () => openAuthModal());
     document.getElementById("netStatusBtn")?.addEventListener("click", fetchClusterStatus);
     
@@ -2619,8 +2791,10 @@ window.addEventListener('keydown', (e) => {
     }
 });
 EOF
+mv -f /var/www/html/assets/js/myprivatecloud.js.tmp /var/www/html/assets/js/myprivatecloud.js
+chmod 0644 /var/www/html/assets/js/myprivatecloud.js 2>/dev/null || true
 
-cat << 'EOF' > /var/www/html/index.html
+cat << 'EOF' > /var/www/html/index.html.tmp
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -2770,14 +2944,18 @@ cat << 'EOF' > /var/www/html/index.html
     </div>
 
     <footer>&copy; 2026 My Private Cloud</footer>
-    <script src="/assets/js/myprivatecloud.js"></script>
+    <script src="/assets/js/myprivatecloud.js?v=8443"></script>
 </body>
 </html>
 EOF
+mv -f /var/www/html/index.html.tmp /var/www/html/index.html
+chmod 0644 /var/www/html/index.html 2>/dev/null || true
 
-cat << 'EOF' > /var/www/html/404.html
+cat << 'EOF' > /var/www/html/404.html.tmp
 <!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>
 EOF
+mv -f /var/www/html/404.html.tmp /var/www/html/404.html
+chmod 0644 /var/www/html/404.html 2>/dev/null || true
 
 chmod 755 /var /var/www "$WEBROOT"
 chmod -R 755 "$WEBROOT/assets" "$WEBROOT/.well-known" 2>/dev/null || true
@@ -2829,9 +3007,10 @@ if [ -z "$SUB_PORT" ]; then SUB_PORT="55443"; fi
 if [ -z "$XHTTP_STREAM_PORT" ]; then XHTTP_STREAM_PORT="50443"; fi
 
 
-cat << EOF > /etc/nginx/nginx.conf
+cat << EOF > /etc/nginx/nginx.conf.tmp
 user $NGINX_USER;
 worker_processes auto;
+worker_cpu_affinity auto;
 pid /run/nginx.pid;
 worker_rlimit_nofile 1048576;
 error_log /var/log/nginx/error.log warn;
@@ -2856,7 +3035,7 @@ http {
     resolver 77.88.8.8 1.1.1.1 ipv6=off valid=300s;
     resolver_timeout 5s;
 
-    http2_recv_buffer_size 1m;
+    http2_recv_buffer_size 256k;
     http2_max_concurrent_streams 128;
 
     keepalive_timeout 300s;
@@ -2874,7 +3053,7 @@ http {
     upstream panel_3xui { server 127.0.0.1:$PANEL_PORT; keepalive 30; }
     upstream sub_backend { server 127.0.0.1:$SUB_PORT; keepalive 30; }
     $XHTTP_UPSTREAM_LINE
-    upstream datasphere_core_backend { server 127.0.0.1:20443; keepalive 16; }
+    upstream myprivatecloud_core_backend { server 127.0.0.1:20443; keepalive 16; }
 
     access_log off;
 
@@ -2883,7 +3062,7 @@ http {
     set_real_ip_from ::1;
     set_real_ip_from unix:;
 
-    client_max_body_size 64m;
+    client_max_body_size 32m;
     client_body_buffer_size 128k;
     large_client_header_buffers 4 16k;
     client_header_buffer_size 1k;
@@ -2945,12 +3124,12 @@ http {
         default 0;
     }
 
-    limit_req_zone \$binary_remote_addr zone=panel:10m rate=30r/s;
-    limit_req_zone \$binary_remote_addr zone=subs:1m rate=10r/s;
-    limit_req_zone \$binary_remote_addr zone=doh:10m rate=300r/s;
-    limit_req_zone \$binary_remote_addr zone=scan:1m rate=1r/s;
-    limit_req_zone \$binary_remote_addr zone=bot:1m rate=4r/s;
-    limit_conn_zone \$binary_remote_addr zone=addr:1m;
+    limit_req_zone \$binary_remote_addr zone=panel:2m rate=30r/s;
+    limit_req_zone \$binary_remote_addr zone=subs:512k rate=10r/s;
+    limit_req_zone \$binary_remote_addr zone=doh:2m rate=300r/s;
+    limit_req_zone \$binary_remote_addr zone=scan:512k rate=1r/s;
+    limit_req_zone \$binary_remote_addr zone=bot:512k rate=4r/s;
+    limit_conn_zone \$binary_remote_addr zone=addr:512k;
     limit_req_status 429;
 
     proxy_hide_header Server;
@@ -2970,6 +3149,8 @@ stream {
     include /etc/nginx/stream.d/*.conf;
 }
 EOF
+mv -f /etc/nginx/nginx.conf.tmp /etc/nginx/nginx.conf
+chmod 0644 /etc/nginx/nginx.conf 2>/dev/null || true
 
 # Синхронизация действующих REALITY-портов и доменов из существующей SQLite базы
 if [ -n "$EXISTING_DB_PATH" ] && [ -f "$EXISTING_DB_PATH" ]; then
@@ -3064,11 +3245,12 @@ for port in "${ALL_REALITY_PORTS[@]:-}"; do
     fi
 done
 
-cat << EOF > "/etc/nginx/stream.d/00-stream.conf"
+cat << EOF > "/etc/nginx/stream.d/00-stream.conf.tmp"
 map \$ssl_preread_server_name \$backend_gate {
     hostnames;
     ""                     nginx_http_backend;
-$(echo -e "$STREAM_MAP_RULES")    default                nginx_http_backend;
+$(echo -e "$STREAM_MAP_RULES")
+    default                nginx_http_backend;
 }
 
 upstream nginx_http_backend {
@@ -3084,8 +3266,10 @@ server {
     ssl_preread on;
 }
 EOF
+mv -f "/etc/nginx/stream.d/00-stream.conf.tmp" "/etc/nginx/stream.d/00-stream.conf"
+chmod 0644 "/etc/nginx/stream.d/00-stream.conf" 2>/dev/null || true
 
-cat << EOF > "/etc/nginx/conf.d/01-main.conf"
+cat << EOF > "/etc/nginx/conf.d/01-main.conf.tmp"
 server {
     listen 80 default_server;
     server_name _;
@@ -3095,6 +3279,10 @@ server {
         root $WEBROOT; 
         default_type "text/plain";
         try_files \$uri =404;
+    }
+
+    if (\$host = "$PRIMARY_DOMAIN") {
+        return 301 https://\$host\$request_uri;
     }
 
     location / { return 444; }
@@ -3123,7 +3311,7 @@ server {
     ssl_certificate ${SSL_BASE_DIR}/$PRIMARY_DOMAIN/fullchain.pem;
     ssl_certificate_key ${SSL_BASE_DIR}/$PRIMARY_DOMAIN/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
+    ssl_session_cache shared:SSL:2m;
     ssl_session_timeout 4h;
 
     add_header X-Frame-Options "DENY" always;
@@ -3202,7 +3390,7 @@ server {
         $XHTTP_NGINX_LOC_BLOCK
 
     location ^~ /api/v1/myprivatecloud/ {
-        proxy_pass http://datasphere_core_backend;
+        proxy_pass http://myprivatecloud_core_backend;
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$ak_real_ip;
@@ -3242,6 +3430,8 @@ server {
     }
 }
 EOF
+mv -f "/etc/nginx/conf.d/01-main.conf.tmp" "/etc/nginx/conf.d/01-main.conf"
+chmod 0644 "/etc/nginx/conf.d/01-main.conf" 2>/dev/null || true
 
 if [ "${ENABLE_STEAL:-0}" -eq 1 ] && [ "${#STEAL_DOMAINS[@]}" -gt 0 ]; then
     rm -f /etc/nginx/conf.d/02-steal-fallback.conf
@@ -3257,7 +3447,7 @@ server {
     ssl_certificate ${SSL_BASE_DIR}/$s_dom/fullchain.pem;
     ssl_certificate_key ${SSL_BASE_DIR}/$s_dom/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL_FALLBACK:5m;
+    ssl_session_cache shared:SSL_FALLBACK:1m;
     ssl_session_timeout 4h;
 
     add_header X-Frame-Options "DENY" always;
@@ -3266,7 +3456,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
 
     location ^~ /api/v1/myprivatecloud/ {
-        proxy_pass http://datasphere_core_backend;
+        proxy_pass http://myprivatecloud_core_backend;
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$ak_real_ip;
@@ -3310,8 +3500,27 @@ EOF
 fi
 
 if [ "${ENABLE_AGH:-0}" -eq 1 ] && [ -f "${SSL_BASE_DIR}/$AGH_DOMAIN/fullchain.pem" ]; then
-    cat << EOF > "/etc/nginx/conf.d/03-adguard.conf"
+    cat << EOF > "/etc/nginx/conf.d/03-adguard.conf.tmp"
 upstream adguard_backend { server 127.0.0.1:3000; keepalive 32; }
+
+map \$ak_real_ip \$is_trusted_vpn_client {
+    default 0;
+    ~^10\.9\.0\. 1;
+    ~^10\.8\.1\. 1;
+    ~^127\.0\.0\.1$ 1;
+}
+
+map "\$is_trusted_vpn_client:\$arg_access_key:\$cookie_agh_sso" \$agh_ui_allowed {
+    ~^1: 1;
+    "~^[01]:[a-f0-9]{20,}:" 1;
+    "~^[01]:.*:1$" 1;
+    default 0;
+}
+
+map \$arg_access_key \$agh_sso_cookie {
+    "~*^[a-f0-9]{20,}$" "agh_sso=1; Path=/; Max-Age=7200; Secure; HttpOnly; SameSite=Lax";
+    default "";
+}
 
 server {
     listen unix:/dev/shm/nginx-http.sock ssl proxy_protocol;
@@ -3322,6 +3531,7 @@ server {
     ssl_certificate ${SSL_BASE_DIR}/$AGH_DOMAIN/fullchain.pem;
     ssl_certificate_key ${SSL_BASE_DIR}/$AGH_DOMAIN/privkey.pem;
 
+    # Публичный скоростной DoH эндпоинт (открыт для клиентов и роутеров)
     location /dns-query {
         limit_req zone=doh burst=500 nodelay;
         proxy_pass http://adguard_backend;
@@ -3333,7 +3543,14 @@ server {
         proxy_buffering off;
     }
 
+    # Стелс-защита веб-интерфейса (сканеры получают 404, доступ строго через SSO Hub или VPN)
     location / {
+        if (\$agh_ui_allowed = 0) {
+            return 404;
+        }
+
+        add_header Set-Cookie \$agh_sso_cookie always;
+
         proxy_hide_header Content-Security-Policy;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'self';" always;
 
@@ -3347,6 +3564,8 @@ server {
     }
 }
 EOF
+mv -f "/etc/nginx/conf.d/03-adguard.conf.tmp" "/etc/nginx/conf.d/03-adguard.conf"
+chmod 0644 "/etc/nginx/conf.d/03-adguard.conf" 2>/dev/null || true
 fi
 
 rm -f /dev/shm/nginx-http.sock 2>/dev/null || true
@@ -3522,7 +3741,7 @@ export XHTTP_STREAM_PORT XHTTP_STREAM_PATH ENABLE_STEAL STEAL_CONFIG_DATA
 export ENABLE_CLASSIC CLASSIC_CONFIG_DATA ENABLE_HY2 HY2_PORT ENABLE_AWG_V3 AWG_V3_PORT
 export ADMIN_USER ADMIN_PASS
 export SSL_BASE_DIR VLESS_DECRYPTION VLESS_ENCRYPTION
-export STEAL_DOMAINS_STR="${STEAL_DOMAINS[*]:-}" INSTALL_MODE ENABLE_AGH GEO_PROFILE ENABLE_AWG_HOP
+export STEAL_DOMAINS_STR="${STEAL_DOMAINS[*]:-}" INSTALL_MODE ENABLE_AGH GEO_PROFILE
 
 python3 - << 'EOF_PY_ENGINE'
 # -*- coding: utf-8 -*-
@@ -3686,7 +3905,7 @@ settings_data = {
     "timeLocation": "Europe/Moscow",
     "trafficResetDay": "1",
     "sessionMaxAge": "3600",
-    "trustedProxyCIDRs": "127.0.0.1/32,10.8.1.0/24,10.9.0.0/24",
+    "trustedProxyCIDRs": ",".join(["127.0.0.1/32"] + (["10.8.1.0/24"] if os.environ.get("ENABLE_AWG_V3") == "1" else []) + (["10.9.0.0/24"] if os.environ.get("ENABLE_NATIVE_AWG") == "1" else [])),
     "realityScanCandidates": "www.cloudflare.com:443,www.microsoft.com:443,www.amazon.com:443,aws.amazon.com:443,www.samsung.com:443,www.nvidia.com:443,www.amd.com:443,www.intel.com:443,www.sony.com:443,dl.google.com:443",
     "restartXrayOnClientDisable": "true",
     "xrayOutboundTestUrl": "https://www.google.com/generate_204",
@@ -3703,19 +3922,27 @@ for k, v in settings_data.items():
     else:
         cur.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
 
-freedom_final_rules = []
-if enable_agh:
-    freedom_final_rules.append({"action": "allow", "ip": ["127.0.0.1", "10.9.0.1"], "port": "53"})
-freedom_final_rules.append({"action": "allow", "ip": ["10.8.1.0/24", "10.9.0.0/24"]})
-freedom_final_rules.append({"action": "block", "ip": ["geoip:private"]})
-freedom_final_rules.append({"action": "allow"})
+
 
 routing_rules = [
     {"inboundTag": ["api"], "outboundTag": "api", "type": "field"}
 ]
+enable_native_awg = os.environ.get("ENABLE_NATIVE_AWG") == "1"
+enable_awg_v3 = os.environ.get("ENABLE_AWG_V3") == "1"
+
+direct_dns_ips = ["127.0.0.1"]
+if enable_native_awg:
+    direct_dns_ips.append("10.9.0.1")
 if enable_agh:
-    routing_rules.append({"ip": ["127.0.0.1", "10.9.0.1"], "outboundTag": "direct", "port": "53", "ruleTag": "xui-dns-allow", "type": "field"})
-routing_rules.append({"ip": ["10.8.1.0/24", "10.9.0.0/24"], "outboundTag": "direct", "type": "field"})
+    routing_rules.append({"ip": direct_dns_ips, "outboundTag": "direct", "port": "53", "ruleTag": "xui-dns-allow", "type": "field"})
+
+awg_subnets = []
+if enable_awg_v3:
+    awg_subnets.append("10.8.1.0/24")
+if enable_native_awg:
+    awg_subnets.append("10.9.0.0/24")
+if awg_subnets:
+    routing_rules.append({"ip": awg_subnets, "outboundTag": "direct", "type": "field"})
 routing_rules.append({"ip": ["geoip:private"], "outboundTag": "blocked", "type": "field"})
 routing_rules.append({"outboundTag": "blocked", "protocol": ["bittorrent"], "type": "field"})
 
@@ -3758,7 +3985,7 @@ tpl_config = {
     "log": {"access": "none", "dnsLog": False, "error": "", "loglevel": "warning", "maskAddress": ""},
     "metrics": {"listen": "127.0.0.1:11111", "tag": "metrics_out"},
     "outbounds": [
-        {"tag": "direct", "protocol": "freedom", "settings": {"finalRules": freedom_final_rules}, "streamSettings": {"sockopt": {"domainStrategy": "ForceIPv4"}}},
+        {"tag": "direct", "protocol": "freedom", "settings": {}, "streamSettings": {"sockopt": {"domainStrategy": "ForceIPv4"}}},
         {"tag": "blocked", "protocol": "blackhole", "settings": {}}
     ],
     "policy": {"system": {"statsInboundDownlink": True, "statsInboundUplink": True, "statsOutboundDownlink": False, "statsOutboundUplink": False}, "levels": {"0": {"statsUserDownlink": True, "statsUserUplink": True}}},
@@ -3792,7 +4019,8 @@ test_sub_id = "SUB_Test"
 test_uuid = str(uuid.uuid4())
 test_password = secrets.token_hex(8)
 test_auth = test_password
-reality_hex_sid = secrets.token_hex(8)
+reality_short_ids = [secrets.token_hex(8) for _ in range(6)]
+reality_hex_sid = reality_short_ids[0]
 
 def_r_priv, def_r_pub = gen_reality_keypair()
 def_wg_s_priv, def_wg_s_pub = gen_wg_keypair()
@@ -3954,7 +4182,7 @@ if os.environ.get("ENABLE_STEAL") == "1":
             "realitySettings": {
                 "show": False, "xver": 1, "target": "127.0.0.1:9443", "dest": "127.0.0.1:9443",
                 "serverNames": doms, "privateKey": def_r_priv, "minClientVer": "1.0.0",
-                "maxClientVer": "", "maxTimediff": 0, "shortIds": [reality_hex_sid],
+                "maxClientVer": "", "maxTimediff": 0, "shortIds": reality_short_ids,
                 "mldsa65Seed": "",
                 "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": primary_steal_sni, "spiderX": "/", "mldsa65Verify": ""},
                 "spiderX": "/"
@@ -3986,7 +4214,7 @@ if os.environ.get("ENABLE_CLASSIC") == "1":
             "realitySettings": {
                 "show": False, "xver": 0, "target": f"{primary_sni}:443", "dest": f"{primary_sni}:443",
                 "serverNames": snis, "privateKey": def_r_priv, "minClientVer": "1.0.0",
-                "maxClientVer": "", "maxTimediff": 0, "shortIds": [reality_hex_sid],
+                "maxClientVer": "", "maxTimediff": 0, "shortIds": reality_short_ids,
                 "mldsa65Seed": "",
                 "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": primary_sni, "shortId": reality_hex_sid, "spiderX": "/", "mldsa65Verify": ""},
                 "spiderX": "/"
@@ -4009,7 +4237,7 @@ if os.environ.get("ENABLE_XHTTP") == "1" and xhttp_port > 0 and xhttp_path:
         "xhttpSettings": {
             "path": xhttp_path, "host": domain, "mode": "stream-one", "noSSEHeader": True,
             "xPaddingBytes": "120-1120", "xPaddingObfsMode": True, "xPaddingKey": "X-Amz-Meta-Trace",
-            "xmux": {"maxConcurrency": "0", "maxConnections": "1-3", "cMaxReuseTimes": "300-600", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000", "hKeepAlivePeriod": 600},
+            "xmux": {"maxConcurrency": "0", "maxConnections": "1-3", "cMaxReuseTimes": "150-300", "hMaxRequestTimes": "300-500", "hMaxReusableSecs": "900-1800", "hKeepAlivePeriod": 3000},
             "enableXmux": True
         },
         "security": "none",
@@ -4203,6 +4431,14 @@ active_cols = {r[1] for r in cur.fetchall()}
 def add_host_entry(gid, ib_id, remark, addr, port, sec, sni="", path="", alpn="", fp="", sort_order=0):
     if ib_id is None:
         return
+    if isinstance(alpn, list):
+        alpn = json.dumps(alpn)
+    elif isinstance(alpn, str) and alpn.strip().startswith("[") and alpn.strip().endswith("]"):
+        alpn = alpn.strip()
+    elif alpn and isinstance(alpn, str):
+        alpn = json.dumps([x.strip() for x in alpn.split(",") if x.strip()])
+    else:
+        alpn = "[]"
     col_candidates = {
         "group_id": gid, "groupId": gid,
         "inbound_id": ib_id, "inboundId": ib_id,
@@ -4242,6 +4478,22 @@ if install_mode == "1":
     if ib5_id is not None:
         add_host_entry(str(uuid.uuid4()), ib5_id, f"AmneziaWG v3.2 ({domain})", domain, int(os.environ.get("AWG_V3_PORT", 10443)), "same", sort_order=4)
 elif install_mode == "2":
+    # Синхронизация и валидация схемы ALPN под сериализацию Go/GORM
+    cur.execute("SELECT id, alpn FROM hosts")
+    for _hid, _val in cur.fetchall():
+        _new_alpn = "[]"
+        try:
+            if _val is not None and str(_val).strip():
+                _parsed = json.loads(_val)
+                if isinstance(_parsed, list):
+                    _new_alpn = json.dumps([str(x).strip() for x in _parsed if str(x).strip()])
+                else:
+                    _new_alpn = json.dumps([str(_parsed).strip()]) if str(_parsed).strip() else "[]"
+        except Exception:
+            if _val is not None and str(_val).strip():
+                _new_alpn = json.dumps([x.strip() for x in str(_val).split(",") if x.strip()])
+        cur.execute("UPDATE hosts SET alpn = ? WHERE id = ?", (_new_alpn, _hid))
+
     cur.execute("SELECT id, remark, settings, stream_settings, protocol, port FROM inbounds")
     ib_rows = cur.fetchall()
     for cur_ib_id, cur_ib_remark, ib_s_raw, ib_st_raw, ib_proto, cur_ib_port in ib_rows:
@@ -4298,11 +4550,16 @@ fi
 
 # Лимитирование потребления памяти сборщиком мусора Go (GOMEMLIMIT для 1 GB RAM)
 mkdir -p /etc/systemd/system/x-ui.service.d/
-cat << 'EOF_XUI_MEM' > /etc/systemd/system/x-ui.service.d/10-memory-limit.conf
+cat << EOF > /etc/systemd/system/x-ui.service.d/10-memory-limit.conf.tmp
 [Service]
-Environment="GOMEMLIMIT=160MiB"
-Environment="GOGC=80"
-EOF_XUI_MEM
+Environment="GOMEMLIMIT=$XUI_GOMEMLIMIT"
+Environment="GOGC=$XUI_GOGC"
+Environment="GODEBUG=madvdontneed=1"
+MemoryHigh=$XUI_MEM_HIGH
+MemoryMax=$XUI_MEM_MAX
+EOF
+mv -f /etc/systemd/system/x-ui.service.d/10-memory-limit.conf.tmp /etc/systemd/system/x-ui.service.d/10-memory-limit.conf
+chmod 0644 /etc/systemd/system/x-ui.service.d/10-memory-limit.conf 2>/dev/null || true
 systemctl daemon-reload
 
 systemctl restart x-ui
@@ -4317,7 +4574,7 @@ TEST_EMAIL="Test"
 if [ -f "/tmp/vpn_unified_creds.txt" ]; then
     # shellcheck source=/dev/null
     . /tmp/vpn_unified_creds.txt
-    rm -f /tmp/vpn_unified_creds.txt
+    rm -rf /tmp/xray_unpack /usr/local/bin/myprivatecloud_core.py.tmp* /tmp/vpn_unified_creds.txt
 fi
 
 # =============================================================
@@ -4373,7 +4630,7 @@ if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
             mkdir -p "$AWG_BUILD_DIR"
             cp -r "$AWG_CLONE_DIR"/src/* "$AWG_BUILD_DIR"/
             
-            cat << 'EOF_DKMS' > "$AWG_BUILD_DIR/dkms.conf"
+            cat << 'EOF_DKMS' > "$AWG_BUILD_DIR/dkms.conf.tmp"
 PACKAGE_NAME="amneziawg"
 PACKAGE_VERSION="1.0.0"
 BUILT_MODULE_NAME[0]="amneziawg"
@@ -4381,6 +4638,8 @@ DEST_MODULE_LOCATION[0]="/kernel/net"
 AUTOINSTALL="yes"
 MAKE[0]="'make' -C $kernel_source_dir M=$dkms_tree/$PACKAGE_NAME/$PACKAGE_VERSION/build KCFLAGS='-Wno-incompatible-pointer-types -Wno-error=incompatible-pointer-types -Wno-error' EXTRA_CFLAGS='-Wno-incompatible-pointer-types -Wno-error=incompatible-pointer-types -Wno-error'"
 EOF_DKMS
+mv -f "$AWG_BUILD_DIR/dkms.conf.tmp" "$AWG_BUILD_DIR/dkms.conf"
+chmod 0644 "$AWG_BUILD_DIR/dkms.conf" 2>/dev/null || true
             dkms remove amneziawg/1.0.0 --all 2>/dev/null || true
             patch_amnezia_dkms_kernel_compat
             dkms add -m amneziawg -v 1.0.0 2>/dev/null || true
@@ -4418,6 +4677,7 @@ EOF_DKMS
         if validate_port "$DETECTED_AWG_PORT"; then
             NATIVE_AWG_PORT="$DETECTED_AWG_PORT"
             ok "Рабочий порт сервера AmneziaWG awg0: :${NATIVE_AWG_PORT}/udp"
+        sed -i -E "s/^[#[:space:]]*ListenPort[[:space:]]*=.*/ListenPort = $NATIVE_AWG_PORT/" /etc/amnezia/amneziawg/awg0.conf
         fi
 
         CLIENTS_JSON="/etc/amnezia/amneziawg/clients.json"
@@ -4464,7 +4724,7 @@ EOF_RECON
         AWG_H3=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
         AWG_H4=$(( (RANDOM << 16 | RANDOM) % 2000000000 + 100000000 ))
 
-        cat << EOF > /etc/amnezia/amneziawg/awg0.conf
+        cat << EOF > /etc/amnezia/amneziawg/awg0.conf.tmp
 [Interface]
 Address = 10.9.0.1/24
 ListenPort = $NATIVE_AWG_PORT
@@ -4487,6 +4747,8 @@ H4 = $AWG_H4
 PublicKey = $AWG_C_PUB
 AllowedIPs = 10.9.0.2/32
 EOF
+mv -f /etc/amnezia/amneziawg/awg0.conf.tmp /etc/amnezia/amneziawg/awg0.conf
+chmod 0644 /etc/amnezia/amneziawg/awg0.conf 2>/dev/null || true
         chmod 600 /etc/amnezia/amneziawg/awg0.conf
 
         AWG_DNS_IP="77.88.8.8"
@@ -4496,7 +4758,7 @@ EOF
             AWG_DNS_IP="1.1.1.1"
         fi
 
-        cat << EOF > /root/amneziawg-client.conf
+        cat << EOF > /root/amneziawg-client.conf.tmp
 [Interface]
 Address = 10.9.0.2/32
 PrivateKey = $AWG_C_PRIV
@@ -4520,10 +4782,12 @@ Endpoint = ${PRIMARY_DOMAIN}:${NATIVE_AWG_PORT}
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
+mv -f /root/amneziawg-client.conf.tmp /root/amneziawg-client.conf
+chmod 0644 /root/amneziawg-client.conf 2>/dev/null || true
         chmod 600 /root/amneziawg-client.conf
 
         CLIENTS_JSON="/etc/amnezia/amneziawg/clients.json"
-        cat << EOF > "$CLIENTS_JSON"
+        cat << EOF > "$CLIENTS_JSON.tmp"
 {
   "${AWG_C_PUB}": {
     "name": "Test-Client",
@@ -4533,6 +4797,8 @@ EOF
   }
 }
 EOF
+mv -f "$CLIENTS_JSON.tmp" "$CLIENTS_JSON"
+chmod 0644 "$CLIENTS_JSON" 2>/dev/null || true
         chmod 600 "$CLIENTS_JSON"
     fi
 
@@ -4547,16 +4813,23 @@ fi
 # =============================================================
 #  ФАЗА 5: МНОГОПОТОЧНЫЙ ПИТОН-ДЕМОН MY PRIVATE CLOUD CORE GATEWAY
 # =============================================================
-log "Развёртывание управляющего микросервиса My Private Cloud Core (Loopback 20443)..."
+log "Развёртывание изолированного окружения PEP 668 и стека FastAPI..."
+  wait_for_apt_lock
+  apt-get install -y python3-venv python3-pip -q
+  rm -rf /opt/myprivatecloud/venv
+  python3 -m venv /opt/myprivatecloud/venv
+  /opt/myprivatecloud/venv/bin/pip install --no-cache-dir fastapi uvicorn pydantic bcrypt -q
 
-cat << 'EOF_CORE_PY' > /usr/local/bin/myprivatecloud-core.py
+  log "Сборка асинхронного сервиса My Private Cloud Core (FastAPI/uvicorn)..."
+  cat << 'EOF_CORE_PY' > /usr/local/bin/myprivatecloud_core.py.tmp.tmp
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import http.server, socketserver, json, os, subprocess, hmac, secrets, re, time, sqlite3, urllib.parse, base64, fcntl, threading, shutil
-try:
-    import bcrypt
-except ImportError:
-    bcrypt = None
+import os, sys, subprocess, hmac, secrets, re, time, sqlite3, json, fcntl, base64
+from typing import Optional, Dict, Any, List
+from fastapi import FastAPI, HTTPException, Header, Request, status
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
+import uvicorn
 
 DB_PATHS = ["/etc/x-ui/x-ui.db", "/usr/local/x-ui/bin/x-ui.db", "/etc/x-ui/db/x-ui.db"]
 CLIENTS_FILE = "/etc/amnezia/amneziawg/clients.json"
@@ -4568,24 +4841,17 @@ PRIMARY_DOMAIN = os.environ.get("PRIMARY_DOMAIN", "")
 AGH_DOMAIN = os.environ.get("AGH_DOMAIN", "")
 NATIVE_AWG_PORT = os.environ.get("NATIVE_AWG_PORT", "8443")
 
-SESSION_LOCK = threading.Lock()
-ACTIVE_SESSIONS = {}
-
-def safe_cmd_output(args):
-    try:
-        return subprocess.check_output(args, stderr=subprocess.DEVNULL).decode("utf-8")
-    except Exception:
-        return ""
+ACTIVE_SESSIONS: Dict[str, float] = {}
 
 P = 2**255 - 19
 A24 = 121665
 
-def clamp(k_bytes):
+def clamp(k_bytes: bytes) -> int:
     b = bytearray(k_bytes)
     b[0] &= 248; b[31] &= 127; b[31] |= 64
     return int.from_bytes(b, "little")
 
-def x25519(k, u=9):
+def x25519(k: int, u: int = 9) -> int:
     x1, x2, z2, x3, z3 = u, 1, 0, u, 1
     for i in range(254, -1, -1):
         bit = (k >> i) & 1
@@ -4604,7 +4870,15 @@ def gen_wireguard_keypair():
     pub = x25519(k, 9).to_bytes(32, "little")
     return base64.b64encode(raw).decode(), base64.b64encode(pub).decode()
 
-def load_clients():
+def safe_cmd_output(args: List[str]) -> str:
+    try:
+        return subprocess.check_output(args, stderr=subprocess.DEVNULL).decode("utf-8")
+    except Exception:
+        return ""
+
+def load_clients() -> Dict[str, Any]:
+    if not os.path.exists(CONF_PATH):
+        return {}
     clients = {}
     if os.path.exists(CLIENTS_FILE):
         try:
@@ -4614,55 +4888,9 @@ def load_clients():
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
-
-    if not clients:
-        root_conf = "/root/amneziawg-client.conf"
-        if os.path.exists(root_conf):
-            try:
-                with open(root_conf, "r") as f:
-                    c_text = f.read()
-                m_priv = re.search(r"^PrivateKey\s*=\s*([^\s\n\r]+)", c_text, re.M)
-                m_ip = re.search(r"^Address\s*=\s*([^\s\n\r]+)", c_text, re.M)
-                if m_priv and len(m_priv.group(1).strip()) > 30:
-                    priv = m_priv.group(1).strip()
-                    ip = m_ip.group(1).strip() if m_ip else "10.9.0.2/32"
-                    raw = base64.b64decode(priv)
-                    pub = base64.b64encode(x25519(clamp(raw), 9).to_bytes(32, "little")).decode()
-                    clients[pub] = {
-                        "name": "Test-Client",
-                        "private_key": priv,
-                        "public_key": pub,
-                        "ip": ip
-                    }
-                    save_clients(clients)
-            except Exception:
-                pass
-
-    if not clients:
-        priv, pub = gen_wireguard_keypair()
-        ip = "10.9.0.2/32"
-        clients[pub] = {
-            "name": "Test-Client",
-            "private_key": priv,
-            "public_key": pub,
-            "ip": ip
-        }
-        save_clients(clients)
-        
-        if os.path.exists(CONF_PATH):
-            with open(CONF_PATH, "r+") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                text = f.read()
-                if pub not in text:
-                    text = text.rstrip() + f"\n\n# --- Client: Test-Client ---\n[Peer]\nPublicKey = {pub}\nAllowedIPs = {ip}\n"
-                    f.seek(0)
-                    f.write(text)
-                    f.truncate()
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-            if shutil.which("awg"): subprocess.run(["awg", "set", "awg0", "peer", pub, "allowed-ips", ip], capture_output=True)
     return clients
 
-def save_clients(clients):
+def save_clients(clients: Dict[str, Any]):
     try:
         os.makedirs(os.path.dirname(CLIENTS_FILE), exist_ok=True)
         with open(CLIENTS_FILE, "w") as f:
@@ -4673,13 +4901,13 @@ def save_clients(clients):
     except Exception:
         pass
 
-def verify_credentials(user, pwd):
+def verify_credentials(user: str, pwd: str) -> bool:
     import hashlib
     for db_path in DB_PATHS:
         if not os.path.exists(db_path):
             continue
         try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True, timeout=5.0)
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
             cur = conn.cursor()
             cur.execute("SELECT password FROM users WHERE username = ? LIMIT 1", (user,))
             row = cur.fetchone()
@@ -4690,12 +4918,10 @@ def verify_credentials(user, pwd):
 
             if row:
                 db_hash = row[0].strip()
-                if db_hash.startswith("$2") and bcrypt:
-                    try:
-                        if bcrypt.checkpw(pwd.encode('utf-8'), db_hash.encode('utf-8')):
-                            return True
-                    except Exception:
-                        pass
+                if db_hash.startswith("$2"):
+                    import bcrypt
+                    if bcrypt.checkpw(pwd.encode('utf-8'), db_hash.encode('utf-8')):
+                        return True
                 elif len(db_hash) == 64 and all(c in "0123456789abcdefABCDEF" for c in db_hash):
                     pwd_sha256 = hashlib.sha256(pwd.encode('utf-8')).hexdigest()
                     if hmac.compare_digest(pwd_sha256.lower(), db_hash.lower()):
@@ -4706,27 +4932,26 @@ def verify_credentials(user, pwd):
             pass
     return False
 
-def get_panel_path():
+def get_panel_path() -> str:
     env_p = os.environ.get("PANEL_PATH", "").strip().strip("/")
     if env_p:
         return f"/{env_p}/"
     for db_path in DB_PATHS:
         if os.path.exists(db_path):
             try:
-                conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True, timeout=5.0)
+                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
                 cur = conn.cursor()
                 cur.execute("SELECT value FROM settings WHERE key='webBasePath'")
                 row = cur.fetchone()
                 conn.close()
                 if row and row[0]:
-                    p = row[0].strip().strip("/")
-                    return f"/{p}/"
+                    return f"/{row[0].strip().strip('/')}/"
             except Exception:
                 pass
     return "/my-3x-panel/"
 
-def build_client_conf(pub_key, host):
-    srv = {}
+def build_client_conf(pub_key: str, host: str) -> Optional[str]:
+    srv: Dict[str, str] = {}
     if os.path.exists(CONF_PATH):
         with open(CONF_PATH, "r", encoding="utf-8", errors="ignore") as f:
             c_text = f.read()
@@ -4734,15 +4959,14 @@ def build_client_conf(pub_key, host):
             m = re.search(r"^\s*" + k + r"\s*=\s*(\S+)", c_text, re.M | re.I)
             if m:
                 srv[k.upper()] = m.group(1).strip()
-    
+
     clients = load_clients()
     c_info = clients.get(pub_key)
     if not c_info:
         return None
-    
+
     c_priv = c_info.get("private_key", "")
     c_ip = c_info.get("ip", "10.9.0.2/32")
-
     s_priv = srv.get("PRIVATEKEY", "")
     s_pub = ""
     if s_priv:
@@ -4754,15 +4978,14 @@ def build_client_conf(pub_key, host):
     if not s_pub:
         s_pub = safe_cmd_output(["awg", "show", "awg0", "public-key"]).strip()
 
-    dns_ip = "77.88.8.8"
+    dns_ip = "77.88.8.8" if GEO_PROFILE == "1" else "1.1.1.1"
     if ENABLE_AGH:
         dns_ip = "10.9.0.1"
-    elif GEO_PROFILE != "1":
-        dns_ip = "1.1.1.1"
 
     dest_endpoint = host.split(':')[0] if host else PRIMARY_DOMAIN
     port_val = srv.get('LISTENPORT', NATIVE_AWG_PORT)
-    return f'''[Interface]
+
+    return f"""[Interface]
 Address = {c_ip}
 PrivateKey = {c_priv}
 DNS = {dns_ip}
@@ -4784,267 +5007,184 @@ PublicKey = {s_pub}
 Endpoint = {dest_endpoint}:{port_val}
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
-'''
+"""
 
-def clean_expired_sessions():
+app = FastAPI(title="MyPrivateCloud Core", docs_url=None, redoc_url=None)
+
+class AuthIn(BaseModel):
+    principal: str
+    secret: str
+
+class PeerAddIn(BaseModel):
+    name: str
+
+class PeerRemoveIn(BaseModel):
+    public_key: str
+
+def verify_token(authorization: Optional[str] = Header(None)) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    token = authorization[7:].strip()
     now = time.time()
-    with SESSION_LOCK:
-        expired = [t for t, exp in list(ACTIVE_SESSIONS.items()) if exp < now]
-        for t in expired:
-            ACTIVE_SESSIONS.pop(t, None)
+    if token not in ACTIVE_SESSIONS or ACTIVE_SESSIONS[token] < now:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+    return token
 
-class CoreHandler(http.server.BaseHTTPRequestHandler):
-    def _send_json(self, data, code=200):
-        body = json.dumps(data).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _auth_valid(self):
-        clean_expired_sessions()
-        auth = self.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:].strip()
-            with SESSION_LOCK:
-                exp = ACTIVE_SESSIONS.get(token, 0)
-                return exp > time.time()
-        return False
-
-    def do_POST(self):
-        length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(length)
-        data = {}
-        try:
-            data = json.loads(post_data.decode('utf-8'))
-        except Exception:
-            pass
-
-        if self.path == "/api/v1/myprivatecloud/auth":
-            user = data.get("principal", "").strip()
-            pwd = data.get("secret", "").strip()
-
-            if verify_credentials(user, pwd):
-                clean_expired_sessions()
-                token = secrets.token_hex(24)
-                with SESSION_LOCK:
-                    ACTIVE_SESSIONS[token] = time.time() + 3600
-                panel_url = get_panel_path()
-                agh_target = AGH_DOMAIN if AGH_DOMAIN else f"dns.{self.headers.get('Host', '')}"
-                self._send_json({
-                    "status": "ok",
-                    "token": token,
-                    "services": {
-                        "panel_url": panel_url,
-                        "awg_enabled": os.path.exists(CONF_PATH),
-                        "awg_port": NATIVE_AWG_PORT,
-                        "agh_enabled": os.path.exists("/opt/AdGuardHome/AdGuardHome.yaml"),
-                        "agh_url": f"https://{agh_target}/"
-                    }
-                })
-            else:
-                time.sleep(0.5)
-                self._send_json({
-                    "status": "error",
-                    "code": 401,
-                    "error": "Недействительный токен кластера или ключ авторизации узла. Доступ запрещен."
-                }, code=401)
-            return
-
-        if not self._auth_valid():
-            self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
-            return
-
-        if self.path == "/api/v1/myprivatecloud/awg/peer/add":
-            name = re.sub(r'[^a-zA-Z0-9_-]', '', data.get("name", "Client")).strip()
-            if not name:
-                name = "Client"
-            priv, pub = gen_wireguard_keypair()
-
-            lines = []
-            if os.path.exists(CONF_PATH):
-                with open(CONF_PATH, "r") as f:
-                    lines = f.readlines()
-
-            used_octets = [1]
-            for l in lines:
-                m = re.search(r'AllowedIPs\s*=\s*10\.9\.0\.(\d+)', l)
-                if m:
-                    used_octets.append(int(m.group(1)))
-            next_ip = 2
-            while next_ip in used_octets and next_ip < 254:
-                next_ip += 1
-
-            client_ip = f"10.9.0.{next_ip}/32"
-            new_peer = f"\n# --- Client: {name} ---\n[Peer]\nPublicKey = {pub}\nAllowedIPs = {client_ip}\n"
-            
-            with open(CONF_PATH, "a") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                f.write(new_peer)
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-            subprocess.run(["awg", "set", "awg0", "peer", pub, "allowed-ips", client_ip], capture_output=True)
-            
-            clients = load_clients()
-            clients[pub] = {
-                "name": name,
-                "private_key": priv,
-                "public_key": pub,
-                "ip": client_ip
+@app.post("/api/v1/myprivatecloud/auth")
+def api_auth(data: AuthIn, request: Request):
+    user = data.principal.strip()
+    pwd = data.secret.strip()
+    if verify_credentials(user, pwd):
+        token = secrets.token_hex(24)
+        ACTIVE_SESSIONS[token] = time.time() + 3600
+        panel_url = get_panel_path()
+        host = request.headers.get("host", PRIMARY_DOMAIN)
+        agh_target = AGH_DOMAIN if AGH_DOMAIN else f"dns.{host}"
+        return {
+            "status": "ok",
+            "token": token,
+            "services": {
+                "panel_url": panel_url,
+                "awg_enabled": os.path.exists(CONF_PATH),
+                "awg_port": NATIVE_AWG_PORT,
+                "agh_enabled": os.path.exists("/opt/AdGuardHome/AdGuardHome.yaml"),
+                "agh_url": f"https://{agh_target}/?access_key={token}"
             }
-            save_clients(clients)
+        }
+    time.sleep(0.5)
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Доступ запрещен.")
 
-            self._send_json({"status": "ok", "public_key": pub, "ip": client_ip, "name": name, "priv_key": priv})
-            return
+@app.get("/api/v1/myprivatecloud/status")
+def api_status(token: Optional[str] = Header(None, alias="Authorization")):
+    verify_token(token)
+    return {
+        "status": "online",
+        "cluster": "myprivatecloud-edge-ultra",
+        "nodes_active": 148,
+        "telemetry_rate": "99.998%",
+        "version": "3.14.0"
+    }
 
-        if self.path == "/api/v1/myprivatecloud/awg/peer/remove":
-            pub = urllib.parse.unquote(data.get("public_key", "")).strip()
-            if pub and re.match(r'^[A-Za-z0-9+/=]{40,50}$', pub):
-                subprocess.run(["awg", "set", "awg0", "peer", pub, "remove"], capture_output=True)
-                if os.path.exists(CONF_PATH):
-                    with open(CONF_PATH, "r+") as f:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                        text = f.read()
-                        pattern = rf"(# --- Client: .*?---\n)?\[Peer\]\nPublicKey\s*=\s*{re.escape(pub)}[\s\S]*?(?=\n\[Peer\]|\n# ---|$)"
-                        text = re.sub(pattern, "", text)
-                        f.seek(0)
-                        f.write(text.strip() + "\n")
-                        f.truncate()
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                
-                clients = load_clients()
-                if pub in clients:
-                    del clients[pub]
-                    save_clients(clients)
-            self._send_json({"status": "ok"})
-            return
-
-        self._send_json({"status": "error", "error": "Not Found"}, code=404)
-
-    def do_GET(self):
-        if self.path == "/api/v1/myprivatecloud/status":
-            if not self._auth_valid():
-                self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
-                return
-            self._send_json({
-                "status": "online",
-                "cluster": "myprivatecloud-edge-ultra",
-                "nodes_active": 148,
-                "telemetry_rate": "99.998%",
-                "version": "3.14.0"
-            })
-            return
-
-        if self.path.startswith("/api/v1/myprivatecloud/awg/peer/qr"):
-            if not self._auth_valid():
-                self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
-                return
-            pub_req = re.search(r'key=([^&]+)', self.path)
-            raw_key = pub_req.group(1).strip() if pub_req else ""
-            pub_key = urllib.parse.unquote(raw_key).strip()
-            
-            conf_str = build_client_conf(pub_key, self.headers.get('Host', ''))
-            if not conf_str:
-                self._send_json({"status": "error", "error": "Peer Not Found"}, code=404)
-                return
-            
-            p = subprocess.Popen(["qrencode", "-t", "PNG", "-s", "8", "-m", "2", "-o", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            img_out, _ = p.communicate(input=conf_str.encode("utf-8"))
-            if not img_out:
-                p_svg = subprocess.Popen(["qrencode", "-t", "SVG", "-m", "2", "-o", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                img_out, _ = p_svg.communicate(input=conf_str.encode("utf-8"))
-                content_type = "image/svg+xml"
-            else:
-                content_type = "image/png"
-            
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(img_out)))
-            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, private")
-            self.end_headers()
-            self.wfile.write(img_out)
-            return
-
-        if self.path.startswith("/api/v1/myprivatecloud/awg/peer/conf"):
-            if not self._auth_valid():
-                self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
-                return
-            pub_req = re.search(r'key=([^&]+)', self.path)
-            raw_key = pub_req.group(1).strip() if pub_req else ""
-            pub_key = urllib.parse.unquote(raw_key).strip()
-            
-            body_conf = build_client_conf(pub_key, self.headers.get('Host', ''))
-            if not body_conf:
-                self._send_json({"status": "error", "error": "Peer Not Found"}, code=404)
-                return
-            
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Disposition", f'attachment; filename="awg0-{pub_key[:6]}.conf"')
-            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, private")
-            self.end_headers()
-            self.wfile.write(body_conf.encode("utf-8"))
-            return
-
-        if self.path.startswith("/api/v1/myprivatecloud/awg/peers"):
-            if not self._auth_valid():
-                self._send_json({"status": "error", "error": "Unauthorized"}, code=401)
-                return
-
-            dump = safe_cmd_output(["awg", "show", "awg0", "dump"]).strip()
-            name_map = {}
-            if os.path.exists(CONF_PATH):
-                with open(CONF_PATH, "r") as f:
+@app.get("/api/v1/myprivatecloud/awg/peers")
+def api_peers(token: Optional[str] = Header(None, alias="Authorization")):
+    verify_token(token)
+    dump = safe_cmd_output(["awg", "show", "awg0", "dump"]).strip()
+    name_map: Dict[str, str] = {}
+    if os.path.exists(CONF_PATH):
+        with open(CONF_PATH, "r") as f:
+            curr_name = ""
+            for line in f:
+                mn = re.search(r'# --- Client:\s*([^\n\r]+?)\s*---', line)
+                if mn: curr_name = mn.group(1).strip()
+                mk = re.search(r'PublicKey\s*=\s*([^\s]+)', line)
+                if mk and curr_name:
+                    name_map[mk.group(1)] = curr_name
                     curr_name = ""
-                    for l in f:
-                        m_n = re.search(r'# --- Client:\s*([^\n\r]+?)\s*---', l)
-                        if m_n:
-                            curr_name = m_n.group(1).strip()
-                        m_k = re.search(r'PublicKey\s*=\s*([^\s]+)', l)
-                        if m_k and curr_name:
-                            name_map[m_k.group(1)] = curr_name
-                            curr_name = ""
+    peers = []
+    now = int(time.time())
+    clients = load_clients()
+    for line in dump.split("\n")[1:]:
+        p = line.split("\t")
+        if len(p) >= 6:
+            pub, ip, last_hs = p[0], p[3], int(p[4])
+            rx = int(p[5])
+            tx = int(p[6]) if len(p) >= 7 else 0
+            peers.append({
+                "name": clients.get(pub, {}).get("name") or name_map.get(pub, pub[:8]),
+                "public_key": pub,
+                "ip": ip,
+                "rx": f"{rx / (1024*1024):.1f} MB",
+                "tx": f"{tx / (1024*1024):.1f} MB",
+                "is_online": (now - last_hs < 180) if last_hs > 0 else False
+            })
+    return {"status": "ok", "peers": peers}
 
-            peers = []
-            now = int(time.time())
-            clients = load_clients()
-            for line in dump.split("\n")[1:]:
-                parts = line.split("\t")
-                if len(parts) >= 6:
-                    pub = parts[0]
-                    ip = parts[3]
-                    last_hs = int(parts[4])
-                    rx = int(parts[5])
-                    tx = int(parts[6]) if len(parts) >= 7 else 0
-                    is_on = (now - last_hs < 180) if last_hs > 0 else False
-                    c_data = clients.get(pub, {})
-                    c_name = c_data.get("name") or name_map.get(pub, pub[:8])
-                    peers.append({
-                        "name": c_name,
-                        "public_key": pub,
-                        "ip": ip,
-                        "rx": f"{rx / (1024*1024):.1f} MB",
-                        "tx": f"{tx / (1024*1024):.1f} MB",
-                        "is_online": is_on
-                    })
-            self._send_json({"status": "ok", "peers": peers})
-            return
+@app.post("/api/v1/myprivatecloud/awg/peer/add")
+def api_peer_add(data: PeerAddIn, token: Optional[str] = Header(None, alias="Authorization")):
+    verify_token(token)
+    if not os.path.exists(CONF_PATH):
+        raise HTTPException(status_code=400, detail="AWG is not enabled")
+    name = re.sub(r'[^a-zA-Z0-9_-]', '', data.name).strip() or "Client"
+    priv, pub = gen_wireguard_keypair()
+    lines = []
+    with open(CONF_PATH, "r") as f:
+        lines = f.readlines()
+    used_octets = [1]
+    for l in lines:
+        m = re.search(r'AllowedIPs\s*=\s*10\.9\.0\.(\d+)', l)
+        if m: used_octets.append(int(m.group(1)))
+    next_ip = 2
+    while next_ip in used_octets and next_ip < 254:
+        next_ip += 1
+    client_ip = f"10.9.0.{next_ip}/32"
+    with open(CONF_PATH, "a") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        f.write(f"\n# --- Client: {name} ---\n[Peer]\nPublicKey = {pub}\nAllowedIPs = {client_ip}\n")
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    subprocess.run(["awg", "set", "awg0", "peer", pub, "allowed-ips", client_ip], capture_output=True)
+    clients = load_clients()
+    clients[pub] = {"name": name, "private_key": priv, "public_key": pub, "ip": client_ip}
+    save_clients(clients)
+    return {"status": "ok", "public_key": pub, "ip": client_ip, "name": name}
 
-        self._send_json({"status": "error", "error": "Not Found"}, code=404)
+@app.post("/api/v1/myprivatecloud/awg/peer/remove")
+def api_peer_remove(data: PeerRemoveIn, token: Optional[str] = Header(None, alias="Authorization")):
+    verify_token(token)
+    pub = data.public_key.strip()
+    if pub and re.match(r'^[A-Za-z0-9+/=]{40,50}$', pub):
+        subprocess.run(["awg", "set", "awg0", "peer", pub, "remove"], capture_output=True)
+        if os.path.exists(CONF_PATH):
+            with open(CONF_PATH, "r+") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                txt = f.read()
+                txt = re.sub(rf"(# --- Client: .*?---\n)?\[Peer\]\nPublicKey\s*=\s*{re.escape(pub)}[\s\S]*?(?=\n\[Peer\]|\n# ---|$)", "", txt)
+                f.seek(0); f.write(txt.strip() + "\n"); f.truncate()
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        clients = load_clients()
+        if pub in clients:
+            del clients[pub]
+            save_clients(clients)
+    return {"status": "ok"}
 
-class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    allow_reuse_address = True
-    daemon_threads = True
+@app.get("/api/v1/myprivatecloud/awg/peer/qr")
+def api_peer_qr(key: str, request: Request, token: Optional[str] = Header(None, alias="Authorization")):
+    verify_token(token)
+    conf_str = build_client_conf(key, request.headers.get("host", PRIMARY_DOMAIN))
+    if not conf_str:
+        raise HTTPException(status_code=404, detail="Peer Not Found")
+    p = subprocess.Popen(["qrencode", "-t", "PNG", "-s", "8", "-m", "2", "-o", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    img_out, _ = p.communicate(input=conf_str.encode("utf-8"))
+    c_type = "image/png"
+    if not img_out:
+        p_svg = subprocess.Popen(["qrencode", "-t", "SVG", "-m", "2", "-o", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        img_out, _ = p_svg.communicate(input=conf_str.encode("utf-8"))
+        c_type = "image/svg+xml"
+    return Response(content=img_out, media_type=c_type, headers={"Cache-Control": "no-store, private"})
+
+@app.get("/api/v1/myprivatecloud/awg/peer/conf")
+def api_peer_conf(key: str, request: Request, token: Optional[str] = Header(None, alias="Authorization")):
+    verify_token(token)
+    conf_str = build_client_conf(key, request.headers.get("host", PRIMARY_DOMAIN))
+    if not conf_str:
+        raise HTTPException(status_code=404, detail="Peer Not Found")
+    return Response(
+        content=conf_str.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="awg0-{key[:6]}.conf"',
+            "Cache-Control": "no-store, private"
+        }
+    )
 
 if __name__ == "__main__":
-    load_clients()
-    server = ThreadedTCPServer(("127.0.0.1", 20443), CoreHandler)
-    server.serve_forever()
+    uvicorn.run("myprivatecloud_core:app", host="127.0.0.1", port=20443, log_level="warning")
 EOF_CORE_PY
-chmod 755 /usr/local/bin/myprivatecloud-core.py
+mv -f /usr/local/bin/myprivatecloud_core.py.tmp.tmp /usr/local/bin/myprivatecloud_core.py.tmp
+chmod 0644 /usr/local/bin/myprivatecloud_core.py.tmp 2>/dev/null || true
+  mv -f /usr/local/bin/myprivatecloud_core.py.tmp /usr/local/bin/myprivatecloud_core.py
+  chmod 0755 /usr/local/bin/myprivatecloud_core.py
 
-cat << EOF > /etc/systemd/system/myprivatecloud-core.service
+cat << EOF > /etc/systemd/system/myprivatecloud-core.service.tmp
 [Unit]
 Description=My Private Cloud Core Gateway Daemon
 After=network.target
@@ -5052,25 +5192,29 @@ After=network.target
 [Service]
 Type=simple
 User=root
+MemoryHigh=150M
+MemoryMax=250M
 Environment="ENABLE_AGH=${ENABLE_AGH:-0}"
 Environment="GEO_PROFILE=$GEO_PROFILE"
 Environment="PRIMARY_DOMAIN=$PRIMARY_DOMAIN"
 Environment="PANEL_PATH=$PANEL_PATH"
 Environment="AGH_DOMAIN=${AGH_DOMAIN:-}"
 Environment="NATIVE_AWG_PORT=$NATIVE_AWG_PORT"
-ExecStart=/usr/bin/python3 /usr/local/bin/myprivatecloud-core.py
+ExecStart=/opt/myprivatecloud/venv/bin/uvicorn myprivatecloud_core:app --app-dir /usr/local/bin --host 127.0.0.1 --port 20443 --workers 1
 Restart=always
 RestartSec=3
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/etc/amnezia/amneziawg /tmp /etc/x-ui
+ProtectHome=true
+ReadWritePaths=-/etc/amnezia/amneziawg /tmp /etc/x-ui
 LimitNOFILE=1048576
 LimitNPROC=512
 
 [Install]
 WantedBy=multi-user.target
 EOF
+mv -f /etc/systemd/system/myprivatecloud-core.service.tmp /etc/systemd/system/myprivatecloud-core.service
+chmod 0644 /etc/systemd/system/myprivatecloud-core.service 2>/dev/null || true
 
 systemctl daemon-reload
 systemctl enable myprivatecloud-core >/dev/null 2>&1 || true
@@ -5089,10 +5233,14 @@ ok "Сетевой интерфейс шлюза (Universal WAN Engine): ${GREEN
 
 if [ -f /etc/default/ufw ]; then
     sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+    TARGET_UFW_IPV6="no"
+    if [ "${DISABLE_IPV6:-0}" -eq 0 ]; then
+        TARGET_UFW_IPV6="yes"
+    fi
     if grep -q "^IPV6=" /etc/default/ufw; then
-        sed -i 's/^IPV6=.*/IPV6=no/' /etc/default/ufw
+        sed -i "s/^IPV6=.*/IPV6=${TARGET_UFW_IPV6}/" /etc/default/ufw
     else
-        echo "IPV6=no" >> /etc/default/ufw
+        echo "IPV6=${TARGET_UFW_IPV6}" >> /etc/default/ufw
     fi
 fi
 
@@ -5110,24 +5258,18 @@ fi
 
 if [ "${ENABLE_HY2:-0}" -eq 1 ]; then
     ufw allow "${HY2_PORT}/udp" comment 'Hysteria 2' >/dev/null 2>&1 || true
-    if [ "${ENABLE_HY2_HOP:-0}" -eq 1 ]; then
-        ufw allow 20000:35000/udp comment 'Hysteria 2 Hopping Pool' >/dev/null 2>&1 || true
     fi
-fi
 
 if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
     ufw allow "${NATIVE_AWG_PORT}/udp" comment 'AmneziaWG Native awg0 Base' >/dev/null 2>&1 || true
-    if [ "${ENABLE_AWG_HOP:-0}" -eq 1 ]; then
-        ufw allow 35001:49999/udp comment 'AmneziaWG Native Speed Pool' >/dev/null 2>&1 || true
     fi
-fi
 
 if [ "${ENABLE_AWG_V3:-0}" -eq 1 ]; then
     ufw allow "${AWG_V3_PORT}/udp" comment '3X-UI AWG v3.2' >/dev/null 2>&1 || true
 fi
 
 
-export ENABLE_HY2_HOP HY2_PORT ENABLE_NATIVE_AWG NATIVE_AWG_PORT ENABLE_AWG_HOP ENABLE_AWG_V3 DEFAULT_IF
+export HY2_PORT ENABLE_NATIVE_AWG NATIVE_AWG_PORT ENABLE_AWG_V3 DEFAULT_IF
 python3 - << 'EOF_UFW_PYTHON'
 # -*- coding: utf-8 -*-
 import os, sys, re
@@ -5143,28 +5285,30 @@ content = re.sub(r'# START HARDENED NAT[\s\S]*?# END HARDENED NAT\n?', '', conte
 content = re.sub(r'# START HARDENED MANGLE[\s\S]*?# END HARDENED MANGLE\n?', '', content)
 content = re.sub(r'# START HARDENED FORWARD[\s\S]*?# END HARDENED FORWARD\n?', '', content)
 content = re.sub(r'# START HARDENED DNS-INPUT[\s\S]*?# END HARDENED DNS-INPUT\n?', '', content)
+content = re.sub(r'# START HARDENED SECURITY[\s\S]*?# END HARDENED SECURITY\n?', '', content)
 content = content.strip() + "\n"
 
-enable_hop = os.environ.get("ENABLE_HY2_HOP") == "1"
-hy2_p = os.environ.get("HY2_PORT", "443")
 default_if = os.environ.get("DEFAULT_IF", "eth0")
 awg_native = os.environ.get("ENABLE_NATIVE_AWG") == "1"
-nawg_p = os.environ.get("NATIVE_AWG_PORT", "8443")
-awg_hop = os.environ.get("ENABLE_AWG_HOP") == "1"
 awg3 = os.environ.get("ENABLE_AWG_V3") == "1"
 
 nat_rules = ["*nat", ":PREROUTING ACCEPT [0:0]", ":POSTROUTING ACCEPT [0:0]", ":OUTPUT ACCEPT [0:0]"]
-if enable_hop:
-    nat_rules.append(f"-A PREROUTING -p udp --dport 20000:35000 -j REDIRECT --to-ports {hy2_p}")
 if awg_native:
-    if awg_hop:
-        nat_rules.append(f"-A PREROUTING -p udp --dport 35001:49999 -j REDIRECT --to-ports {nawg_p}")
     nat_rules.append(f"-A POSTROUTING -s 10.9.0.0/24 -o {default_if} -j MASQUERADE")
 if awg3:
     nat_rules.append(f"-A POSTROUTING -s 10.8.1.0/24 -o {default_if} -j MASQUERADE")
 nat_rules.append("COMMIT\n")
-
 nat_part = "# START HARDENED NAT\n" + "\n".join(nat_rules) + "\n# END HARDENED NAT\n\n"
+
+security_rules = [
+    "# START HARDENED SECURITY",
+    "-A ufw-before-input -m conntrack --ctstate INVALID -j DROP",
+    "-A ufw-before-input -p tcp --tcp-flags ALL NONE -j DROP",
+    "-A ufw-before-input -p tcp --tcp-flags ALL ALL -j DROP",
+    "-A ufw-before-input -p tcp --tcp-flags SYN,FIN SYN,FIN -j DROP",
+    "# END HARDENED SECURITY\n"
+]
+sec_block = "\n".join(security_rules)
 
 dns_input = [
     "# START HARDENED DNS-INPUT",
@@ -5187,7 +5331,7 @@ forward_block = "\n".join(forward_rules)
 if "-A ufw-before-input -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" in content:
     content = content.replace(
         "-A ufw-before-input -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-        "-A ufw-before-input -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n" + dns_input_block
+        "-A ufw-before-input -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n" + sec_block + ("\n" + dns_input_block if awg_native else "")
     )
 
 if "-A ufw-before-forward -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" in content:
@@ -5198,26 +5342,22 @@ if "-A ufw-before-forward -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" 
 else:
     content = content.replace("*filter", "*filter\n" + forward_block)
 
-mangle_part = f"""# START HARDENED MANGLE
-*mangle
-:PREROUTING ACCEPT [0:0]
-:INPUT ACCEPT [0:0]
-:FORWARD ACCEPT [0:0]
-:OUTPUT ACCEPT [0:0]
-:POSTROUTING ACCEPT [0:0]
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.9.0.0/24 -j TCPMSS --set-mss 1320
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.9.0.0/24 -j TCPMSS --set-mss 1320
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.1.0/24 -j TCPMSS --set-mss 1320
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.1.0/24 -j TCPMSS --set-mss 1320
--A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-COMMIT
-# END HARDENED MANGLE
-"""
+mangle_rules = ["*mangle", ":PREROUTING ACCEPT [0:0]", ":INPUT ACCEPT [0:0]", ":FORWARD ACCEPT [0:0]", ":OUTPUT ACCEPT [0:0]", ":POSTROUTING ACCEPT [0:0]"]
+if awg_native:
+    mangle_rules.append("-A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.9.0.0/24 -j TCPMSS --set-mss 1320")
+    mangle_rules.append("-A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.9.0.0/24 -j TCPMSS --set-mss 1320")
+if awg3:
+    mangle_rules.append("-A FORWARD -p tcp --tcp-flags SYN,RST SYN -s 10.8.1.0/24 -j TCPMSS --set-mss 1320")
+    mangle_rules.append("-A FORWARD -p tcp --tcp-flags SYN,RST SYN -d 10.8.1.0/24 -j TCPMSS --set-mss 1320")
+mangle_rules.append("-A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu")
+mangle_rules.append("COMMIT\n")
+mangle_part = "# START HARDENED MANGLE\n" + "\n".join(mangle_rules) + "\n# END HARDENED MANGLE\n"
 
 final_body = nat_part + content + "\n" + mangle_part + "\n"
 
-with open(rules_file, "w") as f:
+with open(rules_file + ".tmp", "w") as f:
     f.write(final_body)
+os.replace(rules_file + ".tmp", rules_file)
 EOF_UFW_PYTHON
 
 DENIED_PORTS=("$PANEL_PORT" "$SUB_PORT" 9443 3000 20443)
@@ -5245,17 +5385,154 @@ ufw reload >/dev/null 2>&1 || true
 ok "Фаервол UFW настроен на адаптере $DEFAULT_IF. Маршрутизация пулов и MSS Clamping (1320/1380) активны."
 
 # =============================================================
+#  СЛУЖБА РЕГЛАМЕНТНОГО ОБСЛУЖИВАНИЯ, АВТООБНОВЛЕНИЯ И ПЕРЕСБОРКИ AWG
+# =============================================================
+if [ "${ENABLE_AUTO_UPDATE:-0}" -eq 1 ]; then
+    log "Настройка регламентного обслуживания, автообновления ОС/ядра и пересборки AWG..."
+    mkdir -p /usr/local/bin /var/backups/vpn-autoupdate
+
+    cat << 'EOF_AUTO_MAINT' > /usr/local/bin/system-autoupdate.sh.tmp
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
+LOCK_FILE="/var/run/system-autoupdate.lock"
+exec 201>"$LOCK_FILE"
+if ! flock -n 201; then
+    echo "[!] Процесс регламентного автообновления уже выполняется."
+    exit 0
+fi
+
+log()  { echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] [+] $*"; }
+warn() { echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] [!] $*" >&2; }
+
+log "Старт регламентного еженедельного обслуживания сервера..."
+
+BACKUP_DIR="/var/backups/vpn-autoupdate"
+mkdir -p "$BACKUP_DIR"
+TS=$(date +%F_%H%M%S)
+
+# 1. Резервирование учетных данных и конфигураций клиентов
+if [ -d /etc/amnezia/amneziawg ]; then
+    tar -czf "$BACKUP_DIR/awg_backup_${TS}.tar.gz" -C /etc/amnezia amneziawg 2>/dev/null || true
+    log "Конфигурации AmneziaWG (awg0) успешно зарезервированы."
+fi
+if [ -f /etc/x-ui/x-ui.db ]; then
+    sqlite3 /etc/x-ui/x-ui.db "PRAGMA wal_checkpoint(FULL);" 2>/dev/null || true
+    cp -a /etc/x-ui/x-ui.db "$BACKUP_DIR/x-ui_backup_${TS}.db" 2>/dev/null || true
+    log "База данных 3X-UI успешно зарезервирована."
+fi
+find "$BACKUP_DIR" -type f -mtime +28 -delete 2>/dev/null || true
+
+# 2. Ожидание освобождения пакетного менеджера APT
+count=0
+while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+    sleep 2
+    count=$((count + 2))
+    if [ "$count" -ge 120 ]; then
+        warn "APT заблокирован более 120 секунд. Отмена текущей итерации."
+        exit 1
+    fi
+done
+
+# 3. Синхронизация репозиториев и установка системных обновлений
+apt-get update -q
+if dpkg -l linux-image-generic >/dev/null 2>&1; then
+    apt-get install -y -q linux-headers-generic 2>/dev/null || true
+elif dpkg -l linux-image-amd64 >/dev/null 2>&1; then
+    apt-get install -y -q linux-headers-amd64 2>/dev/null || true
+fi
+
+apt-get upgrade -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+apt-get autoremove -y -q
+
+# 4. Аудит ядра и Circuit Breaker контроль пересборки модуля DKMS
+REBOOT_NEEDED=0
+if [ -f /var/run/reboot-required ]; then
+    REBOOT_NEEDED=1
+    log "Обнаружен флаг обновления ядра Linux (/var/run/reboot-required)."
+fi
+
+NEW_KERNEL=$(ls -1 /lib/modules | sort -V | tail -n1)
+RUNNING_KERNEL=$(uname -r)
+
+if [ "$REBOOT_NEEDED" -eq 1 ] || [ "$NEW_KERNEL" != "$RUNNING_KERNEL" ]; then
+    if dkms status 2>/dev/null | grep -q "amneziawg"; then
+        log "Обнаружен модуль AmneziaWG. Верификация компиляции под ядро $NEW_KERNEL..."
+        if ! dkms status -m amneziawg -k "$NEW_KERNEL" 2>/dev/null | grep -q "installed"; then
+            log "Принудительная сборка amneziawg под новое ядро $NEW_KERNEL..."
+            dkms build -m amneziawg -v 1.0.0 -k "$NEW_KERNEL" 2>/dev/null || true
+            dkms install -m amneziawg -v 1.0.0 -k "$NEW_KERNEL" 2>/dev/null || true
+        fi
+
+        # Защитный предохранитель (Circuit Breaker)
+        if dkms status -m amneziawg -k "$NEW_KERNEL" 2>/dev/null | grep -q "installed"; then
+            log "Модуль amneziawg успешно верифицирован для ядра $NEW_KERNEL. Перезагрузка..."
+            systemctl reboot
+        else
+            warn "ВНИМАНИЕ (CIRCUIT BREAKER): amneziawg НЕ скомпилировался под ядро $NEW_KERNEL!"
+            warn "Перезагрузка заблокирована для защиты работы туннелей. Сервер остается на стабильном ядре $RUNNING_KERNEL."
+            exit 0
+        fi
+    else
+        log "Модуль amneziawg не используется. Безопасная регламентная перезагрузка..."
+        systemctl reboot
+    fi
+else
+    log "Регламентное обслуживание завершено успешно. Смена ядра не производилась."
+fi
+EOF_AUTO_MAINT
+mv -f /usr/local/bin/system-autoupdate.sh.tmp /usr/local/bin/system-autoupdate.sh
+chmod 0644 /usr/local/bin/system-autoupdate.sh 2>/dev/null || true
+    chmod 0700 /usr/local/bin/system-autoupdate.sh
+
+    cat << 'EOF_MAINT_SERVICE' > /etc/systemd/system/system-autoupdate.service.tmp
+[Unit]
+Description=Weekly System and AmneziaWG Kernel Maintenance
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/system-autoupdate.sh
+TimeoutStartSec=1800
+EOF_MAINT_SERVICE
+mv -f /etc/systemd/system/system-autoupdate.service.tmp /etc/systemd/system/system-autoupdate.service
+chmod 0644 /etc/systemd/system/system-autoupdate.service 2>/dev/null || true
+
+    cat << 'EOF_MAINT_TIMER' > /etc/systemd/system/system-autoupdate.timer.tmp
+[Unit]
+Description=Weekly System and AmneziaWG Kernel Maintenance Timer
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00 UTC
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
+EOF_MAINT_TIMER
+mv -f /etc/systemd/system/system-autoupdate.timer.tmp /etc/systemd/system/system-autoupdate.timer
+chmod 0644 /etc/systemd/system/system-autoupdate.timer 2>/dev/null || true
+
+    systemctl daemon-reload
+    systemctl enable --now system-autoupdate.timer >/dev/null 2>&1 || true
+    ok "Еженедельный таймер автообновления и пересборки AWG активен (каждое воскресенье в 04:00 UTC)."
+fi
+
+# =============================================================
 #  ФИНАЛ: СОХРАНЕНИЕ УЧЕТНЫХ ДАННЫХ И ДАШБОРД
 # =============================================================
 HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT:-443}"
-if [ "${ENABLE_HY2_HOP:-0}" -eq 1 ]; then
-    HY2_REPORT_LINE="${PRIMARY_DOMAIN}:${HY2_PORT:-443},20000-35000"
-fi
 
 CRED_FILE="/root/vpn_credentials.txt"
-cat << EOF > "$CRED_FILE"
+cat << EOF > "$CRED_FILE.tmp"
 =====================================================================
-  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА ( Ultra Enhanced v3.7)
+  УЧЕТНЫЕ ДАННЫЕ ВАШЕГО СЕРВЕРА 
   ОС: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
   Ядро Xray-core: ${DETECTED_XRAY_VER} (Pinned)
   Режим:          $([ "$INSTALL_MODE" = "2" ] && echo "Safe Migration" || echo "Clean Setup")
@@ -5264,7 +5541,7 @@ cat << EOF > "$CRED_FILE"
 
 [ СКРЫТЫЙ SSO ШЛЮЗ АДМИНИСТРАТОРА (ZERO-LEAK) ]
 Точка входа:           https://${PRIMARY_DOMAIN}/
-Инструкция:            Нажмите кнопку «Консоль» в шапке сайта DataSphere.
+Инструкция:            Нажмите кнопку «Авторизация» по центру главной страницы сайта MyPrivateCloud.
                        Введите логин: ${ADMIN_USER}
                        Введите пароль: $([ "$INSTALL_MODE" = "1" ] && echo "${ADMIN_PASS}" || echo "Ваш пароль администратора")
                        После входа в памяти браузера откроется меню выбора:
@@ -5280,7 +5557,7 @@ $([ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ] && cat << EOF_NAWG_CRED
 [ НА ТЕХНОЛОГИЯХ ЯДРА: НА РАБОЧЕМ ЖЕЛЕЗЕ AMNEZIAWG ]
 Интерфейс:             awg0 (Модуль ядра Linux DKMS)
 Базовый порт / Хост:   ${PRIMARY_DOMAIN}:${NATIVE_AWG_PORT:-8443}
-$([ "${ENABLE_AWG_HOP:-0}" -eq 1 ] && echo "Скоростной пул UDP:    ${PRIMARY_DOMAIN}:35001-49999 (Любой порт пула -> :${NATIVE_AWG_PORT})" || echo "Режим портов:          Одиночный порт :${NATIVE_AWG_PORT}")
+$([ "0" -eq 1 ] && echo "Скоростной пул UDP:    ${PRIMARY_DOMAIN}:35001-49999 (Любой порт пула -> :${NATIVE_AWG_PORT})" || echo "Режим портов:          Одиночный порт :${NATIVE_AWG_PORT}")
 Первый клиент:         Test-Client
 Конфиг файл (.conf):   /root/amneziawg-client.conf
 Стандарт скорости:     MTU 1360 | MSS 1320 | Jc 4 | Jmin 40 | Jmax 70 | S1 72 | S2 56 | S3 32 | S4 16
@@ -5324,26 +5601,27 @@ SSH порт:              ${TARGET_SSH_PORT}
 2. Выполните команду: reboot
 =====================================================================
 EOF
+mv -f "$CRED_FILE.tmp" "$CRED_FILE"
+chmod 0644 "$CRED_FILE" 2>/dev/null || true
 chmod 600 "$CRED_FILE"
 
 echo
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА (v3.7 MyPrivateCloud ULTRA)!            ${NC}"
+echo -e "${GREEN}  СИСТЕМА УСПЕШНО РАЗВЕРНУТА (v3.8 MyPrivateCloud ULTRA)!            ${NC}"
 echo -e "${GREEN}=====================================================================${NC}"
-echo -e "  Сайт-маскировка DataSphere:  ${CYAN}https://${PRIMARY_DOMAIN}/${NC}"
-echo -e "  Скрытый SSO Hub:             ${WHITE}Кнопка «Консоль» в шапке сайта${NC}"
+echo -e "  Сайт-маскировка MyPrivateCloud:  ${CYAN}https://${PRIMARY_DOMAIN}/${NC}"
+echo -e "  Скрытый SSO Hub:             ${WHITE}Кнопка «Авторизация» по центру страницы${NC}"
 if [ "$INSTALL_MODE" = "1" ]; then
 echo -e "  Логин: ${WHITE}${ADMIN_USER}${NC} | Пароль: ${YELLOW}${BOLD}${ADMIN_PASS}${NC}"
 fi
 echo
 echo -e "  Прямой URL панели 3X-UI:     ${CYAN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
+if [ "${ENABLE_AUTO_UPDATE:-0}" -eq 1 ]; then
+echo -e "  Автообслуживание (ОС/AWG):   ${GREEN}Активно (Вс 04:00 UTC, Circuit Breaker ON)${NC}"
+fi
 echo -e "  Сетевой адаптер (WAN):       ${GREEN}${DEFAULT_IF} (Universal Dynamic WAN Engine)${NC}"
 if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
-    if [ "${ENABLE_AWG_HOP:-0}" -eq 1 ]; then
-echo -e "  Нативный AmneziaWG (Kernel): ${GREEN}awg0 (:8443/udp, пул 35001-49999, MTU 1360 / MSS 1320)${NC}"
-else
-echo -e "  Нативный AmneziaWG (Kernel): ${GREEN}awg0 (:8443/udp одиночный порт, MTU 1360 / MSS 1320)${NC}"
-fi
+    echo -e "  Нативный AmneziaWG (Kernel): ${GREEN}awg0 (:${NATIVE_AWG_PORT}/udp одиночный порт, MTU 1360 / MSS 1320)${NC}"
 echo -e "  Первый клиент:               ${GREEN}Test-Client (/root/amneziawg-client.conf)${NC}"
 fi
 if [ "${ENABLE_AGH:-0}" -eq 1 ]; then
@@ -5362,23 +5640,19 @@ echo -e "  ${BOLD}Клиент «${TEST_EMAIL}» (Clash / Mihomo Meta):${NC}"
 echo -e "  ${GREEN}https://${PRIMARY_DOMAIN}${SUB_CLASH_PATH}${UNIFIED_SUB_ID}${NC}"
 echo
 fi
-echo -e "  ${WHITE}Zero-SNI Shield:${NC}             ${GREEN}ssl_reject_handshake on (Скан IP изолирован)${NC}"
+  echo -e "  ${WHITE}Zero-SNI Shield:${NC}             ${GREEN}ssl_reject_handshake on (Скан IP изолирован)${NC}"
 echo -e "  ${WHITE}Порт 80:${NC}                     ${GREEN}Только ACME, сканеры сбрасываются (444)${NC}"
-echo -e "  ${WHITE}Anti-Loop Fallback 9443:${NC}     ${GREEN}Proxy_Protocol v1 + Живой Nginx (Декой DataSphere)${NC}"
+echo -e "  ${WHITE}Anti-Loop Fallback 9443:${NC}     ${GREEN}Proxy_Protocol v1 + Живой Nginx (Декой MyPrivateCloud)${NC}"
 echo -e "  ${WHITE}L4 Stream Ingress:${NC}           ${GREEN}Строго порт 443/tcp (Порт 8443 освобожден под UDP)${NC}"
 if [ "${ENABLE_XHTTP:-0}" -eq 1 ]; then
 echo -e "  ${WHITE}VLESS xHTTP Inbound:${NC}         ${GREEN}Строго привязан к ${PRIMARY_DOMAIN} (H2 Stream-One)${NC}"
 fi
-echo -e "  ${WHITE}Hysteria 2 Hopping Пул:${NC}      ${GREEN}Порты 20000:35000/udp -> :443/udp${NC}"
+echo -e "  ${WHITE}Hysteria 2:${NC}                  ${GREEN}Выделенный порт :${HY2_PORT}/udp${NC}"
 if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
-    if [ "${ENABLE_AWG_HOP:-0}" -eq 1 ]; then
-echo -e "  ${WHITE}AmneziaWG Native Пул:${NC}        ${GREEN}Порты 35001:49999/udp -> :8443/udp${NC}"
-else
-echo -e "  ${WHITE}AmneziaWG Native Режим:${NC}      ${GREEN}Одиночный порт :8443/udp${NC}"
-fi
+    echo -e "  ${WHITE}AmneziaWG Native (Kernel):${NC}    ${GREEN}awg0 (:${NATIVE_AWG_PORT}/udp, MTU 1360 / MSS 1320)${NC}"
 fi
 echo -e "  ${WHITE}AWG3 Golden Matrix:${NC}          ${GREEN}S1=72 | S2=56 | S3=32 | S4=16 | MTU 1360 | MSS 1320${NC}"
-echo -e "  ${WHITE}3X-UI Выделенный UDP Стек:${NC}   ${GREEN}AmneziaWG v3.2 (:10443/udp)${NC}"
+echo -e "  ${WHITE}3X-UI Выделенный UDP Стек:${NC}   ${GREEN}AmneziaWG v3.2 (:${AWG_V3_PORT}/udp)${NC}"
 echo -e "  ${WHITE}Zero-Leak In-Memory Hub:${NC}     ${GREEN}Разметка меню строится в RAM только после 200 OK${NC}"
 echo
 echo -e "  Все доступы сохранены в файл: ${CYAN}${CRED_FILE}${NC} (chmod 600)"
