@@ -85,7 +85,7 @@ cleanup() {
             systemctl start x-ui 2>/dev/null || true
         fi
     fi
-    rm -rf /tmp/xray_unpack /tmp/xui_upd_unpack /usr/local/bin/myprivatecloud_core.py.tmp* /usr/local/bin/myprivatecloud_utils.py.tmp* /tmp/vpn_unified_creds.txt /tmp/3xui_install.log /tmp/3x-ui-install.sh /tmp/xray-*.zip /tmp/x-ui-linux-*.tar.gz /tmp/agh.tar.gz /tmp/nginx_prev_sni_map.txt /tmp/nginx_signing.key.tmp /tmp/xui_stage2_* /tmp/awg-kernel-src /tmp/awg-tools-build /tmp/ufw_before_pre_b10.bak "${NGINX_PRE_BAK:-}" "${XUI_PRE_BAK:-}" 2>/dev/null || true
+    rm -rf /tmp/xray_unpack /tmp/xui_upd_unpack /usr/local/bin/myprivatecloud_core.py.tmp* /usr/local/bin/myprivatecloud_utils.py.tmp* /usr/local/bin/hardcore_dpi_audit.sh.tmp* /tmp/vpn_unified_creds.txt /tmp/3xui_install.log /tmp/3x-ui-install.sh /tmp/xray-*.zip /tmp/x-ui-linux-*.tar.gz /tmp/agh.tar.gz /tmp/nginx_prev_sni_map.txt /tmp/nginx_signing.key.tmp /tmp/xui_stage2_* /tmp/awg-kernel-src /tmp/awg-tools-build /tmp/ufw_before_pre_b10.bak /tmp/resolv.conf.pre_geo_bak "${NGINX_PRE_BAK:-}" "${XUI_PRE_BAK:-}" 2>/dev/null || true
     if [ "$exit_code" -ne 0 ]; then
         echo -e "\n${RED}[X] Скрипт аварийно прерван на строке ${1:-unknown} (код: ${exit_code}).${NC}" >&2
     fi
@@ -153,8 +153,18 @@ CREATE_USER=0
 SETUP_KEYS=0
 EXISTING_DB_PATH=""
 export EXISTING_DB_PATH
+# HARDCORE_PREUPDATE_AND_AUDIT_PATCH_V1
+# HARDCORE_PREUPDATE_AND_AUDIT_PATCH_V2
+PRE_UPGRADE_DONE=0
+PRE_UTILS_DONE=0
+PRE_UPD_CHOICE="0"
+PRE_UTILS_CHOICE="0"
+IS_COMBAT_HOST=0
 
-rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx /usr/share/keyrings/nginx-archive-keyring.gpg.tmp 2>/dev/null || true
+rm -f /usr/share/keyrings/nginx-archive-keyring.gpg.tmp 2>/dev/null || true
+if [ -f /etc/apt/sources.list.d/nginx.list ] && [ ! -s /usr/share/keyrings/nginx-archive-keyring.gpg ]; then
+    rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx 2>/dev/null || true
+fi
 AMNEZIA_KEY_VALID=0
 if [ -s /etc/apt/keyrings/amnezia.gpg ] && command -v gpg >/dev/null 2>&1; then
     if gpg --no-default-keyring --keyring /etc/apt/keyrings/amnezia.gpg --list-keys 4166F2C257290828 >/dev/null 2>&1; then
@@ -328,7 +338,7 @@ patch_amnezia_dkms_kernel_compat() {
         fi
         [ -n "$target_header" ] || continue
 
-        if grep -qE '__compat_udp_tunnel_sock_patched|__builtin_types_compatible_p.*setup_udp_tunnel_sock' "$target_header" 2>/dev/null; then
+        if grep -qE '__compat_udp_tunnel_sock_patched' "$target_header" 2>/dev/null && grep -qE '^[[:space:]]*#define[[:space:]]+udp_tunnel_sock_release\(' "$target_header" 2>/dev/null; then
             continue
         fi
 
@@ -373,25 +383,20 @@ legacy_re = re.compile(
 )
 
 changed = False
-if legacy_re.search(txt):
-    txt = legacy_re.sub(pr265_block, txt, count=1)
-    txt = re.sub(r"^[ \t]*#define\s+udp_tunnel_sock_release\s*\([^\n]*\n?", "", txt, flags=re.M)
+multiline_setup_re = re.compile(r"^[ \t]*#define[ \t]+setup_udp_tunnel_sock\b(?:[^\n]*\\\n)*[^\n]*sk->sk_socket[^\n]*\n?", re.M)
+multiline_rel_re = re.compile(r"^[ \t]*#define[ \t]+udp_tunnel_sock_release\b(?:[^\n]*\\\n)*[^\n]*\n?", re.M)
+incomplete_pr265_re = re.compile(r"/\* PR #265:.*?#ifndef __compat_udp_tunnel_sock_patched.*?#endif", re.S)
+if "__compat_udp_tunnel_sock_patched" in txt and not re.search(r"^[ \t]*#define[ \t]+udp_tunnel_sock_release\(", txt, re.M):
+    txt = incomplete_pr265_re.sub(pr265_block, txt, count=1)
     changed = True
-elif re.search(r"^[ \t]*#define\s+setup_udp_tunnel_sock\s*\([^\n]*sk->sk_socket", txt, re.M):
-    lines = txt.splitlines(keepends=True)
-    out = []
-    inserted = False
-    for ln in lines:
-        if re.match(r"^[ \t]*#define\s+setup_udp_tunnel_sock\s*\(", ln):
-            if not inserted:
-                out.append(pr265_block + "\n")
-                inserted = True
-            continue
-        if re.match(r"^[ \t]*#define\s+udp_tunnel_sock_release\s*\(", ln):
-            continue
-        out.append(ln)
-    txt = "".join(out)
-    changed = inserted
+elif legacy_re.search(txt):
+    txt = multiline_rel_re.sub("", txt)
+    txt = legacy_re.sub(pr265_block, txt, count=1)
+    changed = True
+elif multiline_setup_re.search(txt):
+    txt = multiline_rel_re.sub("", txt)
+    txt = multiline_setup_re.sub(pr265_block + "\n", txt, count=1)
+    changed = True
 
 if changed:
     tmp = hp + ".tmp"
@@ -442,6 +447,22 @@ wait_for_apt_lock() {
 log "Первичная подготовка системных утилит (Профиль: ${CPU_CORES} vCPU / ${TOTAL_RAM_MB} MB RAM)..."
 wait_for_apt_lock
 dpkg --configure -a >/dev/null 2>&1 || true
+
+if [ -e /etc/resolv.conf ] && grep -qE '^\s*nameserver\s+127\.0\.0\.1\b' /etc/resolv.conf 2>/dev/null; then
+    if ! getent ahosts deb.debian.org >/dev/null 2>&1 && ! getent ahosts archive.ubuntu.com >/dev/null 2>&1; then
+        warn "Обнаружен неактивный локальный DNS (127.0.0.1). Временное переключение /etc/resolv.conf для APT bootstrap..."
+        if [ ! -f /tmp/resolv.conf.pre_geo_bak ]; then
+            cp -L /etc/resolv.conf /tmp/resolv.conf.pre_geo_bak 2>/dev/null || true
+        fi
+        cat << 'EOF_BOOT_DNS' > /etc/resolv.conf.tmp
+nameserver 1.1.1.1
+nameserver 77.88.8.8
+nameserver 8.8.8.8
+EOF_BOOT_DNS
+        mv -f /etc/resolv.conf.tmp /etc/resolv.conf
+        chmod 0644 /etc/resolv.conf 2>/dev/null || true
+    fi
+fi
 
 # Очистка кэша APT для освобождения буферов памяти перед установкой
 apt-get clean -q >/dev/null 2>&1 || true
@@ -500,6 +521,11 @@ is_tcp_port_free() {
             return 1
         fi
     done
+    if command -v ss >/dev/null 2>&1; then
+        if ss -tlnp 2>/dev/null | awk -v port="$p" '$4 ~ (":" port "$") && $0 !~ /(x-ui|xray|nginx|AdGuardHome|sshd|uvicorn)/ {f=1} END {exit !f}'; then
+            return 1
+        fi
+    fi
     return 0
 }
 
@@ -514,6 +540,17 @@ is_udp_port_free() {
             return 1
         fi
     done
+    if command -v ss >/dev/null 2>&1; then
+        local cur_awg_p=""
+        if [ -f /etc/amnezia/amneziawg/awg0.conf ]; then
+            cur_awg_p=$(grep -E '^\s*ListenPort\s*=' /etc/amnezia/amneziawg/awg0.conf 2>/dev/null | head -n1 | awk -F= '{print $2}' | tr -d '[:space:]' || echo "")
+        fi
+        if [ "$p" != "$cur_awg_p" ]; then
+            if ss -ulnp 2>/dev/null | awk -v port="$p" '$4 ~ (":" port "$") && $0 !~ /(x-ui|xray|AdGuardHome)/ {f=1} END {exit !f}'; then
+                return 1
+            fi
+        fi
+    fi
     return 0
 }
 
@@ -636,6 +673,26 @@ sqlite_ro() {
     sqlite3 -cmd ".timeout 5000" "$db" "$sql" 2>/dev/null || true
 }
 
+get_local_ib_cond() {
+    local db="$1"
+    local cond=""
+    local cols
+    cols=$(sqlite_ro "$db" "PRAGMA table_info(inbounds);")
+    if printf '%s\n' "$cols" | grep -qE '\|node_id\|'; then
+        cond="AND (node_id IS NULL OR node_id = 0)"
+    fi
+    if printf '%s\n' "$cols" | grep -qE '\|origin_node_guid\|'; then
+        local pguid
+        pguid=$(sqlite_ro "$db" "SELECT value FROM settings WHERE key='panelGuid' LIMIT 1;" | tr -d "'\";[:space:]")
+        if [[ "$pguid" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            cond="${cond} AND (origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = '${pguid}')"
+        else
+            cond="${cond} AND (origin_node_guid IS NULL OR origin_node_guid = '')"
+        fi
+    fi
+    printf '%s' "$cond"
+}
+
 # =============================================================
 #  УНИВЕРСАЛЬНЫЙ ДЕТЕКТОР ВНЕШНЕГО СЕТЕВОГО ИНТЕРФЕЙСА (TIER 1-4)
 # =============================================================
@@ -705,6 +762,7 @@ if [ -n "${SSH_CONNECTION:-}" ]; then
 fi
 if [ -z "$SSH_ACTIVE_PORT" ] || ! validate_port "$SSH_ACTIVE_PORT"; then
     if [ -x /usr/sbin/sshd ]; then
+        mkdir -p /run/sshd 2>/dev/null || true
         SSH_ACTIVE_PORT=$(/usr/sbin/sshd -T 2>/dev/null | awk '/^port[[:space:]]+/ {print $2; exit}' || echo "")
     fi
 fi
@@ -876,6 +934,9 @@ echo -e "  1) ${GREEN}[RU] Сервер в РФ${NC} (Яндекс DNS 77.88.8.8
 echo -e "  2) ${GREEN}[EU/World] Зарубежный сервер${NC} (Cloudflare DNS, прямой GitHub, DoQ)"
 prompt_choice "Выберите сетевой профиль" "$DEFAULT_GEO_PROFILE" GEO_PROFILE "1" "2"
 
+if [ ! -f /tmp/resolv.conf.pre_geo_bak ] && [ -e /etc/resolv.conf ]; then
+    cp -L /etc/resolv.conf /tmp/resolv.conf.pre_geo_bak 2>/dev/null || true
+fi
 if [ "$GEO_PROFILE" = "1" ]; then
     log "Активация сетевой стратегии для РФ (Яндекс DNS Primary)..."
     cat << 'EOF' > /etc/resolv.conf.tmp
@@ -894,6 +955,178 @@ nameserver 9.9.9.9
 EOF
     mv -f /etc/resolv.conf.tmp /etc/resolv.conf
     chmod 0644 /etc/resolv.conf 2>/dev/null || true
+fi
+
+IS_COMBAT_HOST=0
+if [ "$INSTALL_MODE" = "2" ] || [ -n "${EXISTING_DB_PATH:-}" ] || \
+   [ -f /etc/amnezia/amneziawg/awg0.conf ] || [ -f /opt/AdGuardHome/AdGuardHome.yaml ] || \
+   [ -f /etc/nginx/conf.d/01-main.conf ]; then
+    IS_COMBAT_HOST=1
+elif systemctl is-active --quiet x-ui 2>/dev/null || \
+     systemctl is-active --quiet nginx 2>/dev/null || \
+     systemctl is-active --quiet AdGuardHome 2>/dev/null || \
+     systemctl is-active --quiet awg-quick@awg0 2>/dev/null; then
+    IS_COMBAT_HOST=1
+fi
+
+echo
+echo -e "${WHITE}${BOLD}--- ПРЕДВАРИТЕЛЬНОЕ ОБНОВЛЕНИЕ И УТИЛИТЫ СЕРВЕРА ---${NC}"
+if [ "$IS_COMBAT_HOST" -eq 1 ]; then
+    ok "Статус сервера: ${YELLOW}${BOLD}БОЕВОЙ СЕРВЕР${NC} (обнаружены активные компоненты/конфиги)."
+    DEFAULT_PRE_UPD_MODE="2"
+else
+    ok "Статус сервера: ${GREEN}${BOLD}ГОЛЫЙ СЕРВЕР${NC} (чистое окружение)."
+    DEFAULT_PRE_UPD_MODE="1"
+fi
+
+echo -e "  1) ${GREEN}Голый сервер (Full Upgrade)${NC} — apt full-upgrade + autoremove --purge + clean"
+echo -e "  2) ${YELLOW}Боевой сервер (Safe Upgrade)${NC} — apt upgrade --with-new-pkgs + autoclean + dkms/systemd аудит"
+echo -e "  3) ${CYAN}Пропустить${NC} обновление пакетов ОС на этом этапе"
+prompt_choice "Выберите стратегию обновления сервера" "$DEFAULT_PRE_UPD_MODE" PRE_UPD_CHOICE "1" "2" "3"
+
+if [ "$PRE_UPD_CHOICE" = "1" ] || [ "$PRE_UPD_CHOICE" = "2" ]; then
+    if [ "$IS_COMBAT_HOST" -eq 1 ] && [ "$INSTALL_MODE" != "2" ]; then
+        BAK_PATHS=()
+        for bp in /etc/x-ui /etc/nginx /etc/letsencrypt /etc/ssl/acme /etc/amnezia/amneziawg /etc/myprivatecloud /etc/ufw/before.rules /opt/AdGuardHome/AdGuardHome.yaml; do
+            if [ -e "$bp" ]; then
+                BAK_PATHS+=("$bp")
+            fi
+        done
+        if [ "${#BAK_PATHS[@]}" -gt 0 ]; then
+            PRE_BAK_TAR="/root/backup_before_preupdate_$(date +%F_%H%M%S).tar.gz"
+            log "Создание страховочного архива перед обновлением боевого хоста ($PRE_BAK_TAR)..."
+            tar -czf "$PRE_BAK_TAR" "${BAK_PATHS[@]}" 2>/dev/null || true
+            if [ -f "$PRE_BAK_TAR" ]; then
+                chmod 0600 "$PRE_BAK_TAR" 2>/dev/null || true
+            fi
+        fi
+    fi
+
+    for apt_f in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+        [ -f "$apt_f" ] || continue
+        if grep -qiE 'launchpadcontent\.net/amnezia|launchpad\.net/amnezia|amnezia/ppa' "$apt_f" 2>/dev/null; then
+            if [ ! -s /etc/apt/keyrings/amnezia.gpg ] || ! grep -q '/etc/apt/keyrings/amnezia.gpg' "$apt_f" 2>/dev/null; then
+                rm -f "$apt_f" 2>/dev/null || true
+            fi
+        fi
+    done
+
+    wait_for_apt_lock
+    dpkg --configure -a >/dev/null 2>&1 || true
+
+    if [ "$PRE_UPD_CHOICE" = "1" ]; then
+        log "Запуск оптимального обновления голого сервера (full-upgrade + autoremove --purge + clean)..."
+        DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=120 update -q
+        DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=120 full-upgrade -y -q \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold"
+        apt-get autoremove --purge -y -q
+        apt-get clean -q
+        PRE_UPGRADE_DONE=1
+        if [ -f /var/run/reboot-required ]; then
+            warn "[!] Требуется reboot перед деплоем (при смене ABI ядра на Debian отказ от reboot заблокирует сборку AmneziaWG awg0)."
+            if [ -f /var/run/reboot-required.pkgs ]; then
+                cat /var/run/reboot-required.pkgs 2>/dev/null || true
+            fi
+            if prompt_yes_no "Перезагрузить сервер сейчас перед продолжением деплоя?" "y"; then
+                ok "Выполняется перезагрузка. После входа запустите /root/install.sh повторно."
+                trap - ERR EXIT INT TERM
+                exec 200>&- || true
+                rm -f "$LOCK_FILE" /tmp/resolv.conf.pre_geo_bak 2>/dev/null || true
+                systemctl reboot
+                exit 0
+            fi
+        else
+            ok "[OK] Система актуальна, reboot не требуется."
+        fi
+    else
+        log "Запуск безопасного обновления боевого сервера (upgrade --with-new-pkgs + autoclean)..."
+        patch_amnezia_dkms_kernel_compat
+        if dpkg -s amneziawg-dkms >/dev/null 2>&1 && dpkg -l amneziawg-dkms 2>/dev/null | grep -qE '^i[UHRF]|^r[cF]'; then
+            dpkg --configure -a || true
+        fi
+        DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=120 update -q
+        if ! DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=120 upgrade --with-new-pkgs -y -q \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold"; then
+            warn "Обновление завершилось с ошибкой (возможен DKMS postinst под новое ядро). Применение патча PR #265 и восстановление dpkg..."
+            patch_amnezia_dkms_kernel_compat
+            dpkg --configure -a || true
+            DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=120 install -f -y -q \
+                -o Dpkg::Options::="--force-confdef" \
+                -o Dpkg::Options::="--force-confold" || die "Не удалось завершить безопасное обновление боевого сервера."
+        fi
+        apt-get autoclean -y -q
+        patch_amnezia_dkms_kernel_compat
+        if dpkg -s amneziawg-dkms >/dev/null 2>&1 && dpkg -l amneziawg-dkms 2>/dev/null | grep -qE '^i[UHRF]|^r[cF]'; then
+            dpkg --configure -a || true
+        fi
+        if command -v dkms >/dev/null 2>&1; then
+            log "Статус модулей DKMS:"
+            dkms status || true
+        fi
+        log "Проверка сбойных юнитов systemd:"
+        systemctl --failed --no-pager || true
+        PRE_UPGRADE_DONE=1
+        if [ -f /var/run/reboot-required ]; then
+            warn "[!] Требуется плановый reboot. Пакеты:"
+            cat /var/run/reboot-required.pkgs 2>/dev/null || true
+            if ! prompt_yes_no "Продолжить развёртывание/миграцию сейчас (плановый reboot выполнить в конце)?" "y"; then
+                if [ -s /tmp/resolv.conf.pre_geo_bak ] && systemctl is-active --quiet AdGuardHome 2>/dev/null; then
+                    cp -f /tmp/resolv.conf.pre_geo_bak /etc/resolv.conf 2>/dev/null || true
+                    chmod 0644 /etc/resolv.conf 2>/dev/null || true
+                    ok "Локальный DNS /etc/resolv.conf боевого сервера восстановлен."
+                fi
+                warn "Установка приостановлена для плановой перезагрузки. После reboot запустите /root/install.sh повторно."
+                exit 0
+            fi
+        else
+            ok "[OK] Обновление завершено, reboot не требуется."
+        fi
+    fi
+fi
+
+DEFAULT_PRE_UTILS="2"
+if [ "$VIRT_TYPE" = "lxc" ] || [ "$VIRT_TYPE" = "openvz" ] || [ "$VIRT_TYPE" = "docker" ]; then
+    DEFAULT_PRE_UTILS="1"
+fi
+
+echo
+echo -e "${WHITE}${BOLD}--- НАБОР СИСТЕМНЫХ И ДИАГНОСТИЧЕСКИХ УТИЛИТ ---${NC}"
+echo -e "  1) ${GREEN}Вариант 1 — Базовый набор${NC} (curl, jq, sqlite3, shellcheck, mtr-tiny, tcpdump, iperf3, btop, iftop, tmux, ncdu)"
+echo -e "  2) ${GREEN}Вариант 2 — Базовый + сборка модулей ядра (amneziawg-dkms)${NC} (+ build-essential, git, dkms)"
+echo -e "  3) ${CYAN}Пропустить${NC} установку дополнительных утилит"
+prompt_choice "Выберите набор утилит для установки" "$DEFAULT_PRE_UTILS" PRE_UTILS_CHOICE "1" "2" "3"
+
+if [ "$PRE_UTILS_CHOICE" = "1" ] || [ "$PRE_UTILS_CHOICE" = "2" ]; then
+    wait_for_apt_lock
+    if [ "$PRE_UPGRADE_DONE" -eq 0 ]; then
+        DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=120 update -q || true
+    fi
+    PRE_UTIL_BASE=(
+        curl ca-certificates gnupg unzip psmisc jq sqlite3 python3
+        bind9-dnsutils iproute2 mtr-tiny tcpdump iperf3 iftop tmux ncdu
+    )
+    PRE_UTIL_OPT=(btop shellcheck htop)
+    PRE_UTIL_FULL=("${PRE_UTIL_BASE[@]}" "${PRE_UTIL_OPT[@]}")
+    if [ "$PRE_UTILS_CHOICE" = "2" ]; then
+        PRE_UTIL_FULL+=(build-essential git dkms)
+    fi
+
+    log "Установка выбранного набора утилит..."
+    if ! DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends -q "${PRE_UTIL_FULL[@]}"; then
+        warn "Единый пакетный запрос не прошёл (возможна недоступность btop/shellcheck в текущем репо). Выполняется резервная установка..."
+        PRE_UTIL_FALLBACK=("${PRE_UTIL_BASE[@]}")
+        if [ "$PRE_UTILS_CHOICE" = "2" ]; then
+            PRE_UTIL_FALLBACK+=(build-essential git dkms)
+        fi
+        DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends -q "${PRE_UTIL_FALLBACK[@]}" || warn "Часть базовых утилит не установлена."
+        for opt_pkg in "${PRE_UTIL_OPT[@]}"; do
+            DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends -q "$opt_pkg" 2>/dev/null || true
+        done
+    fi
+    PRE_UTILS_DONE=1
+    ok "Набор системных утилит установлен."
 fi
 
 echo
@@ -928,8 +1161,8 @@ done
 ok "Главный домен L7 (PRIMARY_DOMAIN): ${GREEN}${PRIMARY_DOMAIN}${NC}"
 
 ALL_DOMAINS=("$PRIMARY_DOMAIN")
-declare -A DOMAIN_TO_PORT
-declare -A EXT_SNI_TO_PORT
+declare -A DOMAIN_TO_PORT=()
+declare -A EXT_SNI_TO_PORT=()
 STEAL_PORTS_LIST=()
 CLASSIC_PORTS_LIST=()
 ALL_REALITY_PORTS=()
@@ -950,16 +1183,18 @@ done
 
 echo
 echo -e "${WHITE}${BOLD}--- ШАГ 2: Системные настройки и безопасность ОС ---${NC}"
-if prompt_yes_no "Выполнить полное обновление системы (apt upgrade) и очистку?" "y"; then
-    DO_SYS_UPGRADE=1
+DO_SYS_UPGRADE=0
+if [ "${PRE_UPGRADE_DONE:-0}" -eq 1 ]; then
+    ok "Обновление пакетов ОС уже выполнено на предварительном этапе."
 else
-    DO_SYS_UPGRADE=0
+    log "Обновление пакетов ОС пропущено согласно предварительному выбору."
 fi
 
-if prompt_yes_no "Установить расширенные инструменты мониторинга (htop, btop, jq, tmux)?" "y"; then
-    INSTALL_EXTRA_UTILS=1
+INSTALL_EXTRA_UTILS=0
+if [ "${PRE_UTILS_DONE:-0}" -eq 1 ]; then
+    ok "Набор диагностических утилит уже установлен на предварительном этапе (Вариант ${PRE_UTILS_CHOICE})."
 else
-    INSTALL_EXTRA_UTILS=0
+    log "Установка дополнительных утилит пропущена согласно предварительному выбору."
 fi
 
 if prompt_yes_no "Включить сетевой тюнинг ядра (TCP BBR, somaxconn, буферы, MTU probing)?" "y"; then
@@ -1057,22 +1292,19 @@ DETECTED_XHTTP_PORT="50443"
 
 if [ -n "$EXISTING_DB_PATH" ]; then
     DETECTED_PANEL_PATH=$(sqlite_ro "$EXISTING_DB_PATH" "SELECT value FROM settings WHERE key='webBasePath';")
+    DETECTED_PANEL_PATH="${DETECTED_PANEL_PATH#/}"
+    DETECTED_PANEL_PATH="${DETECTED_PANEL_PATH%/}"
     DETECTED_PANEL_PATH="${DETECTED_PANEL_PATH:-my-3x-panel}"
     DETECTED_SUB_PATH=$(sqlite_ro "$EXISTING_DB_PATH" "SELECT value FROM settings WHERE key='subPath';")
+    DETECTED_SUB_PATH="${DETECTED_SUB_PATH#/}"
+    DETECTED_SUB_PATH="${DETECTED_SUB_PATH%/}"
     DETECTED_SUB_PATH="${DETECTED_SUB_PATH:-my-post-key}"
     DETECTED_PANEL_PORT=$(sqlite_ro "$EXISTING_DB_PATH" "SELECT value FROM settings WHERE key='webPort';")
     DETECTED_PANEL_PORT="${DETECTED_PANEL_PORT:-10443}"
     DETECTED_SUB_PORT=$(sqlite_ro "$EXISTING_DB_PATH" "SELECT value FROM settings WHERE key='subPort';")
     DETECTED_SUB_PORT="${DETECTED_SUB_PORT:-55443}"
-    DETECTED_PANEL_PATH="${DETECTED_PANEL_PATH#/}"
-    DETECTED_PANEL_PATH="${DETECTED_PANEL_PATH%/}"
-    DETECTED_SUB_PATH="${DETECTED_SUB_PATH#/}"
-    DETECTED_SUB_PATH="${DETECTED_SUB_PATH%/}"
 
-    LOCAL_IB_COND=""
-    if sqlite_ro "$EXISTING_DB_PATH" "PRAGMA table_info(inbounds);" | grep -qE '\|node_id\|'; then
-        LOCAL_IB_COND="AND (node_id IS NULL OR node_id = 0)"
-    fi
+    LOCAL_IB_COND=$(get_local_ib_cond "$EXISTING_DB_PATH")
     DB_XHTTP_PATH=$(sqlite_ro "$EXISTING_DB_PATH" "SELECT json_extract(stream_settings, '$.xhttpSettings.path') FROM inbounds WHERE protocol='vless' AND stream_settings LIKE '%xhttp%' ${LOCAL_IB_COND} ORDER BY enable DESC, id ASC LIMIT 1;")
     if [ -n "$DB_XHTTP_PATH" ]; then
         DETECTED_XHTTP_PATH="${DB_XHTTP_PATH#/}"
@@ -1128,8 +1360,22 @@ if db_p and os.path.exists(db_p):
         conn = sqlite3.connect(f"file:{db_p}?mode=ro", uri=True, timeout=5.0)
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(inbounds)")
-        _nc_det = " AND (node_id IS NULL OR node_id = 0)" if any(r[1] == "node_id" for r in cur.fetchall()) else ""
-        cur.execute(f"SELECT port, tag, stream_settings FROM inbounds WHERE protocol='vless' AND stream_settings LIKE '%reality%'{_nc_det} ORDER BY enable DESC, id ASC")
+        _cols_det = {r[1] for r in cur.fetchall()}
+        _nc_det_parts = []
+        _nc_det_params = []
+        if "node_id" in _cols_det:
+            _nc_det_parts.append("(node_id IS NULL OR node_id = 0)")
+        if "origin_node_guid" in _cols_det:
+            cur.execute("SELECT value FROM settings WHERE key='panelGuid' LIMIT 1")
+            _pg_det = cur.fetchone()
+            _pg_val = str(_pg_det[0]).strip() if _pg_det and _pg_det[0] else ""
+            if _pg_val:
+                _nc_det_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = ?)")
+                _nc_det_params.append(_pg_val)
+            else:
+                _nc_det_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '')")
+        _nc_det = (" AND " + " AND ".join(_nc_det_parts)) if _nc_det_parts else ""
+        cur.execute(f"SELECT port, tag, stream_settings FROM inbounds WHERE protocol='vless' AND stream_settings LIKE '%reality%'{_nc_det} ORDER BY enable DESC, id ASC", _nc_det_params)
         for p, tag, st_raw in cur.fetchall():
             st = json.loads(st_raw) if st_raw else {}
             rs = st.get("realitySettings", {})
@@ -1159,7 +1405,7 @@ else
     ENABLE_STEAL=0
 fi
 
-declare -A STEAL_PORT_DOMAINS
+declare -A STEAL_PORT_DOMAINS=()
 if [ "$ENABLE_STEAL" -eq 1 ]; then
     while true; do
         prompt_tcp_port "  Локальный порт Xray для Steal-Oneself" "$DETECTED_STEAL_PORT" PORT_VAL
@@ -1233,10 +1479,13 @@ if prompt_yes_no "Включить VLESS xHTTP (Native H2 Stream-One + Post-Quan
         prompt_path "  Секретный URI-путь для xHTTP (например: Stream-One-Path)" "${DETECTED_XHTTP_PATH:-Stream-One-Path}" RAW_XHTTP_STREAM_PATH
         XHTTP_STREAM_PATH="/${RAW_XHTTP_STREAM_PATH#/}"
         XHTTP_STREAM_PATH="${XHTTP_STREAM_PATH%/}/"
-        if [ "$XHTTP_STREAM_PATH" != "$PANEL_PATH" ] && [ "$XHTTP_STREAM_PATH" != "$SUB_PATH" ]; then
+        if [ "$XHTTP_STREAM_PATH" != "$PANEL_PATH" ] && [ "$XHTTP_STREAM_PATH" != "$SUB_PATH" ] && \
+           [[ "$XHTTP_STREAM_PATH" != "$PANEL_PATH"* ]] && [[ "$PANEL_PATH" != "$XHTTP_STREAM_PATH"* ]] && \
+           [[ "$XHTTP_STREAM_PATH" != "$SUB_PATH"* ]] && [[ "$SUB_PATH" != "$XHTTP_STREAM_PATH"* ]] && \
+           [[ "$XHTTP_STREAM_PATH" != "/api/v1/myprivatecloud/"* ]]; then
             break
         fi
-        warn "URI-путь xHTTP не может совпадать с путём панели или подписок."
+        warn "URI-путь xHTTP конфликтует или пересекается с путём панели, подписок или системного API."
     done
     BASE_XHTTP_PATH="${XHTTP_STREAM_PATH%/}"
 else
@@ -1252,7 +1501,7 @@ else
     ENABLE_CLASSIC=0
 fi
 
-declare -A CLASSIC_PORT_SNIS
+declare -A CLASSIC_PORT_SNIS=()
 if [ "$ENABLE_CLASSIC" -eq 1 ]; then
     while true; do
         prompt_tcp_port "  Локальный порт Xray для Classic REALITY" "46443" PORT_VAL
@@ -1333,10 +1582,7 @@ DETECTED_HY2_PORT="40443"
 DETECTED_AWG_V3_PORT="42443"
 DETECTED_NATIVE_AWG_PORT="41443"
 if [ -n "${EXISTING_DB_PATH:-}" ] && [ -f "$EXISTING_DB_PATH" ]; then
-    LOCAL_IB_COND=""
-    if sqlite_ro "$EXISTING_DB_PATH" "PRAGMA table_info(inbounds);" | grep -qE '\|node_id\|'; then
-        LOCAL_IB_COND="AND (node_id IS NULL OR node_id = 0)"
-    fi
+    LOCAL_IB_COND=$(get_local_ib_cond "$EXISTING_DB_PATH")
     DB_HY2_P=$(sqlite_ro "$EXISTING_DB_PATH" "SELECT port FROM inbounds WHERE protocol='hysteria' ${LOCAL_IB_COND} ORDER BY enable DESC, id ASC LIMIT 1;")
     if validate_port "$DB_HY2_P"; then DETECTED_HY2_PORT="$DB_HY2_P"; fi
     DB_AWG3_P=$(sqlite_ro "$EXISTING_DB_PATH" "SELECT port FROM inbounds WHERE protocol='amneziawg' ${LOCAL_IB_COND} ORDER BY enable DESC, id ASC LIMIT 1;")
@@ -1597,7 +1843,7 @@ wait_for_apt_lock
 CORE_PKGS=(
     curl iproute2 bind9-dnsutils ca-certificates ufw iptables systemd
     sudo bash psmisc openssl gnupg sqlite3 jq unzip gawk tar
-    python3 python3-bcrypt python3-systemd qrencode fail2ban
+    python3 python3-bcrypt python3-systemd qrencode fail2ban openssh-client
 )
 if ! apt-get install -y "${CORE_PKGS[@]}" -q >/dev/null 2>&1; then
     warn "Повторная установка системных пакетов с выводом диагностики..."
@@ -1743,7 +1989,8 @@ if [ "${ENABLE_BBR_TUNING:-0}" -eq 1 ] && [ "${CPU_CORES:-1}" -gt 1 ]; then
     cat << EOF > /etc/systemd/system/network-rps.service.tmp
 [Unit]
 Description=Network RPS/RFS/XPS Multi-Core Scaling on $DEFAULT_IF
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
@@ -1879,7 +2126,7 @@ fi
 ufw allow "${TARGET_SSH_PORT}/tcp" comment 'SSH Target Port' >/dev/null 2>&1 || true
 
 if [ -f /etc/ssh/sshd_config ]; then
-    sed -i -E 's/^[#\s]*Port [0-9]+/Port '"$TARGET_SSH_PORT"'/' /etc/ssh/sshd_config || true
+    sed -i -E 's/^[#[:space:]]*Port [0-9]+/Port '"$TARGET_SSH_PORT"'/' /etc/ssh/sshd_config || true
     if ! head -n 5 /etc/ssh/sshd_config 2>/dev/null | grep -qE '^Include /etc/ssh/sshd_config\.d/\*\.conf'; then
         sed -i -E '/^[[:space:]]*Include[[:space:]]+\/etc\/ssh\/sshd_config\.d\/\*\.conf/d' /etc/ssh/sshd_config
         if [ -s /etc/ssh/sshd_config ]; then
@@ -2071,6 +2318,7 @@ done
 
 log "Оркестрация официального репозитория Nginx для $OS_ID ($OS_CODENAME)..."
 systemctl stop nginx 2>/dev/null || true
+rm -f /etc/apt/sources.list.d/nginx.list /etc/apt/preferences.d/99nginx 2>/dev/null || true
 
 if systemctl is-active --quiet apache2 2>/dev/null || systemctl list-unit-files apache2.service 2>/dev/null | grep -q "apache2"; then
     systemctl stop apache2 2>/dev/null || true
@@ -2127,6 +2375,18 @@ EXISTING_NGINX_VER="0"
 if command -v nginx >/dev/null 2>&1; then
     EXISTING_NGINX_VER=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "0")
 fi
+
+is_cve_safe_nginx() {
+    local v="${1:-0}"
+    [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+    local maj="${BASH_REMATCH[1]}" mn="${BASH_REMATCH[2]}"
+    if [ "$maj" -gt 1 ]; then return 0; fi
+    if [ $((mn % 2)) -eq 1 ]; then
+        dpkg --compare-versions "$v" "ge" "1.31.10"
+    else
+        dpkg --compare-versions "$v" "ge" "1.30.8"
+    fi
+}
 
 MIN_NGINX_VER="1.29.4"
 USE_OFFICIAL_NGINX_REPO=0
@@ -2192,16 +2452,19 @@ if [ "$USE_OFFICIAL_NGINX_REPO" -eq 1 ]; then
     apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx
     ok "Nginx Mainline ($CANDIDATE_NGINX_VER) успешно актуализирован/установлен."
 else
-    if [ "$EXISTING_NGINX_VER" != "0" ] && dpkg --compare-versions "$EXISTING_NGINX_VER" "ge" "$MIN_NGINX_VER"; then
-        ok "Сохранена активная версия Nginx ($EXISTING_NGINX_VER >= $MIN_NGINX_VER)."
+    if [ "$EXISTING_NGINX_VER" != "0" ] && is_cve_safe_nginx "$EXISTING_NGINX_VER"; then
+        ok "Сохранена актуальная версия Nginx ($EXISTING_NGINX_VER, CVE-patched)."
     else
-        die "Установка Nginx ниже ${MIN_NGINX_VER} строго запрещена (необходим proxy_http_version 2). Репозиторий nginx.org недоступен; фоллбэк на системный репозиторий $OS_ID заблокирован."
+        die "Активный Nginx ($EXISTING_NGINX_VER) отсутствует или уязвим (требуется >= 1.31.10 mainline / >= 1.30.8 stable), а репозиторий nginx.org недоступен."
     fi
 fi
 
 INSTALLED_NGINX_VER=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "0")
 if [ "$INSTALLED_NGINX_VER" = "0" ] || dpkg --compare-versions "$INSTALLED_NGINX_VER" "lt" "$MIN_NGINX_VER"; then
     die "Установленная версия Nginx ($INSTALLED_NGINX_VER) ниже допустимой $MIN_NGINX_VER. Прекращение работы."
+fi
+if ! is_cve_safe_nginx "$INSTALLED_NGINX_VER"; then
+    warn "Установленный Nginx ($INSTALLED_NGINX_VER) ниже CVE-патч уровня (1.31.10 mainline / 1.30.8 stable). Проверьте обновления nginx.org."
 fi
 ok "Версия Nginx верифицирована: ${GREEN}${INSTALLED_NGINX_VER}${NC} (>= ${MIN_NGINX_VER}, proxy_http_version 2 активен)."
 
@@ -2296,9 +2559,21 @@ EOF
 mv -f /etc/nginx/nginx.conf.tmp /etc/nginx/nginx.conf
 chmod 0644 /etc/nginx/nginx.conf 2>/dev/null || true
 
+HAS_IPV6_STACK=0
+if [ "${DISABLE_IPV6:-0}" -eq 0 ] && [ -f /proc/net/if_inet6 ] && grep -q '00000000000000000000000000000001' /proc/net/if_inet6 2>/dev/null; then
+    HAS_IPV6_STACK=1
+fi
+NGINX_V6_80=""
+NGINX_V6_443=""
+if [ "$HAS_IPV6_STACK" -eq 1 ]; then
+    NGINX_V6_80="    listen [::]:80 default_server;"
+    NGINX_V6_443="    listen [::]:443 backlog=65535 reuseport;"
+fi
+
 cat << EOF > /etc/nginx/conf.d/00-acme.conf.tmp
 server {
     listen 80 default_server;
+${NGINX_V6_80}
     server_name _;
     server_tokens off;
     root /var/www/html;
@@ -2437,6 +2712,17 @@ EOF
                     warn "Установка прервана пользователем из-за отсутствия SSL."
                     exit 1
                 fi
+            elif [ "${ENABLE_AGH:-0}" -eq 1 ] && [ "$dom" = "${AGH_DOMAIN:-}" ]; then
+                warn "Не удалось выпустить Let's Encrypt для AdGuard Home ($AGH_DOMAIN)."
+                if prompt_yes_no "Сгенерировать аварийный Self-Signed SSL для $AGH_DOMAIN?" "y"; then
+                    gen_emergency_selfsigned "$AGH_DOMAIN"
+                    ok "Аварийный Self-Signed SSL для $AGH_DOMAIN сгенерирован."
+                else
+                    warn "Веб-интерфейс/DoH AdGuard Home будет отключён (нет SSL)."
+                    ENABLE_AGH=0
+                    sed -i -E 's/^ENABLE_AGH=.*/ENABLE_AGH="0"/' /etc/myprivatecloud/config.env 2>/dev/null || true
+                    python3 -c 'import json, os; p="/etc/myprivatecloud/config.json"; d=json.load(open(p,"r",encoding="utf-8")); d["enable_agh"]=False; open(p+".tmp","w",encoding="utf-8").write(json.dumps(d,indent=2,ensure_ascii=False)); os.replace(p+".tmp",p); os.chmod(p,0o600)' 2>/dev/null || true
+                fi
             fi
         fi
     done
@@ -2481,6 +2767,16 @@ else
                     ok "Аварийный самоподписанный SSL успешно сгенерирован."
                 else
                     die "Установка прервана из-за отсутствия SSL для $PRIMARY_DOMAIN."
+                fi
+            elif [ "${ENABLE_AGH:-0}" -eq 1 ] && [ "$dom" = "${AGH_DOMAIN:-}" ]; then
+                if prompt_yes_no "Сгенерировать аварийный Self-Signed SSL для $AGH_DOMAIN?" "y"; then
+                    gen_emergency_selfsigned "$AGH_DOMAIN"
+                    ok "Аварийный Self-Signed SSL для $AGH_DOMAIN сгенерирован."
+                else
+                    warn "Веб-интерфейс/DoH AdGuard Home будет отключён (нет SSL)."
+                    ENABLE_AGH=0
+                    sed -i -E 's/^ENABLE_AGH=.*/ENABLE_AGH="0"/' /etc/myprivatecloud/config.env 2>/dev/null || true
+                    python3 -c 'import json, os; p="/etc/myprivatecloud/config.json"; d=json.load(open(p,"r",encoding="utf-8")); d["enable_agh"]=False; open(p+".tmp","w",encoding="utf-8").write(json.dumps(d,indent=2,ensure_ascii=False)); os.replace(p+".tmp",p); os.chmod(p,0o600)' 2>/dev/null || true
                 fi
             fi
         fi
@@ -3202,6 +3498,44 @@ for p, lbl in (("/var/www/html/assets/img/favicon.svg", "main"), ("/var/www/stea
     os.chmod(p + ".tmp", 0o644)
     os.replace(p + ".tmp", p)
 EOF_FAV_GEN
+cat << 'EOF_STEAL_CSS' > /var/www/steal/steal.css.tmp
+:root { color-scheme: dark; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #0d1117; color: #c9d1d9; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    text-align: center; padding: 24px;
+}
+main { max-width: 560px; background: #161b22; border: 1px solid #30363d; border-radius: 16px; padding: 36px 28px; }
+h1 { font-size: 22px; font-weight: 600; color: #f0f6fc; margin-bottom: 10px; }
+p { font-size: 14px; color: #8b949e; line-height: 1.5; }
+.badge { display: inline-block; margin-top: 18px; padding: 4px 12px; font-size: 12px; border-radius: 999px; background: rgba(46, 160, 67, 0.15); color: #3fb950; border: 1px solid rgba(46, 160, 67, 0.4); }
+EOF_STEAL_CSS
+mv -f /var/www/steal/steal.css.tmp /var/www/steal/steal.css
+chmod 0644 /var/www/steal/steal.css
+
+cat << 'EOF_STEAL_HTML' > /var/www/steal/index.html.tmp
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edge Content Delivery Node</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/steal.css">
+</head>
+<body>
+    <main>
+        <h1>Edge Content Delivery Node</h1>
+        <p>Static asset distribution endpoint. Direct directory indexing and unauthenticated administrative endpoints are disabled.</p>
+        <span class="badge">Status: Operational</span>
+    </main>
+</body>
+</html>
+EOF_STEAL_HTML
+mv -f /var/www/steal/index.html.tmp /var/www/steal/index.html
+chmod 0644 /var/www/steal/index.html
+
 chown -R "$NGINX_USER:$NGINX_USER" /var/www/steal 2>/dev/null || true
 chmod 0644 /var/www/html/assets/img/favicon.svg 2>/dev/null || true
 
@@ -3677,6 +4011,10 @@ async function confirmAddPeerAction() {
             },
             body: JSON.stringify({ name: name })
         });
+        if (!res.ok) {
+            const errD = await res.json().catch(() => ({}));
+            throw new Error(errD.detail || ("HTTP " + res.status));
+        }
         const result = await res.json();
         if (result.status === "ok") {
             showToast("OK", \`Node \${name} attached.\`);
@@ -3755,7 +4093,7 @@ async function confirmDeletePeerAction() {
     if (!pendingDeleteKey || !authenticatedSession) return;
 
     try {
-        await fetch("/api/v1/myprivatecloud/storage/node/remove", {
+        const res = await fetch("/api/v1/myprivatecloud/storage/node/remove", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -3763,6 +4101,7 @@ async function confirmDeletePeerAction() {
             },
             body: JSON.stringify({ public_key: pendingDeleteKey })
         });
+        if (!res.ok) throw new Error("HTTP " + res.status);
         openNodeManager();
     } catch(e) {
         showToast("Error", "");
@@ -3878,7 +4217,7 @@ cat << EOF > /var/www/html/index.html.tmp
         </section>
     </main>
 
-    <div id="authModal" class="modal-overlay">
+    <div id="authModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
         <div class="modal-card">
             <div class="modal-header">
                 <div>
@@ -3917,7 +4256,7 @@ cat << EOF > /var/www/html/index.html.tmp
         </div>
     </div>
 
-    <div id="qrModal" class="modal-overlay qr-modal-overlay">
+    <div id="qrModal" class="modal-overlay qr-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="qrClientTitle">
         <div class="modal-card qr-modal-card">
             <div class="modal-header">
                 <div>
@@ -4027,14 +4366,15 @@ XHTTP_NGINX_LOC_BLOCK=""
 
 if [ "${ENABLE_XHTTP:-0}" -eq 1 ]; then
     XHTTP_STREAM_PORT="${XHTTP_STREAM_PORT//[!0-9]/}"
-    if [ -z "$XHTTP_STREAM_PORT" ]; then XHTTP_STREAM_PORT="50443"; fi
-    XHTTP_UPSTREAM_LINE="upstream xray_xhttp_stream { server 127.0.0.1:${XHTTP_STREAM_PORT}; keepalive 64; }"
-    XHTTP_BADBOT_MAP_LINE="~^.*:[01]:${BASE_XHTTP_PATH} 0;"
-    XHTTP_NGINX_LOC_BLOCK="    location ^~ ${BASE_XHTTP_PATH} {
+    if [ -z "${XHTTP_STREAM_PORT:-}" ]; then XHTTP_STREAM_PORT="50443"; fi
+    XHTTP_UPSTREAM_LINE="upstream xray_xhttp_stream { server 127.0.0.1:${XHTTP_STREAM_PORT}; }"
+    XHTTP_BADBOT_MAP_LINE="~^.*:[01]:${XHTTP_STREAM_PATH} 0;"
+    XHTTP_NGINX_LOC_BLOCK="    location ^~ ${XHTTP_STREAM_PATH} {
         if (\$request_method != POST) { return 404; }
+        gzip off;
         proxy_http_version 2;
         proxy_set_header Connection \"\";
-        proxy_set_header Host \$http_host;
+        proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$ak_real_ip;
         proxy_set_header X-Forwarded-For \$ak_real_ip;
         proxy_set_header X-Forwarded-Proto \$scheme;
@@ -4054,9 +4394,21 @@ if [ "${ENABLE_XHTTP:-0}" -eq 1 ]; then
         proxy_pass http://xray_xhttp_stream;
     }"
 fi
-if [ -z "$PANEL_PORT" ]; then PANEL_PORT="10443"; fi
-if [ -z "$SUB_PORT" ]; then SUB_PORT="55443"; fi
-if [ -z "$XHTTP_STREAM_PORT" ]; then XHTTP_STREAM_PORT="50443"; fi
+if [ -z "${PANEL_PORT:-}" ]; then PANEL_PORT="10443"; fi
+if [ -z "${SUB_PORT:-}" ]; then SUB_PORT="55443"; fi
+if [ -z "${XHTTP_STREAM_PORT:-}" ]; then XHTTP_STREAM_PORT="50443"; fi
+
+mkdir -p /etc/nginx/snippets
+cat << 'EOF_NGX_SEC_SNIP' > /etc/nginx/snippets/hardened-headers.conf.tmp
+add_header X-Frame-Options "DENY" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" always;
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+EOF_NGX_SEC_SNIP
+mv -f /etc/nginx/snippets/hardened-headers.conf.tmp /etc/nginx/snippets/hardened-headers.conf
+chmod 0644 /etc/nginx/snippets/hardened-headers.conf 2>/dev/null || true
 
 cat << EOF > /etc/nginx/nginx.conf.tmp
 user $NGINX_USER;
@@ -4222,9 +4574,11 @@ sync_nginx_stream_and_steal() {
     local -a local_reality_ports=("${ALL_REALITY_PORTS[@]:-}")
     local -A local_ext_sni_map=()
     local k_sni
-    for k_sni in "${!EXT_SNI_TO_PORT[@]}"; do
-        local_ext_sni_map["$k_sni"]="${EXT_SNI_TO_PORT[$k_sni]}"
-    done
+    if [ "${#EXT_SNI_TO_PORT[@]}" -gt 0 ]; then
+        for k_sni in "${!EXT_SNI_TO_PORT[@]}"; do
+            local_ext_sni_map["$k_sni"]="${EXT_SNI_TO_PORT[$k_sni]}"
+        done
+    fi
 
     if [ "$sync_phase" = "post_phase3" ] && [ -n "$sync_db" ] && [ -f "$sync_db" ]; then
         local_reality_ports=()
@@ -4233,9 +4587,7 @@ sync_nginx_stream_and_steal() {
 
     if [ -n "$sync_db" ] && [ -f "$sync_db" ]; then
         local ib_cond=""
-        if sqlite_ro "$sync_db" "PRAGMA table_info(inbounds);" | grep -qE '\|node_id\|'; then
-            ib_cond="AND (node_id IS NULL OR node_id = 0)"
-        fi
+        ib_cond=$(get_local_ib_cond "$sync_db")
         local db_prev_reality drp
         db_prev_reality=$(sqlite_ro "$sync_db" "SELECT DISTINCT port FROM inbounds WHERE enable = 1 AND protocol='vless' AND stream_settings LIKE '%reality%' ${ib_cond};")
         for drp in $db_prev_reality; do
@@ -4257,8 +4609,22 @@ if os.path.exists(db_p):
         conn = sqlite3.connect(f"file:{db_p}?mode=ro", uri=True, timeout=5.0)
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(inbounds)")
-        _nc_sni = " AND (node_id IS NULL OR node_id = 0)" if any(r[1] == "node_id" for r in cur.fetchall()) else ""
-        cur.execute(f"SELECT port, stream_settings FROM inbounds WHERE enable = 1 AND protocol='vless' AND stream_settings LIKE '%reality%'{_nc_sni}")
+        _cols_sni = {r[1] for r in cur.fetchall()}
+        _sni_parts = []
+        _sni_params = []
+        if "node_id" in _cols_sni:
+            _sni_parts.append("(node_id IS NULL OR node_id = 0)")
+        if "origin_node_guid" in _cols_sni:
+            cur.execute("SELECT value FROM settings WHERE key='panelGuid' LIMIT 1")
+            _pg_r = cur.fetchone()
+            _pg_v = str(_pg_r[0]).strip() if _pg_r and _pg_r[0] else ""
+            if _pg_v:
+                _sni_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = ?)")
+                _sni_params.append(_pg_v)
+            else:
+                _sni_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '')")
+        _nc_sni = (" AND " + " AND ".join(_sni_parts)) if _sni_parts else ""
+        cur.execute(f"SELECT port, stream_settings FROM inbounds WHERE enable = 1 AND protocol='vless' AND stream_settings LIKE '%reality%'{_nc_sni}", _sni_params)
         with open("/tmp/nginx_prev_sni_map.txt", "w", encoding="utf-8") as f_out:
             for p, st_raw in cur.fetchall():
                 if st_raw:
@@ -4294,8 +4660,8 @@ EOF_EXT_SNI
         seen_sni_map["$AGH_DOMAIN"]=1
     fi
 
-    if [ "$ENABLE_STEAL" -eq 1 ]; then
-        for s_dom in "${STEAL_DOMAINS[@]:-}"; do
+    if [ "$ENABLE_STEAL" -eq 1 ] && [ "${#STEAL_DOMAINS[@]}" -gt 0 ]; then
+        for s_dom in "${STEAL_DOMAINS[@]}"; do
             if [ -n "$s_dom" ] && [ -z "${seen_sni_map[$s_dom]:-}" ] && [ -n "${DOMAIN_TO_PORT[$s_dom]:-}" ]; then
                 seen_sni_map["$s_dom"]=1
                 port="${DOMAIN_TO_PORT[$s_dom]}"
@@ -4305,14 +4671,16 @@ EOF_EXT_SNI
         done
     fi
 
-    for ext_sni in "${!local_ext_sni_map[@]}"; do
-        if [ -n "$ext_sni" ] && [ -z "${seen_sni_map[$ext_sni]:-}" ]; then
-            seen_sni_map["$ext_sni"]=1
-            port="${local_ext_sni_map[$ext_sni]}"
-            stream_map_rules+="        ${ext_sni}     reality_backend_${port};\n"
-            local_reality_ports+=("$port")
-        fi
-    done
+    if [ "${#local_ext_sni_map[@]}" -gt 0 ]; then
+        for ext_sni in "${!local_ext_sni_map[@]}"; do
+            if [ -n "$ext_sni" ] && [ -z "${seen_sni_map[$ext_sni]:-}" ]; then
+                seen_sni_map["$ext_sni"]=1
+                port="${local_ext_sni_map[$ext_sni]}"
+                stream_map_rules+="        ${ext_sni}     reality_backend_${port};\n"
+                local_reality_ports+=("$port")
+            fi
+        done
+    fi
 
     mapfile -t local_reality_ports < <(printf "%s\n" "${local_reality_ports[@]:-}" | grep -E "^[0-9]+$" | sort -u || true)
 
@@ -4399,8 +4767,22 @@ if db_p and os.path.exists(db_p):
         conn = sqlite3.connect(f"file:{db_p}?mode=ro", uri=True, timeout=5.0)
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(inbounds)")
-        _nc_fb = " AND (node_id IS NULL OR node_id = 0)" if any(r[1] == "node_id" for r in cur.fetchall()) else ""
-        cur.execute(f"SELECT tag, stream_settings FROM inbounds WHERE enable = 1 AND protocol='vless' AND stream_settings LIKE '%reality%'{_nc_fb}")
+        _cols_fb = {r[1] for r in cur.fetchall()}
+        _fb_parts = []
+        _fb_params = []
+        if "node_id" in _cols_fb:
+            _fb_parts.append("(node_id IS NULL OR node_id = 0)")
+        if "origin_node_guid" in _cols_fb:
+            cur.execute("SELECT value FROM settings WHERE key='panelGuid' LIMIT 1")
+            _pg_f = cur.fetchone()
+            _pg_fv = str(_pg_f[0]).strip() if _pg_f and _pg_f[0] else ""
+            if _pg_fv:
+                _fb_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = ?)")
+                _fb_params.append(_pg_fv)
+            else:
+                _fb_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '')")
+        _nc_fb = (" AND " + " AND ".join(_fb_parts)) if _fb_parts else ""
+        cur.execute(f"SELECT tag, stream_settings FROM inbounds WHERE enable = 1 AND protocol='vless' AND stream_settings LIKE '%reality%'{_nc_fb}", _fb_params)
         for tag, st_raw in cur.fetchall():
             st = json.loads(st_raw) if st_raw else {}
             rs = st.get("realitySettings", {})
@@ -4461,8 +4843,9 @@ server {
     location = /robots.txt { root $WEBROOT; access_log off; }
     location ~ ^/(favicon\\.ico|favicon\\.svg)\$ { root /var/www/steal; try_files /favicon.svg =404; access_log off; expires 30d; }
     location = /assets/img/favicon.svg { root /var/www/steal; try_files /favicon.svg =404; access_log off; expires 7d; }
-    location /assets/ { root $WEBROOT; expires 7d; access_log off; add_header Cache-Control "public, max-age=604800, immutable" always; try_files \$uri =404; }
-    location = / { default_type text/html; root $WEBROOT; try_files /index.html =404; }
+    location = /steal.css { root /var/www/steal; expires 7d; access_log off; include /etc/nginx/snippets/hardened-headers.conf; add_header Cache-Control "public, max-age=604800, immutable" always; try_files /steal.css =404; }
+    location /assets/ { root $WEBROOT; expires 7d; access_log off; include /etc/nginx/snippets/hardened-headers.conf; add_header Cache-Control "public, max-age=604800, immutable" always; try_files \$uri =404; }
+    location = / { default_type text/html; root /var/www/steal; try_files /index.html =404; }
     location / { return 404; }
     location = /404.html { root $WEBROOT; internal; }
     error_page 497 @drop_plain;
@@ -4634,6 +5017,7 @@ server {
         root $WEBROOT;
         expires 7d;
         access_log off;
+        include /etc/nginx/snippets/hardened-headers.conf;
         add_header Cache-Control "public, max-age=604800, immutable" always;
         try_files \$uri =404;
     }
@@ -4672,7 +5056,7 @@ server {
     location = /404.html { root $WEBROOT; internal; }
     location = /robots.txt { root $WEBROOT; access_log off; }
     location ~ ^/(favicon\\.ico|favicon\\.svg)\$ { root $WEBROOT; access_log off; expires 30d; }
-    location /assets/ { root $WEBROOT; expires 7d; access_log off; add_header Cache-Control "public, max-age=604800, immutable" always; try_files \$uri =404; }
+    location /assets/ { root $WEBROOT; expires 7d; access_log off; include /etc/nginx/snippets/hardened-headers.conf; add_header Cache-Control "public, max-age=604800, immutable" always; try_files \$uri =404; }
     location = / { default_type text/html; root $WEBROOT; try_files /index.html =404; }
     location / { return 404; }
 }
@@ -4711,9 +5095,14 @@ EOF_AGH_CID_RE
     cat << EOF > "/etc/nginx/conf.d/03-adguard.conf.tmp"
 upstream adguard_backend { server 127.0.0.1:3000; keepalive 32; }
 
-map "\$agh_sess:\$http_cookie" \$agh_merged_cookie {
-    ~^:\$              "";
-    ~^:(.+)\$          \$1;
+map \$http_cookie \$http_cookie_no_agh {
+    "~^(.*);[ \t]*agh_session=[^;]*\$" "\$1";
+    "~^(.*)agh_session=[^;]*;?[ \t]*(.*)\$" "\$1\$2";
+    default \$http_cookie;
+}
+
+map "\$agh_sess:\$http_cookie_no_agh" \$agh_merged_cookie {
+    ~^:                \$http_cookie;
     ~^([^:]+):\$       \$1;
     ~^([^:]+):(.+)\$   "\$1; \$2";
     default            \$http_cookie;
@@ -4933,50 +5322,68 @@ fi
 
 TARGET_XRAY_VERSION="v26.7.28"
 export TARGET_XRAY_VERSION
-log "Инспекция архитектуры и закрепление Xray Core ${TARGET_XRAY_VERSION}..."
+KEEP_CURRENT_XRAY=0
 
-SYS_ARCH=$(uname -m)
-case "$SYS_ARCH" in
-    x86_64)
-        XRAY_ZIP_ARCH="64"
-        XRAY_BIN_NAMES=("xray-linux-amd64" "xray")
-        ;;
-    aarch64|arm64)
-        XRAY_ZIP_ARCH="arm64-v8a"
-        XRAY_BIN_NAMES=("xray-linux-arm64" "xray-linux-arm64-v8a" "xray")
-        ;;
-    *)
-        die "Архитектура процессора $SYS_ARCH не поддерживается!"
-        ;;
-esac
-
-XRAY_ZIP="/tmp/xray-${TARGET_XRAY_VERSION}.zip"
-export XRAY_ZIP
-rm -f "$XRAY_ZIP"
-
-if [ "$GEO_PROFILE" = "1" ]; then
-    XRAY_URLS=(
-        "https://ghfast.top/https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
-        "https://ghproxy.net/https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
-        "https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
-    )
-else
-    XRAY_URLS=(
-        "https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
-        "https://ghfast.top/https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
-    )
+XRAY_BIN="/usr/local/x-ui/bin/xray"
+if [ ! -x "$XRAY_BIN" ]; then
+    XRAY_BIN="/usr/local/x-ui/bin/xray-linux-amd64"
 fi
 
-while ! download_asset "$XRAY_ZIP" "${XRAY_URLS[@]}"; do
-    warn "Не удалось загрузить бинарник Xray-core (${TARGET_XRAY_VERSION})."
-    if ! prompt_yes_no "Повторить попытку загрузки Xray-core?" "y"; then
-        exit 1
+if [ "$INSTALL_MODE" = "2" ] && [ -x "$XRAY_BIN" ]; then
+    CUR_XRAY_RAW=$("$XRAY_BIN" version 2>/dev/null | awk 'NR==1 {print $2; exit}' | tr -d 'v\r\n' || echo "0")
+    if [[ "$CUR_XRAY_RAW" =~ ^[0-9]+(\.[0-9]+)+$ ]] && dpkg --compare-versions "$CUR_XRAY_RAW" "gt" "26.7.28"; then
+        warn "В системе установлено ядро Xray v${CUR_XRAY_RAW} (новее закреплённого ${TARGET_XRAY_VERSION})."
+        if prompt_yes_no "Сохранить действующее ядро Xray v${CUR_XRAY_RAW} без отката на ${TARGET_XRAY_VERSION}?" "y"; then
+            KEEP_CURRENT_XRAY=1
+            ok "Сохранено действующее ядро Xray v${CUR_XRAY_RAW}."
+        fi
     fi
-done
+fi
 
-XRAY_EXTRACT_DIR="/tmp/xray_unpack"
-rm -rf "$XRAY_EXTRACT_DIR"
-python3 - << 'EOF_ZIP'
+if [ "$KEEP_CURRENT_XRAY" -eq 0 ]; then
+    log "Инспекция архитектуры и закрепление Xray Core ${TARGET_XRAY_VERSION}..."
+    SYS_ARCH=$(uname -m)
+    case "$SYS_ARCH" in
+        x86_64)
+            XRAY_ZIP_ARCH="64"
+            XRAY_BIN_NAMES=("xray-linux-amd64" "xray")
+            ;;
+        aarch64|arm64)
+            XRAY_ZIP_ARCH="arm64-v8a"
+            XRAY_BIN_NAMES=("xray-linux-arm64" "xray-linux-arm64-v8a" "xray")
+            ;;
+        *)
+            die "Архитектура процессора $SYS_ARCH не поддерживается!"
+            ;;
+    esac
+
+    XRAY_ZIP="/tmp/xray-${TARGET_XRAY_VERSION}.zip"
+    export XRAY_ZIP
+    rm -f "$XRAY_ZIP"
+
+    if [ "$GEO_PROFILE" = "1" ]; then
+        XRAY_URLS=(
+            "https://ghfast.top/https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
+            "https://ghproxy.net/https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
+            "https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
+        )
+    else
+        XRAY_URLS=(
+            "https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
+            "https://ghfast.top/https://github.com/XTLS/Xray-core/releases/download/${TARGET_XRAY_VERSION}/Xray-linux-${XRAY_ZIP_ARCH}.zip"
+        )
+    fi
+
+    while ! download_asset "$XRAY_ZIP" "${XRAY_URLS[@]}"; do
+        warn "Не удалось загрузить бинарник Xray-core (${TARGET_XRAY_VERSION})."
+        if ! prompt_yes_no "Повторить попытку загрузки Xray-core?" "y"; then
+            exit 1
+        fi
+    done
+
+    XRAY_EXTRACT_DIR="/tmp/xray_unpack"
+    rm -rf "$XRAY_EXTRACT_DIR"
+    python3 - << 'EOF_ZIP'
 import zipfile, os
 zip_path = os.environ.get("XRAY_ZIP", "/tmp/xray-v26.7.28.zip")
 extract_dir = "/tmp/xray_unpack"
@@ -4984,44 +5391,91 @@ os.makedirs(extract_dir, exist_ok=True)
 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
     zip_ref.extractall(extract_dir)
 EOF_ZIP
-rm -f "$XRAY_ZIP"
+    rm -f "$XRAY_ZIP"
 
-mkdir -p /usr/local/x-ui/bin
-if [ -f "$XRAY_EXTRACT_DIR/xray" ]; then
-    for bin_name in "${XRAY_BIN_NAMES[@]}"; do
-        cp -f "$XRAY_EXTRACT_DIR/xray" "/usr/local/x-ui/bin/${bin_name}"
-        chmod 755 "/usr/local/x-ui/bin/${bin_name}"
+    mkdir -p /usr/local/x-ui/bin
+    if [ -f "$XRAY_EXTRACT_DIR/xray" ]; then
+        for bin_name in "${XRAY_BIN_NAMES[@]}"; do
+            cp -f "$XRAY_EXTRACT_DIR/xray" "/usr/local/x-ui/bin/${bin_name}"
+            chmod 755 "/usr/local/x-ui/bin/${bin_name}"
+        done
+        if [ -f "$XRAY_EXTRACT_DIR/geoip.dat" ]; then
+            cp -f "$XRAY_EXTRACT_DIR/geoip.dat" /usr/local/x-ui/bin/
+        fi
+        if [ -f "$XRAY_EXTRACT_DIR/geosite.dat" ]; then
+            cp -f "$XRAY_EXTRACT_DIR/geosite.dat" /usr/local/x-ui/bin/
+        fi
+        rm -rf "$XRAY_EXTRACT_DIR"
+        ok "Ядро Xray ${TARGET_XRAY_VERSION} зафиксировано в /usr/local/x-ui/bin/."
+    else
+        die "Не найден бинарный файл xray!"
+    fi
+
+    XRAY_BIN="/usr/local/x-ui/bin/xray"
+    if [ ! -x "$XRAY_BIN" ]; then
+        XRAY_BIN="/usr/local/x-ui/bin/xray-linux-amd64"
+    fi
+fi
+
+if [ -f "$DB_PATH" ]; then
+    EXT_GEO_NEEDED=$(sqlite_ro "$DB_PATH" "SELECT value FROM settings WHERE key='xrayTemplateConfig' LIMIT 1;" | grep -oE 'ext:(geosite_RU|geoip_RU)\.dat' | sort -u || true)
+    for geo_ext in $EXT_GEO_NEEDED; do
+        geo_fn="${geo_ext#ext:}"
+        if [ ! -s "/usr/local/x-ui/bin/${geo_fn}" ]; then
+            src_name="geosite.dat"
+            if [[ "$geo_fn" == geoip* ]]; then src_name="geoip.dat"; fi
+            log "Загрузка отсутствующей пользовательской геобазы ${geo_fn} (используется в routing.rules)..."
+            if [ "$GEO_PROFILE" = "1" ]; then
+                RU_GEO_URLS=(
+                    "https://ghfast.top/https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/${src_name}"
+                    "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/${src_name}"
+                )
+            else
+                RU_GEO_URLS=(
+                    "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/${src_name}"
+                    "https://ghfast.top/https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/${src_name}"
+                )
+            fi
+            download_asset "/usr/local/x-ui/bin/${geo_fn}.tmp" "${RU_GEO_URLS[@]}" && mv -f "/usr/local/x-ui/bin/${geo_fn}.tmp" "/usr/local/x-ui/bin/${geo_fn}" || rm -f "/usr/local/x-ui/bin/${geo_fn}.tmp"
+        fi
     done
-    if [ -f "$XRAY_EXTRACT_DIR/geoip.dat" ]; then
-        cp -f "$XRAY_EXTRACT_DIR/geoip.dat" /usr/local/x-ui/bin/
-    fi
-    if [ -f "$XRAY_EXTRACT_DIR/geosite.dat" ]; then
-        cp -f "$XRAY_EXTRACT_DIR/geosite.dat" /usr/local/x-ui/bin/
-    fi
-    rm -rf "$XRAY_EXTRACT_DIR"
-    ok "Ядро Xray ${TARGET_XRAY_VERSION} зафиксировано в /usr/local/x-ui/bin/."
-else
-    die "Не найден бинарный файл xray!"
 fi
 
-XRAY_BIN="/usr/local/x-ui/bin/xray"
-if [ ! -x "$XRAY_BIN" ]; then
-    XRAY_BIN="/usr/local/x-ui/bin/xray-linux-amd64"
-fi
-
-DETECTED_XRAY_VER=$("$XRAY_BIN" version 2>/dev/null | head -n1 | awk '{print $2}' || echo "v26.7.28")
+DETECTED_XRAY_VER=$("$XRAY_BIN" version 2>/dev/null | awk 'NR==1 {print $2; exit}' | tr -d '\r\n' || echo "v26.7.28")
 ok "Активная версия Xray: ${GREEN}${DETECTED_XRAY_VER}${NC}"
 
 MIGRATE_FORCE_MLKEM=1
-if [ "$INSTALL_MODE" = "2" ] && [ "${ENABLE_XHTTP:-0}" -eq 1 ] && [ -f "$DB_PATH" ]; then
-    CUR_XHTTP_DEC=$(sqlite_ro "$DB_PATH" "SELECT json_extract(settings, '$.decryption') FROM inbounds WHERE tag='in-xhttp-stream' OR (protocol='vless' AND stream_settings LIKE '%xhttp%') ORDER BY enable DESC, id ASC LIMIT 1;")
-    if [ "$CUR_XHTTP_DEC" = "none" ] || [ -z "$CUR_XHTTP_DEC" ]; then
-        warn "В действующей базе xHTTP работает без постквантового шифрования (decryption=none)."
-        if ! prompt_yes_no "Включить ML-KEM-768 (потребует обновления подписки у существующих клиентов xHTTP)?" "y"; then
-            MIGRATE_FORCE_MLKEM=0
+MIGRATE_XHTTP_FLOW_POLICY="vision"
+ATTACH_NEW_IB_CLIENTS=0
+if [ "$INSTALL_MODE" = "2" ] && [ -f "$DB_PATH" ]; then
+    LOC_COND_X=$(get_local_ib_cond "$DB_PATH")
+    if [ "${ENABLE_XHTTP:-0}" -eq 1 ]; then
+        CUR_XHTTP_DEC=$(sqlite_ro "$DB_PATH" "SELECT json_extract(settings, '$.decryption') FROM inbounds WHERE (tag='in-xhttp-stream' OR (protocol='vless' AND stream_settings LIKE '%xhttp%')) ${LOC_COND_X} ORDER BY enable DESC, id ASC LIMIT 1;")
+        if [ "$CUR_XHTTP_DEC" = "none" ] || [ -z "$CUR_XHTTP_DEC" ]; then
+            warn "В действующей базе xHTTP работает без постквантового шифрования (decryption=none)."
+            if ! prompt_yes_no "Включить ML-KEM-768 (потребует обновления подписки у существующих клиентов xHTTP)?" "y"; then
+                MIGRATE_FORCE_MLKEM=0
+            fi
+        fi
+        echo -e "  ${WHITE}Политика поля flow для текущих клиентов xHTTP при миграции:${NC}"
+        echo -e "    1) ${GREEN}Сохранить текущий flow каждого клиента (рекомендуется при клиентах с др. узлов)${NC}"
+        echo -e "    2) ${CYAN}Принудительно установить xtls-rprx-vision всем клиентам xHTTP (эталон с ML-KEM-768)${NC}"
+        echo -e "    3) ${YELLOW}Очистить flow=\"\" всем клиентам xHTTP (фикс совместимости, если Vision ломает клиентов)${NC}"
+        prompt_choice "  Выберите политику flow для xHTTP" "1" XHTTP_FLOW_CHOICE "1" "2" "3"
+        case "$XHTTP_FLOW_CHOICE" in
+            2) MIGRATE_XHTTP_FLOW_POLICY="vision" ;;
+            3) MIGRATE_XHTTP_FLOW_POLICY="clear" ;;
+            *) MIGRATE_XHTTP_FLOW_POLICY="keep" ;;
+        esac
+    fi
+    EXISTING_CL_CNT=$(sqlite_ro "$DB_PATH" "SELECT COUNT(*) FROM clients;")
+    if [ "${EXISTING_CL_CNT:-0}" -gt 0 ]; then
+        if prompt_yes_no "При добавлении новых инбаундов привязывать к ним всех текущих активных клиентов (иначе добавится только Test)?" "n"; then
+            ATTACH_NEW_IB_CLIENTS=1
         fi
     fi
 fi
+export MIGRATE_XHTTP_FLOW_POLICY ATTACH_NEW_IB_CLIENTS
 
 VLESS_DECRYPTION=""
 VLESS_ENCRYPTION=""
@@ -5295,11 +5749,17 @@ if existing_tpl_row and existing_tpl_row[0] and install_mode == "2":
                 if isinstance(ob_set, dict):
                     ob_set["domainStrategy"] = "UseIPv4"
                 ob.setdefault("streamSettings", {}).setdefault("sockopt", {})["domainStrategy"] = "ForceIPv4"
+        rules = routing.setdefault("rules", [])
         if enable_agh:
-            rules = routing.setdefault("rules", [])
-            has_agh_rule = any(isinstance(r, dict) and (r.get("ruleTag") == "xui-dns-allow" or ("127.0.0.1" in r.get("ip", []) and str(r.get("port")) == "53")) for r in rules)
-            if not has_agh_rule:
-                rules.insert(0, {"ip": ["127.0.0.1", "10.9.0.1"], "outboundTag": "direct", "port": "53", "ruleTag": "xui-dns-allow", "type": "field"})
+            current_tpl["dns"] = dns_config
+            rules = [r for r in rules if not (isinstance(r, dict) and r.get("ruleTag") == "xui-dns-allow")]
+            has_dns_rule = any(isinstance(r, dict) and ("127.0.0.1" in r.get("ip", []) and str(r.get("port")) == "53") for r in rules)
+            if not has_dns_rule:
+                rules.insert(0, {"ip": direct_dns_ips, "outboundTag": "direct", "port": "53", "ruleTag": "xui-dns-allow", "type": "field"})
+        else:
+            current_tpl["dns"] = {}
+            rules = [r for r in rules if not (isinstance(r, dict) and (r.get("ruleTag") == "xui-dns-allow" or ("127.0.0.1" in r.get("ip", []) and str(r.get("port")) == "53")))]
+        routing["rules"] = rules
         cur.execute("UPDATE settings SET value = ? WHERE key = 'xrayTemplateConfig'", (json.dumps(current_tpl, ensure_ascii=False),))
     except Exception:
         pass
@@ -5360,11 +5820,23 @@ def register_or_get_inbound(ctx, port, proto, tag, remark, s_obj_def, st_obj_def
     vless_dekey = ctx["vless_dekey"]
     vless_enkey = ctx["vless_enkey"]
     active_inbound_ids = ctx["active_inbound_ids"]
+    new_inbound_ids = ctx["new_inbound_ids"]
+    panel_guid = ctx.get("panel_guid", "")
 
     cur.execute("PRAGMA table_info(inbounds)")
     ib_cols = {r[1] for r in cur.fetchall()}
-    _nc_reg = " AND (node_id IS NULL OR node_id = 0)" if "node_id" in ib_cols else ""
-    cur.execute(f"SELECT id, port, settings, stream_settings FROM inbounds WHERE ((port = ? AND protocol = ?) OR tag = ?){_nc_reg}", (port, proto, tag))
+    reg_conds = []
+    reg_params = [port, proto, tag]
+    if "node_id" in ib_cols:
+        reg_conds.append("(node_id IS NULL OR node_id = 0)")
+    if "origin_node_guid" in ib_cols:
+        if panel_guid:
+            reg_conds.append("(origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = ?)")
+            reg_params.append(panel_guid)
+        else:
+            reg_conds.append("(origin_node_guid IS NULL OR origin_node_guid = '')")
+    _nc_reg = (" AND " + " AND ".join(reg_conds)) if reg_conds else ""
+    cur.execute(f"SELECT id, port, settings, stream_settings FROM inbounds WHERE ((port = ? AND protocol = ?) OR tag = ?){_nc_reg}", reg_params)
     row = cur.fetchone()
     sniff = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True})
 
@@ -5403,8 +5875,8 @@ def register_or_get_inbound(ctx, port, proto, tag, remark, s_obj_def, st_obj_def
             if isinstance(rs_set, dict) and not rs_set.get("shortId") and isinstance(sids, list) and sids:
                 rs_set["shortId"] = str(sids[0])
                 st_mutated = True
-            if rs.get("minClientVer"):
-                rs["minClientVer"] = ""
+            if not rs.get("minClientVer"):
+                rs["minClientVer"] = "0.0.0"
                 st_mutated = True
             if rs.get("dest") != "127.0.0.1:9443" and "in-steal" in tag:
                 rs["dest"] = "127.0.0.1:9443"
@@ -5418,12 +5890,21 @@ def register_or_get_inbound(ctx, port, proto, tag, remark, s_obj_def, st_obj_def
 
         if proto == "vless" and tag == "in-xhttp-stream":
             force_mlkem = os.environ.get("MIGRATE_FORCE_MLKEM", "1") == "1"
+            flow_policy = os.environ.get("MIGRATE_XHTTP_FLOW_POLICY", "keep")
             if force_mlkem and (not cur_s.get("decryption") or cur_s.get("decryption") == "none") and vless_dekey and vless_dekey != "none":
                 cur_s["decryption"] = vless_dekey
                 cur_s["encryption"] = vless_enkey
                 s_mutated = True
+            has_vless_enc = bool(cur_s.get("decryption") and cur_s.get("decryption") != "none")
+            has_tls_sec = bool(cur_st.get("security") and cur_st.get("security") != "none")
             for c_item in cur_s.get("clients", []):
-                if isinstance(c_item, dict) and c_item.get("flow") != "xtls-rprx-vision":
+                if not isinstance(c_item, dict):
+                    continue
+                if (not has_vless_enc and not has_tls_sec) or flow_policy == "clear":
+                    if c_item.get("flow"):
+                        c_item["flow"] = ""
+                        s_mutated = True
+                elif flow_policy == "vision" and c_item.get("flow") != "xtls-rprx-vision":
                     c_item["flow"] = "xtls-rprx-vision"
                     s_mutated = True
             if "xhttpSettings" in cur_st:
@@ -5551,6 +6032,7 @@ def register_or_get_inbound(ctx, port, proto, tag, remark, s_obj_def, st_obj_def
         cur.execute(f"INSERT INTO inbounds ({','.join(i_keys)}) VALUES ({i_ph})", [ins_f[k] for k in i_keys])
         inbound_id = cur.lastrowid
         active_inbound_ids.append(inbound_id)
+        new_inbound_ids.add(inbound_id)
         return inbound_id
 EOF_S2_HELPER
 chmod 0600 /tmp/xui_stage2_helper.py
@@ -5655,12 +6137,18 @@ client_xhttp_dict = st_data["client_xhttp_dict"]
 
 vision_inbound_ids = set()
 active_inbound_ids = []
+new_inbound_ids = set()
+cur.execute("SELECT value FROM settings WHERE key = 'panelGuid' LIMIT 1")
+_pg_row = cur.fetchone()
+panel_guid = str(_pg_row[0]).strip() if _pg_row and _pg_row[0] else ""
 
 ctx = {
     "cur": cur, "uid": uid, "install_mode": install_mode,
     "domain": domain, "xhttp_path": xhttp_path,
     "vless_dekey": vless_dekey, "vless_enkey": vless_enkey,
-    "active_inbound_ids": active_inbound_ids
+    "active_inbound_ids": active_inbound_ids,
+    "new_inbound_ids": new_inbound_ids,
+    "panel_guid": panel_guid
 }
 
 ib1_id = None
@@ -5690,7 +6178,7 @@ if os.environ.get("ENABLE_STEAL") == "1":
             "tcpSettings": {"acceptProxyProtocol": True, "header": {"type": "none"}},
             "realitySettings": {
                 "show": False, "xver": 1, "target": "127.0.0.1:9443", "dest": "127.0.0.1:9443",
-                "serverNames": doms, "privateKey": def_r_priv, "minClientVer": "",
+                "serverNames": doms, "privateKey": def_r_priv, "minClientVer": "0.0.0",
                 "maxClientVer": "", "maxTimediff": 0, "shortIds": reality_short_ids,
                 "mldsa65Seed": "",
                 "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": primary_steal_sni, "shortId": reality_hex_sid, "spiderX": "/", "mldsa65Verify": ""},
@@ -5722,7 +6210,7 @@ if os.environ.get("ENABLE_CLASSIC") == "1":
             "tcpSettings": {"acceptProxyProtocol": True, "header": {"type": "none"}},
             "realitySettings": {
                 "show": False, "xver": 0, "target": f"{primary_sni}:443", "dest": f"{primary_sni}:443",
-                "serverNames": snis, "privateKey": def_r_priv, "minClientVer": "",
+                "serverNames": snis, "privateKey": def_r_priv, "minClientVer": "0.0.0",
                 "maxClientVer": "", "maxTimediff": 0, "shortIds": reality_short_ids,
                 "mldsa65Seed": "",
                 "settings": {"publicKey": def_r_pub, "fingerprint": "firefox", "serverName": primary_sni, "shortId": reality_hex_sid, "spiderX": "/", "mldsa65Verify": ""},
@@ -5905,12 +6393,70 @@ if "clients" in tables:
 
         if "client_inbounds" in tables and "inbounds" in tables:
             cur.execute("PRAGMA table_info(inbounds)")
-            _nc_rec = " WHERE (node_id IS NULL OR node_id = 0)" if any(r[1] == "node_id" for r in cur.fetchall()) else ""
-            cur.execute(f"SELECT id, protocol, settings FROM inbounds{_nc_rec}")
+            _rec_ib_cols = {r[1] for r in cur.fetchall()}
+            _rec_parts = []
+            _rec_params = []
+            if "node_id" in _rec_ib_cols:
+                _rec_parts.append("(node_id IS NULL OR node_id = 0)")
+            if "origin_node_guid" in _rec_ib_cols:
+                if panel_guid:
+                    _rec_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = ?)")
+                    _rec_params.append(panel_guid)
+                else:
+                    _rec_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '')")
+            _nc_rec = (" WHERE " + " AND ".join(_rec_parts)) if _rec_parts else ""
+            xhttp_flow_pol = os.environ.get("MIGRATE_XHTTP_FLOW_POLICY", "keep")
+            attach_new_ib = os.environ.get("ATTACH_NEW_IB_CLIENTS", "0") == "1"
+
+            cur.execute(f"SELECT id, protocol, tag, settings, stream_settings FROM inbounds{_nc_rec}", _rec_params)
             for ib_row in cur.fetchall():
-                cur_ib_id = ib_row[0]
-                cur_ib_proto = ib_row[1]
-                cur_ib_s = json.loads(ib_row[2]) if ib_row[2] else {}
+                cur_ib_id, cur_ib_proto, cur_ib_tag = ib_row[0], ib_row[1], str(ib_row[2] or "")
+                cur_ib_s = json.loads(ib_row[3]) if ib_row[3] else {}
+                cur_ib_st = json.loads(ib_row[4]) if ib_row[4] else {}
+
+                if cur_ib_id in new_inbound_ids and cur_ib_proto in ("vless", "hysteria"):
+                    cur.execute("SELECT COUNT(*) FROM client_inbounds WHERE inbound_id = ?", (cur_ib_id,))
+                    if (cur.fetchone()[0] or 0) == 0:
+                        if attach_new_ib:
+                            cur.execute("SELECT id, flow FROM clients WHERE enable = 1 AND uuid IS NOT NULL AND uuid != '' ORDER BY id ASC")
+                            for ex_cid, ex_flow in cur.fetchall():
+                                if cur_ib_proto == "hysteria":
+                                    f_ov = ""
+                                elif cur_ib_tag == "in-xhttp-stream":
+                                    has_enc = bool(cur_ib_s.get("decryption") and cur_ib_s.get("decryption") != "none")
+                                    if not has_enc or xhttp_flow_pol == "clear":
+                                        f_ov = ""
+                                    elif xhttp_flow_pol == "vision":
+                                        f_ov = "xtls-rprx-vision"
+                                    else:
+                                        f_ov = str(ex_flow or "")
+                                else:
+                                    f_ov = str(ex_flow or "xtls-rprx-vision")
+                                cur.execute("INSERT OR IGNORE INTO client_inbounds (client_id, inbound_id, flow_override, created_at) VALUES (?, ?, ?, ?)", (ex_cid, cur_ib_id, f_ov, now_ms))
+                        else:
+                            cur.execute("SELECT id FROM clients WHERE LOWER(email) = LOWER(?) LIMIT 1", (test_email,))
+                            t_row = cur.fetchone()
+                            if t_row:
+                                t_cid = t_row[0]
+                            else:
+                                t_map = {
+                                    "email": test_email, "sub_id": test_sub_id, "uuid": test_uuid, "password": test_password,
+                                    "auth": test_password, "flow": "xtls-rprx-vision", "security": "auto", "reverse": "",
+                                    "wg_private_key": "", "wg_public_key": "", "wg_allowed_ips": "", "wg_pre_shared_key": "",
+                                    "wg_keep_alive": 25, "wg_forwarded_ports": "", "secret": "", "ad_tag": "",
+                                    "limit_ip": 0, "limit_hwid": 0, "total_gb": 0, "expiry_time": 0, "enable": 1,
+                                    "tg_id": 0, "group_name": "", "group": "", "comment": "", "reset": 0,
+                                    "reset_day": 0, "reset_max": 0, "traffic_reset": "never", "traffic_reset_day": 1,
+                                    "created_at": now_ms, "updated_at": now_ms, "sync_orphaned_at": 0
+                                }
+                                flt_t = {k: v for k, v in t_map.items() if k in client_cols}
+                                tk_list = list(flt_t.keys())
+                                cur.execute(f"INSERT INTO clients ({','.join(f'\"{k}\"' for k in tk_list)}) VALUES ({','.join(['?'] * len(tk_list))})", [flt_t[k] for k in tk_list])
+                                t_cid = cur.lastrowid
+                                if "client_traffics" in tables:
+                                    cur.execute("INSERT OR IGNORE INTO client_traffics (inbound_id, enable, email, up, down, expiry_time, total, reset) VALUES (?, 1, ?, 0, 0, 0, 0, 0)", (cur_ib_id, test_email))
+                            t_f_ov = "xtls-rprx-vision" if cur_ib_proto == "vless" else ""
+                            cur.execute("INSERT OR IGNORE INTO client_inbounds (client_id, inbound_id, flow_override, created_at) VALUES (?, ?, ?, ?)", (t_cid, cur_ib_id, t_f_ov, now_ms))
 
                 existing_clients_map = {}
                 for old_c in cur_ib_s.get("clients", []):
@@ -5930,16 +6476,31 @@ if "clients" in tables:
                 mapped_clients = cur.fetchall()
 
                 if mapped_clients:
+                    is_xhttp = (cur_ib_tag == "in-xhttp-stream" or cur_ib_st.get("network") == "xhttp")
+                    has_xhttp_enc = bool(cur_ib_s.get("decryption") and cur_ib_s.get("decryption") != "none")
+                    has_tls_sec = bool(cur_ib_st.get("security") and cur_ib_st.get("security") != "none")
                     reconciled_client_list = []
                     for row_c in mapped_clients:
                         cid, cemail, cuuid, cpwd, cauth, cflow, cwg_pub, cwg_ips, cflow_over, csub_id = row_c[:10]
                         extra_vals = dict(zip(opt_cols, row_c[10:]))
-                        target_flow = cflow_over if cflow_over else cflow
-                        if not target_flow and cur_ib_proto == "vless":
-                            target_flow = "xtls-rprx-vision"
-
                         prev_c = existing_clients_map.get(("email", str(cemail))) or existing_clients_map.get(("id", str(cuuid))) or {}
                         c_entry = dict(prev_c) if isinstance(prev_c, dict) else {}
+
+                        if cur_ib_proto == "vless":
+                            if is_xhttp:
+                                if (not has_xhttp_enc and not has_tls_sec) or xhttp_flow_pol == "clear":
+                                    target_flow = ""
+                                elif xhttp_flow_pol == "vision":
+                                    target_flow = "xtls-rprx-vision"
+                                elif cflow_over is not None and cflow_over != "":
+                                    target_flow = str(cflow_over)
+                                elif prev_c.get("flow") is not None:
+                                    target_flow = str(prev_c.get("flow"))
+                                else:
+                                    target_flow = str(cflow or "")
+                            else:
+                                target_flow = str(cflow_over if (cflow_over is not None and cflow_over != "") else (prev_c.get("flow") or cflow or "xtls-rprx-vision"))
+
                         c_entry.update({
                             "id": cuuid,
                             "email": cemail,
@@ -5959,8 +6520,6 @@ if "clients" in tables:
                             c_entry["flow"] = target_flow
                             if cflow_over != target_flow:
                                 cur.execute("UPDATE client_inbounds SET flow_override = ? WHERE client_id = ? AND inbound_id = ?", (target_flow, cid, cur_ib_id))
-                            if not cflow and "flow" in client_cols:
-                                cur.execute("UPDATE clients SET flow = ? WHERE id = ?", (target_flow, cid))
                             if "security" in extra_vals and extra_vals["security"]:
                                 c_entry["security"] = str(extra_vals["security"])
                             if cpwd: c_entry["password"] = cpwd
@@ -6011,7 +6570,10 @@ if "clients" in tables:
                 sub_pref = ".".join(sub_octets[:3]) + "."
                 used_awg_ips = {f"{sub_pref}0/32", f"{sub_pref}1/32", f"{sub_pref}255/32"}
                 if "wg_allowed_ips" in client_cols:
-                    cur.execute("SELECT email, wg_allowed_ips FROM clients WHERE wg_allowed_ips IS NOT NULL AND wg_allowed_ips != ''")
+                    cur.execute(
+                        "SELECT c.email, c.wg_allowed_ips FROM client_inbounds ci JOIN clients c ON c.id = ci.client_id WHERE ci.inbound_id = ? AND c.wg_allowed_ips IS NOT NULL AND c.wg_allowed_ips != ''",
+                        (ib5_id,)
+                    )
                     for c_em_r, c_ip_r in cur.fetchall():
                         if str(c_em_r or "").strip().lower() != "awg-v3-client":
                             nc_r = _norm_cidr(c_ip_r)
@@ -6255,34 +6817,53 @@ if install_mode == "1":
     if ib5_id is not None:
         add_host_entry(str(uuid.uuid4()), ib5_id, f"AmneziaWG v3.2 ({domain})", domain, int(os.environ.get("AWG_V3_PORT", 42443)), "same", sort_order=4)
 elif install_mode == "2":
-    cur.execute("SELECT id, alpn FROM hosts")
-    for _hid, _val in cur.fetchall():
-        _new_alpn = "[]"
-        try:
-            if _val is not None and str(_val).strip():
-                _parsed = json.loads(_val)
-                if isinstance(_parsed, list):
-                    _new_alpn = json.dumps([str(x).strip() for x in _parsed if str(x).strip()])
-                else:
-                    _new_alpn = json.dumps([str(_parsed).strip()]) if str(_parsed).strip() else "[]"
-        except Exception:
-            if _val is not None and str(_val).strip():
-                _new_alpn = json.dumps([x.strip() for x in str(_val).split(",") if x.strip()])
-        cur.execute("UPDATE hosts SET alpn = ? WHERE id = ?", (_new_alpn, _hid))
-
     cur.execute("PRAGMA table_info(inbounds)")
-    _nc_hosts = " WHERE (node_id IS NULL OR node_id = 0)" if any(r[1] == "node_id" for r in cur.fetchall()) else ""
-    cur.execute(f"SELECT id, remark, settings, stream_settings, protocol, port FROM inbounds{_nc_hosts}")
+    _h_ib_cols = {r[1] for r in cur.fetchall()}
+    _h_parts = []
+    _h_params = []
+    if "node_id" in _h_ib_cols:
+        _h_parts.append("(node_id IS NULL OR node_id = 0)")
+    if "origin_node_guid" in _h_ib_cols:
+        if panel_guid:
+            _h_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = ?)")
+            _h_params.append(panel_guid)
+        else:
+            _h_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '')")
+    _nc_hosts = (" WHERE " + " AND ".join(_h_parts)) if _h_parts else ""
+
+    cur.execute(f"SELECT id, remark, settings, stream_settings, protocol, port, tag FROM inbounds{_nc_hosts}", _h_params)
     ib_rows = cur.fetchall()
-    for cur_ib_id, cur_ib_remark, ib_s_raw, ib_st_raw, ib_proto, cur_ib_port in ib_rows:
+    local_ib_ids = [r[0] for r in ib_rows]
+
+    if local_ib_ids:
+        _h_ng_cond = " AND (node_guids IS NULL OR node_guids = '' OR node_guids = '[]')" if "node_guids" in active_cols else ""
+        _ib_ph = ",".join(["?"] * len(local_ib_ids))
+        cur.execute(f"SELECT id, alpn FROM hosts WHERE inbound_id IN ({_ib_ph}){_h_ng_cond}", local_ib_ids)
+        for _hid, _val in cur.fetchall():
+            _new_alpn = "[]"
+            try:
+                if _val is not None and str(_val).strip():
+                    _parsed = json.loads(_val)
+                    if isinstance(_parsed, list):
+                        _new_alpn = json.dumps([str(x).strip() for x in _parsed if str(x).strip()])
+                    else:
+                        _new_alpn = json.dumps([str(_parsed).strip()]) if str(_parsed).strip() else "[]"
+            except Exception:
+                if _val is not None and str(_val).strip():
+                    _new_alpn = json.dumps([x.strip() for x in str(_val).split(",") if x.strip()])
+            cur.execute("UPDATE hosts SET alpn = ? WHERE id = ?", (_new_alpn, _hid))
+
+    for cur_ib_id, cur_ib_remark, ib_s_raw, ib_st_raw, ib_proto, cur_ib_port, cur_ib_tag in ib_rows:
         st_info = json.loads(ib_st_raw) if ib_st_raw else {}
         rs_sni = ""
         if "realitySettings" in st_info:
             s_names = st_info["realitySettings"].get("serverNames", [])
             if s_names: rs_sni = s_names[0]
         is_xhttp_ib = (ib_proto == "vless" and st_info.get("network") == "xhttp")
+        is_steal_ib = ("in-steal" in str(cur_ib_tag or "").lower() or str(st_info.get("realitySettings", {}).get("dest", "")).strip() == "127.0.0.1:9443")
         target_port = 443 if ib_proto == "vless" else cur_ib_port
-        cur.execute("SELECT id, sni, group_id FROM hosts WHERE inbound_id = ?", (cur_ib_id,))
+        _h_ng_sel = " AND (node_guids IS NULL OR node_guids = '' OR node_guids = '[]')" if "node_guids" in active_cols else ""
+        cur.execute(f"SELECT id, sni, group_id, address FROM hosts WHERE inbound_id = ?{_h_ng_sel}", (cur_ib_id,))
         existing_h = cur.fetchall()
         def _upd_host(hid, vals_map):
             flt = {k: v for k, v in vals_map.items() if k in active_cols}
@@ -6317,9 +6898,10 @@ elif install_mode == "2":
                 for h_row in existing_h:
                     gid_keep = h_row[2] if (h_row[2] and str(h_row[2]).strip()) else str(uuid.uuid4())
                     target_sni = h_row[1] if (h_row[1] and h_row[1].strip()) else rs_sni
-                    _upd_host(h_row[0], {"group_id": gid_keep, "port": target_port, "sni": target_sni})
+                    target_addr = (target_sni or domain) if is_steal_ib else domain
+                    _upd_host(h_row[0], {"group_id": gid_keep, "address": target_addr, "port": target_port, "sni": target_sni})
             else:
-                add_host_entry(str(uuid.uuid4()), cur_ib_id, cur_ib_remark, domain, target_port, "same", sni=rs_sni or domain, fp="firefox", sort_order=1)
+                add_host_entry(str(uuid.uuid4()), cur_ib_id, cur_ib_remark, (rs_sni or domain) if is_steal_ib else domain, target_port, "same", sni=rs_sni or domain, fp="firefox", sort_order=1)
 
     if ib3_id is not None:
         cur.execute("SELECT id, group_id FROM hosts WHERE inbound_id = ?", (ib3_id,))
@@ -6343,7 +6925,8 @@ except Exception:
     pass
 conn.close()
 
-with open("/tmp/vpn_unified_creds.txt", "w") as f:
+_cred_fd = os.open("/tmp/vpn_unified_creds.txt", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(_cred_fd, "w", encoding="utf-8") as f:
     f.write(f"UNIFIED_SUB_ID={test_sub_id}\n")
     f.write(f"UNIFIED_UUID={test_uuid}\n")
     f.write(f"TEST_EMAIL={test_email}\n")
@@ -6420,6 +7003,10 @@ if [ "${ENABLE_AWG_V3:-0}" -eq 1 ] && validate_port "${AWG_V3_PORT:-}"; then
     fi
 fi
 
+for _ in {1..10}; do
+    [ -s /usr/local/x-ui/bin/config.json ] && break
+    sleep 1
+done
 if [ -f /usr/local/x-ui/bin/config.json ]; then
     if "$XRAY_BIN" -test -config /usr/local/x-ui/bin/config.json >/dev/null 2>&1; then
         ok "Конфигурация ядра Xray (/usr/local/x-ui/bin/config.json) прошла xray -test."
@@ -6574,6 +7161,19 @@ EOF_DKMS
     if ! command -v awg >/dev/null 2>&1 || ! grep -qE '^amneziawg\b' /proc/modules 2>/dev/null; then
         warn "Модуль ядра amneziawg не загружен в /proc/modules или отсутствует утилита awg. Нативный AmneziaWG awg0 отключён."
         ENABLE_NATIVE_AWG=0
+        if [ "${ENABLE_AGH:-0}" -eq 1 ] && [ -f /opt/AdGuardHome/AdGuardHome.yaml ]; then
+            python3 - << 'EOF_AGH_DROP_NAWG1'
+import os, re
+yp = "/opt/AdGuardHome/AdGuardHome.yaml"
+txt = open(yp, "r", encoding="utf-8").read()
+new_txt = re.sub(r"^[ \t]*-[ \t]*10\.9\.0\.1[ \t]*\n", "", txt, flags=re.M)
+if new_txt != txt:
+    open(yp + ".tmp", "w", encoding="utf-8").write(new_txt)
+    os.chmod(yp + ".tmp", 0o600)
+    os.replace(yp + ".tmp", yp)
+EOF_AGH_DROP_NAWG1
+            systemctl restart AdGuardHome 2>/dev/null || true
+        fi
     fi
 fi
 
@@ -6602,29 +7202,62 @@ import re, json, os
 conf_path = "/etc/amnezia/amneziawg/awg0.conf"
 clients_json_path = "/etc/amnezia/amneziawg/clients.json"
 clients = {}
-if os.path.exists(conf_path):
+def _reconstruct():
+    if not os.path.exists(conf_path):
+        return
     with open(conf_path, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
-    peers = re.findall(r'\[Peer\][\s\S]*?(?=\n\[Peer\]|\Z)', content)
-    for idx, p_block in enumerate(peers, 1):
-        m_pub = re.search(r'PublicKey\s*=\s*([^\s\n\r]+)', p_block)
-        m_ip = re.search(r'AllowedIPs\s*=\s*([^\s\n\r]+)', p_block)
-        m_name = re.search(r'# --- Client:\s*([^\n\r]+?)\s*---', p_block)
-        if m_pub:
-            pub = m_pub.group(1).strip()
-            ip = m_ip.group(1).strip() if m_ip else f"10.9.0.{idx+1}/32"
-            name = m_name.group(1).strip() if m_name else f"Client-{idx}"
-            clients[pub] = {
-                "name": name,
+    pending_name = ""
+    in_peer = False
+    cur_pub = ""
+    cur_ip = ""
+    cur_name = ""
+    peer_idx = 0
+
+    def _flush_peer():
+        nonlocal peer_idx, cur_pub, cur_ip, cur_name
+        if cur_pub:
+            peer_idx += 1
+            clients[cur_pub] = {
+                "name": cur_name or f"Client-{peer_idx}",
                 "private_key": "",
-                "public_key": pub,
-                "ip": ip
+                "public_key": cur_pub,
+                "ip": cur_ip or f"10.9.0.{peer_idx + 1}/32",
             }
+        cur_pub = ""
+        cur_ip = ""
+        cur_name = ""
+
+    for ln in content.splitlines():
+        st = ln.strip()
+        m_nm = re.search(r"# --- Client:\s*([^\n\r]+?)\s*---", st)
+        if m_nm:
+            pending_name = m_nm.group(1).strip()
+            continue
+        if st.startswith("[") and st.endswith("]"):
+            if in_peer:
+                _flush_peer()
+            in_peer = (st == "[Peer]")
+            if in_peer:
+                cur_name = pending_name
+            pending_name = ""
+            continue
+        if in_peer:
+            m_pub = re.match(r"PublicKey\s*=\s*(\S+)", st, re.I)
+            if m_pub:
+                cur_pub = m_pub.group(1).strip()
+            m_ip = re.match(r"AllowedIPs\s*=\s*(\S+)", st, re.I)
+            if m_ip:
+                cur_ip = m_ip.group(1).strip()
+    if in_peer:
+        _flush_peer()
     tmp_p = clients_json_path + ".tmp"
     with open(tmp_p, "w", encoding="utf-8") as f:
         json.dump(clients, f, indent=2)
     os.chmod(tmp_p, 0o600)
     os.replace(tmp_p, clients_json_path)
+
+_reconstruct()
 EOF_RECON
         fi
         chmod 600 /etc/amnezia/amneziawg/awg0.conf
@@ -6794,6 +7427,19 @@ EOF
         warn "Служба awg-quick@awg0 не запустилась. Нативный AmneziaWG awg0 отключён."
         systemctl disable awg-quick@awg0 >/dev/null 2>&1 || true
         ENABLE_NATIVE_AWG=0
+        if [ "${ENABLE_AGH:-0}" -eq 1 ] && [ -f /opt/AdGuardHome/AdGuardHome.yaml ]; then
+            python3 - << 'EOF_AGH_DROP_NAWG2'
+import os, re
+yp = "/opt/AdGuardHome/AdGuardHome.yaml"
+txt = open(yp, "r", encoding="utf-8").read()
+new_txt = re.sub(r"^[ \t]*-[ \t]*10\.9\.0\.1[ \t]*\n", "", txt, flags=re.M)
+if new_txt != txt:
+    open(yp + ".tmp", "w", encoding="utf-8").write(new_txt)
+    os.chmod(yp + ".tmp", 0o600)
+    os.replace(yp + ".tmp", yp)
+EOF_AGH_DROP_NAWG2
+            systemctl restart AdGuardHome 2>/dev/null || true
+        fi
     fi
 fi
 
@@ -7043,10 +7689,7 @@ def remove_peer_from_awg_conf(conf_text: str, pub_key: str) -> str:
             pending_comments.append(ln)
         else:
             if pending_comments:
-                if cur_header:
-                    cur_lines.extend(pending_comments)
-                else:
-                    cur_lines.extend(pending_comments)
+                cur_lines.extend(pending_comments)
                 pending_comments = []
             cur_lines.append(ln)
     if cur_header:
@@ -7233,7 +7876,7 @@ def login_3xui_session(user: str, pwd: str, port: str, base_path: str) -> List[s
             except Exception:
                 pass
             for ck in cj:
-                c_path = ck.path or clean_bp
+                c_path = clean_bp if (not ck.path or ck.path == "/") else ck.path
                 out_cookies.append(f"{ck.name}={ck.value}; Path={c_path}; HttpOnly; SameSite=Lax; Secure")
     except Exception:
         return []
@@ -7285,6 +7928,17 @@ def login_agh_session() -> str:
     except Exception:
         pass
     return ""
+
+def is_agh_session_valid(agh_session_cookie: str) -> bool:
+    if not agh_session_cookie:
+        return False
+    req = urllib.request.Request("http://127.0.0.1:3000/control/status", method="GET")
+    req.add_header("Cookie", f"agh_session={agh_session_cookie}")
+    try:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
 
 def build_client_conf(pub_key: str) -> Optional[str]:
     srv: Dict[str, str] = {}
@@ -7367,7 +8021,7 @@ from myprivatecloud_utils import (
     remove_peer_from_awg_conf,
     verify_credentials, get_canonical_domains,
     get_panel_info, login_3xui_session,
-    get_agh_basic_auth, login_agh_session, build_client_conf
+    get_agh_basic_auth, login_agh_session, is_agh_session_valid, build_client_conf
 )
 
 app = FastAPI(title="MyPrivateCloud Core", docs_url=None, redoc_url=None, openapi_url=None)
@@ -7457,7 +8111,8 @@ def api_verify_token(request: Request):
 
     if is_valid:
         headers: Dict[str, str] = {"Cache-Control": "no-store, private"}
-        has_agh_cookie = bool((request.cookies.get("agh_session") or "").strip())
+        cur_agh_ck = (request.cookies.get("agh_session") or "").strip()
+        has_agh_cookie = is_agh_session_valid(cur_agh_ck) if cur_agh_ck else False
         if issue_cookie or not has_agh_cookie:
             agh_kv = login_agh_session()
             if agh_kv:
@@ -7693,7 +8348,7 @@ SystemCallFilter=~@mount @swap @reboot @module @raw-io @obsolete @debug @cpu-emu
 IPAddressDeny=any
 IPAddressAllow=localhost
 UMask=0077
-ReadWritePaths=-/etc/amnezia/amneziawg -/etc/x-ui -/etc/myprivatecloud
+ReadWritePaths=-/etc/amnezia/amneziawg -/etc/x-ui -/usr/local/x-ui/bin -/etc/myprivatecloud
 LimitNOFILE=1048576
 LimitNPROC=512
 
@@ -7748,6 +8403,62 @@ ufw logging off >/dev/null 2>&1 || true
 ufw default deny incoming >/dev/null 2>&1 || true
 ufw default allow outgoing >/dev/null 2>&1 || true
 
+TARGET_SSH_PORT="$TARGET_SSH_PORT" ENABLE_HY2="${ENABLE_HY2:-0}" HY2_PORT="${HY2_PORT:-}" \
+ENABLE_NATIVE_AWG="${ENABLE_NATIVE_AWG:-0}" NATIVE_AWG_PORT="${NATIVE_AWG_PORT:-}" \
+ENABLE_AWG_V3="${ENABLE_AWG_V3:-0}" AWG_V3_PORT="${AWG_V3_PORT:-}" \
+ENABLE_AGH="${ENABLE_AGH:-0}" python3 - << 'EOF_UFW_PRUNE'
+import os, re, subprocess
+
+res = subprocess.run(["ufw", "status", "numbered"], capture_output=True, text=True)
+if res.returncode != 0:
+    raise SystemExit(0)
+
+ssh_p = os.environ.get("TARGET_SSH_PORT", "22").strip()
+hy2_on = os.environ.get("ENABLE_HY2", "0") == "1"
+hy2_p = os.environ.get("HY2_PORT", "").strip()
+nawg_on = os.environ.get("ENABLE_NATIVE_AWG", "0") == "1"
+nawg_p = os.environ.get("NATIVE_AWG_PORT", "").strip()
+awg3_on = os.environ.get("ENABLE_AWG_V3", "0") == "1"
+awg3_p = os.environ.get("AWG_V3_PORT", "").strip()
+agh_on = os.environ.get("ENABLE_AGH", "0") == "1"
+
+managed_comments = {
+    "SSH", "SSH Target Port",
+    "Hysteria 2",
+    "AmneziaWG Native awg0 Base",
+    "3X-UI AWG v3.2",
+    "AdGuard DNS awg0 UDP",
+    "AdGuard DNS awg0 TCP",
+}
+
+to_delete = []
+for ln in res.stdout.splitlines():
+    m = re.match(r"^\[\s*(\d+)\]\s+(.+?)\s+#\s*(.+?)\s*$", ln)
+    if not m:
+        continue
+    num, body, cmt = int(m.group(1)), m.group(2), m.group(3).strip()
+    if cmt not in managed_comments:
+        continue
+    keep = False
+    if cmt in ("SSH", "SSH Target Port"):
+        keep = bool(re.match(rf"^{re.escape(ssh_p)}/tcp(?:\s+\(v6\))?\s+ALLOW\b", body))
+    elif cmt == "Hysteria 2":
+        keep = hy2_on and bool(hy2_p) and bool(re.match(rf"^{re.escape(hy2_p)}/udp(?:\s+\(v6\))?\s+ALLOW\b", body))
+    elif cmt == "AmneziaWG Native awg0 Base":
+        keep = nawg_on and bool(nawg_p) and bool(re.match(rf"^{re.escape(nawg_p)}/udp(?:\s+\(v6\))?\s+ALLOW\b", body))
+    elif cmt == "3X-UI AWG v3.2":
+        keep = awg3_on and bool(awg3_p) and bool(re.match(rf"^{re.escape(awg3_p)}/udp(?:\s+\(v6\))?\s+ALLOW\b", body))
+    elif cmt == "AdGuard DNS awg0 UDP":
+        keep = agh_on and nawg_on and ("53/udp" in body) and ("awg0" in body)
+    elif cmt == "AdGuard DNS awg0 TCP":
+        keep = agh_on and nawg_on and ("53/tcp" in body) and ("awg0" in body)
+    if not keep:
+        to_delete.append(num)
+
+for num in sorted(to_delete, reverse=True):
+    subprocess.run(["ufw", "--force", "delete", str(num)], stdin=subprocess.DEVNULL, capture_output=True)
+EOF_UFW_PRUNE
+
 ufw allow "${TARGET_SSH_PORT}/tcp" comment 'SSH' >/dev/null 2>&1 || true
 ufw allow 80/tcp comment 'HTTP ACME' >/dev/null 2>&1 || true
 ufw allow 443/tcp comment 'HTTPS L4 Router' >/dev/null 2>&1 || true
@@ -7773,7 +8484,7 @@ fi
 
 if [ -f /etc/ufw/before.rules ]; then cp -a /etc/ufw/before.rules /tmp/ufw_before_pre_b10.bak 2>/dev/null || true; fi
 
-export HY2_PORT ENABLE_NATIVE_AWG NATIVE_AWG_PORT ENABLE_AWG_V3 DEFAULT_IF BLOCK_PING
+export HY2_PORT ENABLE_NATIVE_AWG NATIVE_AWG_PORT ENABLE_AWG_V3 ENABLE_AGH DEFAULT_IF BLOCK_PING
 python3 - << 'EOF_UFW_PYTHON'
 # -*- coding: utf-8 -*-
 import os, sys, re, subprocess
@@ -7795,15 +8506,11 @@ content = content.strip() + "\n"
 default_if = os.environ.get("DEFAULT_IF", "eth0")
 awg_native = os.environ.get("ENABLE_NATIVE_AWG") == "1"
 awg3 = os.environ.get("ENABLE_AWG_V3") == "1"
+enable_agh = os.environ.get("ENABLE_AGH") == "1"
 block_ping = os.environ.get("BLOCK_PING") == "1"
 
-nat_rules = ["*nat", ":PREROUTING ACCEPT [0:0]", ":POSTROUTING ACCEPT [0:0]", ":OUTPUT ACCEPT [0:0]"]
-if awg_native:
-    nat_rules.append(f"-A POSTROUTING -s 10.9.0.0/24 -o {default_if} -j MASQUERADE")
-if awg3:
-    nat_rules.append(f"-A POSTROUTING -s 10.8.1.0/24 -o {default_if} -j MASQUERADE")
-nat_rules.append("COMMIT")
-nat_part = "# START HARDENED NAT\n" + "\n".join(nat_rules) + "\n# END HARDENED NAT\n\n"
+# NAT управляется идемпотентной цепочкой HARDENED_NAT в apply-mss-clamp.sh во избежание дублей UFW reload
+nat_part = ""
 
 sec_lines = [
     "# START HARDENED SECURITY",
@@ -7813,11 +8520,11 @@ sec_lines = [
     "-A ufw-before-input -p tcp --tcp-flags SYN,FIN SYN,FIN -j DROP",
     "# END HARDENED SECURITY"
 ]
-if awg_native:
+if awg_native and enable_agh:
     sec_lines.extend([
         "# START HARDENED DNS-INPUT",
-        "-A ufw-before-input -i awg0 -p udp --dport 53 -j ACCEPT",
-        "-A ufw-before-input -i awg0 -p tcp --dport 53 -j ACCEPT",
+        "-A ufw-before-input -i awg0 -d 10.9.0.1 -p udp --dport 53 -j ACCEPT",
+        "-A ufw-before-input -i awg0 -d 10.9.0.1 -p tcp --dport 53 -j ACCEPT",
         "# END HARDENED DNS-INPUT"
     ])
 
@@ -7932,6 +8639,13 @@ MSS_SCRIPT="/usr/local/bin/apply-mss-clamp.sh"
 cat << EOF_MSS_SCRIPT > "${MSS_SCRIPT}.tmp"
 #!/usr/bin/env bash
 set -Eeuo pipefail
+while iptables -t nat -D POSTROUTING -s 10.9.0.0/24 -o ${DEFAULT_IF} -j MASQUERADE 2>/dev/null; do :; done
+while iptables -t nat -D POSTROUTING -s 10.8.1.0/24 -o ${DEFAULT_IF} -j MASQUERADE 2>/dev/null; do :; done
+iptables -t nat -D POSTROUTING -j HARDENED_NAT 2>/dev/null || true
+iptables -t nat -F HARDENED_NAT 2>/dev/null || true
+iptables -t nat -X HARDENED_NAT 2>/dev/null || true
+iptables -t nat -N HARDENED_NAT
+
 iptables -t mangle -D FORWARD -j HARDENED_MSS 2>/dev/null || true
 iptables -t mangle -F HARDENED_MSS 2>/dev/null || true
 iptables -t mangle -X HARDENED_MSS 2>/dev/null || true
@@ -7939,7 +8653,8 @@ iptables -t mangle -N HARDENED_MSS
 EOF_MSS_SCRIPT
 
 if [ "${ENABLE_NATIVE_AWG:-0}" -eq 1 ]; then
-    cat << 'EOF_MSS_NAWG' >> "${MSS_SCRIPT}.tmp"
+    cat << EOF_MSS_NAWG >> "${MSS_SCRIPT}.tmp"
+iptables -t nat -A HARDENED_NAT -s 10.9.0.0/24 -o ${DEFAULT_IF} -j MASQUERADE
 iptables -t mangle -A HARDENED_MSS -s 10.9.0.0/24 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1320
 iptables -t mangle -A HARDENED_MSS -s 10.9.0.0/24 -j RETURN
 iptables -t mangle -A HARDENED_MSS -d 10.9.0.0/24 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1320
@@ -7947,7 +8662,8 @@ iptables -t mangle -A HARDENED_MSS -d 10.9.0.0/24 -j RETURN
 EOF_MSS_NAWG
 fi
 if [ "${ENABLE_AWG_V3:-0}" -eq 1 ]; then
-    cat << 'EOF_MSS_AWG3' >> "${MSS_SCRIPT}.tmp"
+    cat << EOF_MSS_AWG3 >> "${MSS_SCRIPT}.tmp"
+iptables -t nat -A HARDENED_NAT -s 10.8.1.0/24 -o ${DEFAULT_IF} -j MASQUERADE
 iptables -t mangle -A HARDENED_MSS -s 10.8.1.0/24 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1320
 iptables -t mangle -A HARDENED_MSS -s 10.8.1.0/24 -j RETURN
 iptables -t mangle -A HARDENED_MSS -d 10.8.1.0/24 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1320
@@ -7955,6 +8671,7 @@ iptables -t mangle -A HARDENED_MSS -d 10.8.1.0/24 -j RETURN
 EOF_MSS_AWG3
 fi
 cat << 'EOF_MSS_TAIL' >> "${MSS_SCRIPT}.tmp"
+iptables -t nat -A POSTROUTING -j HARDENED_NAT
 iptables -t mangle -A HARDENED_MSS -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 iptables -t mangle -I FORWARD 1 -j HARDENED_MSS
 EOF_MSS_TAIL
@@ -7963,9 +8680,10 @@ chmod 0700 "$MSS_SCRIPT"
 
 cat << EOF_MSS_SVC > /etc/systemd/system/network-mss-clamp.service.tmp
 [Unit]
-Description=Idempotent TCP MSS Clamping (HARDENED_MSS Chain)
+Description=Idempotent NAT and TCP MSS Clamping (HARDENED_NAT / HARDENED_MSS)
 After=ufw.service network-online.target
 Wants=network-online.target
+PartOf=ufw.service
 
 [Service]
 Type=oneshot
@@ -8033,6 +8751,18 @@ static inline void __compat_udp_tunnel_sock_release(struct sock *sk)
 #define udp_tunnel_sock_release(sk) __compat_udp_tunnel_sock_release(sk)
 #endif"""
 
+legacy_re = re.compile(
+    r"/\* Kernel 7\.0\+ compatibility backport \*/\s*"
+    r"#if LINUX_VERSION_CODE < KERNEL_VERSION\(7, 0, 0\)\s*"
+    r"#define setup_udp_tunnel_sock\(net, sk, sock_cfg\) setup_udp_tunnel_sock\(net, sk->sk_socket, sock_cfg\)\s*"
+    r"#elif LINUX_VERSION_CODE < KERNEL_VERSION\(7, 2, 0\)\s*"
+    r"#define __compat_setup_udp_tunnel_sock 1\s*"
+    r"#endif",
+    re.M,
+)
+multiline_setup_re = re.compile(r"^[ \t]*#define[ \t]+setup_udp_tunnel_sock\b(?:[^\n]*\\\n)*[^\n]*sk->sk_socket[^\n]*\n?", re.M)
+multiline_rel_re = re.compile(r"^[ \t]*#define[ \t]+udp_tunnel_sock_release\b(?:[^\n]*\\\n)*[^\n]*\n?", re.M)
+
 for root_dir in glob.glob("/usr/src/amneziawg-*"):
     for rel in ("compat/compat.h", "src/compat/compat.h"):
         hp = os.path.join(root_dir, rel)
@@ -8040,27 +8770,28 @@ for root_dir in glob.glob("/usr/src/amneziawg-*"):
             continue
         with open(hp, "r", encoding="utf-8", errors="ignore") as f:
             txt = f.read()
-        if "__compat_udp_tunnel_sock_patched" in txt or ("__builtin_types_compatible_p" in txt and "setup_udp_tunnel_sock" in txt):
+        has_rel = bool(re.search(r"^[ \t]*#define[ \t]+udp_tunnel_sock_release\(", txt, re.M))
+        if ("__compat_udp_tunnel_sock_patched" in txt or ("__builtin_types_compatible_p" in txt and "setup_udp_tunnel_sock" in txt)) and has_rel:
             continue
-        if re.search(r"^[ \t]*#define\s+setup_udp_tunnel_sock\s*\([^\n]*sk->sk_socket", txt, re.M):
-            lines = txt.splitlines(keepends=True)
-            out = []
-            inserted = False
-            for ln in lines:
-                if re.match(r"^[ \t]*#define\s+setup_udp_tunnel_sock\s*\(", ln):
-                    if not inserted:
-                        out.append(pr265_block + "\n")
-                        inserted = True
-                    continue
-                if re.match(r"^[ \t]*#define\s+udp_tunnel_sock_release\s*\(", ln):
-                    continue
-                out.append(ln)
-            if inserted:
-                tmp = hp + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    f.writelines(out)
-                os.chmod(tmp, 0o644)
-                os.replace(tmp, hp)
+        changed = False
+        incomplete_pr265_re = re.compile(r"/\* PR #265:.*?#ifndef __compat_udp_tunnel_sock_patched.*?#endif", re.S)
+        if "__compat_udp_tunnel_sock_patched" in txt and not has_rel:
+            txt = incomplete_pr265_re.sub(pr265_block, txt, count=1)
+            changed = True
+        elif legacy_re.search(txt):
+            txt = multiline_rel_re.sub("", txt)
+            txt = legacy_re.sub(pr265_block, txt, count=1)
+            changed = True
+        elif multiline_setup_re.search(txt):
+            txt = multiline_rel_re.sub("", txt)
+            txt = multiline_setup_re.sub(pr265_block + "\n", txt, count=1)
+            changed = True
+        if changed:
+            tmp = hp + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(txt)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, hp)
 EOF_AUTO_AWG_COMPAT
 }
 
@@ -8105,7 +8836,12 @@ elif dpkg -l linux-image-arm64 >/dev/null 2>&1; then
     apt-get install -y -q linux-headers-arm64 2>/dev/null || true
 fi
 
-apt-get upgrade --with-new-pkgs -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+if ! apt-get upgrade --with-new-pkgs -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"; then
+    warn "Обнаружен сбой apt-get upgrade (возможен DKMS postinst); применяю патч совместимости AWG и повторяю..."
+    patch_awg_compat_sources || true
+    dpkg --configure -a || true
+    apt-get install -f -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+fi
 apt-get autoremove -y -q
 
 REBOOT_NEEDED=0
@@ -8222,7 +8958,13 @@ else
 fi
 
 PQC_STATUS_LABEL=""
-if [[ "${VLESS_DECRYPTION:-}" =~ ^mlkem768 ]]; then
+if [ "${ENABLE_XHTTP:-0}" -eq 1 ] && [ -f "${DB_PATH:-}" ]; then
+    _LOC_C_PQC=$(get_local_ib_cond "$DB_PATH")
+    _DB_XHTTP_DEC=$(sqlite_ro "$DB_PATH" "SELECT json_extract(settings, '$.decryption') FROM inbounds WHERE (tag='in-xhttp-stream' OR (protocol='vless' AND stream_settings LIKE '%xhttp%')) ${_LOC_C_PQC} ORDER BY enable DESC, id ASC LIMIT 1;")
+    if [[ "${_DB_XHTTP_DEC:-}" =~ ^mlkem768 ]]; then
+        PQC_STATUS_LABEL=" + ML-KEM-768"
+    fi
+elif [[ "${VLESS_DECRYPTION:-}" =~ ^mlkem768 ]] && [ "${MIGRATE_FORCE_MLKEM:-1}" -eq 1 ]; then
     PQC_STATUS_LABEL=" + ML-KEM-768"
 fi
 
@@ -8476,5 +9218,1154 @@ echo -e "${GREEN}===============================================================
 
 ROLLBACK_ACTIVE=0
 rm -rf "${NGINX_PRE_BAK:-}" "${XUI_PRE_BAK:-}" 2>/dev/null || true
+
+echo
+if prompt_yes_no "Установить / обновить скрипт аудита безопасности и DPI/ТСПУ (/usr/local/bin/hardcore_dpi_audit.sh)?" "n"; then
+    AUDIT_BIN="/usr/local/bin/hardcore_dpi_audit.sh"
+    cat << 'EOF_HARDCORE_AUDIT' > "${AUDIT_BIN}.tmp"
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+export LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONIOENCODING=utf-8 PYTHONUTF8=1
+
+command -v python3 >/dev/null 2>&1 || { echo "[X] Требуется python3." >&2; exit 1; }
+LOCK_DIR="/run/lock"
+[ -w "${LOCK_DIR}" ] || LOCK_DIR="/tmp"
+exec 200>"${LOCK_DIR}/hardcore_dpi_audit.lock"
+flock -n 200 || { echo "[X] Аудит уже выполняется." >&2; exit 1; }
+
+# shellcheck disable=SC2317
+cleanup() { local rc=$?; trap - ERR EXIT INT TERM; rm -f /tmp/hardcore_audit_*.tmp 2>/dev/null || true; exit "$rc"; }
+trap cleanup ERR EXIT INT TERM
+
+python3 - "$@" << 'PY_AUDIT'
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+import argparse, base64, glob, hashlib, http.client, ipaddress, json, os, re, secrets, shutil, socket, sqlite3, ssl, stat, struct, subprocess, sys, time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+G, C, Y, R, D, B, N = "\033[0;32m", "\033[0;36m", "\033[1;33m", "\033[0;31m", "\033[0;90m", "\033[1m", "\033[0m"
+DDNS_SFX = ("duckdns.org", "no-ip.org", "no-ip.com", "ddns.net", "hopto.org", "zapto.org", "dynu.net", "ydns.eu", "dedyn.io", "nip.io", "sslip.io")
+VPN_KWS = ("mihomo", "singbox", "sing-box", "happ://", "incy://", "vless", "vmess", "trojan", "hysteria", "reality", "xhttp", "xray", "3x-ui", "amnezia", "wireguard", "xtls-rprx-vision", "mlkem768")
+BANNERS = ("<center>nginx</center>", "openresty", "uvicorn", "fastapi", "adguard home", "dns request failed")
+
+@dataclass
+class Check:
+    cid: str; dom: str; title: str; sev: str; st: str; ev: str; fix: str = ""; view: str = ""; pub_title: str = ""
+
+@dataclass
+class Cfg:
+    mode: str; ip: str; p_dom: str; steals: List[str] = field(default_factory=list)
+    agh_dom: str = ""; agh_cid: str = ""; xhttp_p: str = ""; panel_p: str = ""; sub_p: str = ""
+    p_port: int = 10443; s_port: int = 55443; x_port: int = 50443; hy2_p: int = 0
+    nawg_p: int = 0; awg3_p: int = 0; en_agh: bool = False; en_nawg: bool = False
+    r_ports: List[int] = field(default_factory=list); db: str = ""; rl: bool = False; to: float = 4.0; pub_ip: str = ""
+
+def cmd(args: List[str], to: int = 10) -> Tuple[int, str, str]:
+    try:
+        p = subprocess.run(args, capture_output=True, text=True, timeout=to)
+        return p.returncode, p.stdout, p.stderr
+    except Exception as e:
+        return -1, "", str(e)
+
+def mmh3_32_signed(data: bytes, seed: int = 0) -> int:
+    c1, c2 = 0xCC9E2D51, 0x1B873593
+    h1 = seed & 0xFFFFFFFF
+    length = len(data)
+    rounded_end = length & ~0x3
+    for i in range(0, rounded_end, 4):
+        k1 = struct.unpack_from("<I", data, i)[0]
+        k1 = (k1 * c1) & 0xFFFFFFFF
+        k1 = ((k1 << 15) | (k1 >> 17)) & 0xFFFFFFFF
+        k1 = (k1 * c2) & 0xFFFFFFFF
+        h1 ^= k1
+        h1 = ((h1 << 13) | (h1 >> 19)) & 0xFFFFFFFF
+        h1 = (h1 * 5 + 0xE6546B64) & 0xFFFFFFFF
+    tail = length & 0x3
+    k1 = 0
+    if tail == 3: k1 ^= data[rounded_end + 2] << 16
+    if tail >= 2: k1 ^= data[rounded_end + 1] << 8
+    if tail >= 1:
+        k1 ^= data[rounded_end]
+        k1 = (k1 * c1) & 0xFFFFFFFF
+        k1 = ((k1 << 15) | (k1 >> 17)) & 0xFFFFFFFF
+        k1 = (k1 * c2) & 0xFFFFFFFF
+        h1 ^= k1
+    h1 ^= length
+    h1 ^= (h1 >> 16)
+    h1 = (h1 * 0x85EBCA6B) & 0xFFFFFFFF
+    h1 ^= (h1 >> 13)
+    h1 = (h1 * 0xC2B2AE35) & 0xFFFFFFFF
+    h1 ^= (h1 >> 16)
+    return -((h1 ^ 0xFFFFFFFF) + 1) if (h1 & 0x80000000) else h1
+
+def tcp_open(ip: str, port: int, to: float = 1.0, fam: int = socket.AF_INET) -> Tuple[bool, bytes]:
+    s = socket.socket(fam, socket.SOCK_STREAM)
+    s.settimeout(to)
+    try:
+        s.connect((ip, port)); s.settimeout(0.35)
+        try: b = s.recv(256)
+        except Exception: b = b""
+        return True, b
+    except Exception: return False, b""
+    finally: s.close()
+
+def raw_tcp(ip: str, port: int, payload: bytes, to: float = 2.8) -> Tuple[str, bytes, float]:
+    t0 = time.monotonic()
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(to)
+    try:
+        s.connect((ip, port))
+        if payload: s.sendall(payload)
+        chunks: List[bytes] = []; s.settimeout(min(to, 1.8))
+        try:
+            while True:
+                buf = s.recv(4096)
+                if not buf: break
+                chunks.append(buf)
+                if sum(len(x) for x in chunks) > 16384: break
+        except socket.timeout:
+            ms = (time.monotonic() - t0) * 1000.0
+            return ("DATA", b"".join(chunks), ms) if chunks else ("HANG_TIMEOUT", b"", ms)
+        except ConnectionResetError:
+            return "TCP_RST", b"".join(chunks), (time.monotonic() - t0) * 1000.0
+        raw = b"".join(chunks); ms = (time.monotonic() - t0) * 1000.0
+        return ("DATA", raw, ms) if raw else ("EOF_SILENT", b"", ms)
+    except ConnectionResetError: return "TCP_RST", b"", (time.monotonic() - t0) * 1000.0
+    except socket.timeout: return "CONNECT_TIMEOUT", b"", (time.monotonic() - t0) * 1000.0
+    except OSError as e: return f"ERR_{e.errno}", b"", (time.monotonic() - t0) * 1000.0
+    finally: s.close()
+
+def http_sni(ip: str, sni: str, meth: str, path: str, hdrs: Optional[Dict[str, str]] = None, body: Optional[bytes] = None, to: float = 4.0) -> Tuple[int, Dict[str, str], bytes, float, str]:
+    cb = shutil.which("curl")
+    rh = dict(hdrs or {})
+    if "User-Agent" not in rh:
+        rh["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
+    if cb:
+        c = [cb, "-sS", "-i", "-k", "--http2", "--connect-timeout", str(int(max(2.0, to))), "-m", str(int(to + 2)), "--resolve", f"{sni}:443:{ip}", "-X", meth, "-w", "\n__META__%{http_code}|%{time_appconnect}|%{http_version}"]
+        for k, v in rh.items():
+            c.extend(["-H", f"{k}:" if v == "" else f"{k}: {v}"])
+        if body is not None: c.extend(["--data-binary", "@-"])
+        c.append(f"https://{sni}{path}")
+        try:
+            p = subprocess.run(c, input=body, capture_output=True, timeout=int(to + 5))
+            out = p.stdout; mk = b"\n__META__"
+            if mk in out:
+                hp, mp = out.rsplit(mk, 1)
+                mv = mp.decode("utf-8", "replace").strip().split("|")
+                st = int(mv[0]) if mv[0].isdigit() else 0
+                rtt = float(mv[1]) * 1000.0 if len(mv) > 1 and mv[1] else 0.0
+                ver = f"HTTP/{mv[2]}" if len(mv) > 2 else "HTTP/2"
+                sep = b"\r\n\r\n" if b"\r\n\r\n" in hp else b"\n\n"
+                hr, rb = hp.split(sep, 1) if sep in hp else (hp, b"")
+                res_h: Dict[str, str] = {}
+                for ln in hr.decode("utf-8", "replace").splitlines()[1:]:
+                    if ":" in ln:
+                        k, v = ln.split(":", 1); res_h[k.strip().lower()] = v.strip()
+                return st, res_h, rb, rtt, ver
+        except Exception as e:
+            raise RuntimeError(str(e))
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+    ctx.set_alpn_protocols(["http/1.1"])
+    class SC(http.client.HTTPSConnection):
+        def connect(self) -> None:
+            self.sock = ctx.wrap_socket(socket.create_connection((ip, self.port), self.timeout), server_hostname=sni)
+    t0 = time.monotonic(); cn = SC(sni, port=443, timeout=to)
+    try:
+        cn.request(meth, path, body=body, headers=rh); r = cn.getresponse()
+        return r.status, {k.lower(): v for k, v in r.getheaders()}, r.read(), (time.monotonic() - t0) * 1000.0, "HTTP/1.1"
+    finally: cn.close()
+
+def raw_hello(sni: Optional[str], rver: int = 0x0301, cver: int = 0x0303, t13: bool = True, weak: bool = False, corrupt: bool = False) -> bytes:
+    rnd = secrets.token_bytes(32); sid = secrets.token_bytes(32) if t13 else b""
+    cids = [0x0005, 0x000A, 0x002F, 0x0035] if weak else [0x1301, 0x1302, 0x1303, 0xC02B, 0xC02F]
+    craw = b"".join(struct.pack(">H", c) for c in cids); exts: List[bytes] = []
+    if sni:
+        sb = sni.encode("ascii"); ent = struct.pack(">BH", 0, len(sb)) + sb
+        sl = struct.pack(">H", len(ent)) + ent; exts.append(struct.pack(">HH", 0, len(sl)) + sl)
+    al = b"".join(struct.pack(">B", len(a)) + a for a in (b"h2", b"http/1.1"))
+    ab = struct.pack(">H", len(al)) + al; exts.append(struct.pack(">HH", 0x0010, len(ab)) + ab)
+    gr = struct.pack(">HHH", 0x001D, 0x0017, 0x0018); exts.append(struct.pack(">HHH", 0x000A, len(gr) + 2, len(gr)) + gr)
+    exts.append(struct.pack(">HHBB", 0x000B, 2, 1, 0))
+    sg = struct.pack(">HHH", 0x0403, 0x0804, 0x0401); exts.append(struct.pack(">HHH", 0x000D, len(sg) + 2, len(sg)) + sg)
+    if t13:
+        sv = struct.pack(">HH", 0x0304, 0x0303); exts.append(struct.pack(">HHB", 0x002B, len(sv) + 1, len(sv)) + sv)
+        ks = struct.pack(">HH", 0x001D, 32) + secrets.token_bytes(32)
+        exts.append(struct.pack(">HHH", 0x0033, len(ks) + 2, len(ks)) + ks)
+        exts.append(struct.pack(">HHBB", 0x002D, 2, 1, 1))
+    if corrupt: exts.append(struct.pack(">HH", 0xFFFE, 48) + secrets.token_bytes(16))
+    er = b"".join(exts)
+    bd = struct.pack(">H", cver) + rnd + struct.pack(">B", len(sid)) + sid + struct.pack(">H", len(craw)) + craw + b"\x01\x00" + struct.pack(">H", len(er)) + er
+    hs = b"\x01" + struct.pack(">I", len(bd))[1:] + bd
+    return struct.pack(">BHH", 0x16, rver, len(hs)) + hs
+
+def tls_probe_raw(ip: str, payload: bytes, to: float = 2.8) -> Tuple[str, float, int]:
+    st, d, ms = raw_tcp(ip, 443, payload, to)
+    if st != "DATA": return st, ms, 0
+    if len(d) >= 7 and d[0] == 0x15: return f"TLS_ALERT_{d[6]}", ms, len(d)
+    if len(d) >= 6 and d[0] == 0x16 and d[5] == 0x02: return "SERVER_HELLO", ms, len(d)
+    return f"RAW_{d[:4].hex()}", ms, len(d)
+
+def tls_details(ip: str, sni: str, ver: str, to: float = 4.0) -> Tuple[bool, str, List[str], Optional[int]]:
+    ctx = ssl.create_default_context(); ctx.check_hostname = True
+    if ver == "1.2": ctx.minimum_version = ssl.TLSVersion.TLSv1_2; ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    elif ver == "1.3": ctx.minimum_version = ssl.TLSVersion.TLSv1_3; ctx.maximum_version = ssl.TLSVersion.TLSv1_3
+    ctx.set_alpn_protocols(["h2", "http/1.1"])
+    try:
+        with socket.create_connection((ip, 443), to) as r:
+            with ctx.wrap_socket(r, server_hostname=sni) as ss:
+                cert = ss.getpeercert() or {}
+                sans = [str(e[1]) for e in cert.get("subjectAltName", ()) if isinstance(e, tuple) and len(e) == 2 and e[0] == "DNS"]
+                age = None; nb = cert.get("notBefore")
+                if isinstance(nb, str):
+                    try: age = (datetime.now(timezone.utc) - datetime.strptime(nb, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)).days
+                    except Exception: pass
+                return True, str(ss.selected_alpn_protocol() or "none"), sans, age
+    except ssl.SSLCertVerificationError as e: return False, f"CERT_ERR:{e.verify_message}", [], None
+    except Exception as e: return False, type(e).__name__, [], None
+
+def sclient_fingerprint(ip: str, sni: str) -> Dict[str, str]:
+    info: Dict[str, str] = {}
+    if not shutil.which("openssl"): return info
+    try:
+        p = subprocess.run(
+            ["openssl", "s_client", "-connect", f"{ip}:443", "-servername", sni, "-tls1_3", "-alpn", "h2"],
+            input=b"", capture_output=True, timeout=4
+        )
+        out = (p.stdout + p.stderr).decode("utf-8", "ignore")
+        for cm in re.finditer(r"^\s*(?:New,\s+TLSv[\d.]+,\s+Cipher\s+is|Cipher\s*:)\s*([^\s(,]+)", out, re.M):
+            cv = cm.group(1).strip()
+            if cv not in ("0000", "(NONE)"):
+                info["cipher"] = cv
+                break
+        for key, pat in (
+            ("temp_key", r"^\s*Server Temp Key:\s*(.+)$"),
+            ("alpn", r"^\s*ALPN protocol:\s*(\S+)"),
+            ("early", r"^\s*Max Early Data:\s*(\d+)"),
+        ):
+            m = re.search(pat, out, re.M)
+            if m: info[key] = m.group(1).strip()
+        info["early_data"] = "YES" if ("Early data was accepted" in out or int(info.get("early", "0")) > 0) else "NO"
+    except Exception: pass
+    return info
+
+def dns_wire(qn: str = "example.com") -> bytes:
+    lb = b"".join(bytes([len(p)]) + p.encode("ascii") for p in qn.split(".")) + b"\x00"
+    return secrets.token_bytes(2) + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + lb + struct.pack(">HH", 1, 1)
+
+def discover(args: argparse.Namespace) -> Cfg:
+    has_loc = os.path.exists("/etc/myprivatecloud/config.json") or os.path.exists("/etc/x-ui/x-ui.db")
+    mode = ("local" if has_loc else "remote") if args.mode == "auto" else args.mode
+    env_m: Dict[str, str] = {}; cfg_j: Dict[str, Any] = {}
+    if mode == "local":
+        if os.path.exists("/etc/myprivatecloud/config.env"):
+            for ln in open("/etc/myprivatecloud/config.env", encoding="utf-8", errors="ignore"):
+                m = re.match(r'^\s*([A-Z0-9_]+)\s*=\s*"?([^"\n\r]*)"?\s*$', ln)
+                if m: env_m[m.group(1)] = m.group(2).strip()
+        if os.path.exists("/etc/myprivatecloud/config.json"):
+            try: cfg_j = json.load(open("/etc/myprivatecloud/config.json", encoding="utf-8"))
+            except Exception: pass
+
+    t_arg = args.target.strip()
+    p_dom = args.domain or ("" if re.match(r"^\d+\.\d+\.\d+\.\d+$", t_arg) else t_arg) or str(cfg_j.get("primary_domain") or env_m.get("PRIMARY_DOMAIN") or "")
+    a_dom = args.agh_domain or str(cfg_j.get("agh_domain") or env_m.get("AGH_DOMAIN") or "")
+    a_cid = args.agh_client_id or str(env_m.get("AGH_CLIENT_ID") or "")
+    ip = args.target_ip or (t_arg if re.match(r"^\d+\.\d+\.\d+\.\d+$", t_arg) else "")
+
+    if mode == "remote" and not p_dom and not ip:
+        if sys.stdin.isatty():
+            v = input("Введите домен (FQDN) или IP целевого сервера: ").strip()
+            if re.match(r"^\d+\.\d+\.\d+\.\d+$", v): ip = v
+            else: p_dom = v
+            if not args.steal_domain: args.steal_domain = input("Steal-REALITY домен (опц., Enter пропуск): ").strip()
+            if not a_dom: a_dom = input("AdGuard DoH домен (опц., Enter пропуск): ").strip()
+            if not args.xhttp_path: args.xhttp_path = input("xHTTP путь (опц., Enter пропуск): ").strip()
+        else:
+            print(f"{R}[X] Укажите цель: --target <DOMAIN_OR_IP>{N}", file=sys.stderr); sys.exit(1)
+
+    if not ip and mode == "local":
+        rc, out, _ = cmd(["ip", "-4", "route", "get", "1.1.1.1"], 3)
+        ms = re.search(r"\bsrc\s+(\d+\.\d+\.\d+\.\d+)", out) if rc == 0 else None
+        if ms: ip = ms.group(1)
+    if not ip and p_dom:
+        try: ip = socket.gethostbyname(p_dom)
+        except Exception: pass
+    ip = ip or "127.0.0.1"
+    pub_ip = ""
+    try:
+        if not ipaddress.ip_address(ip).is_private:
+            pub_ip = ip
+    except Exception:
+        pass
+    if mode == "local" and not pub_ip and shutil.which("curl"):
+        for ep in ("https://icanhazip.com", "https://ifconfig.me"):
+            rc_p, out_p, _ = cmd(["curl", "-s4", "--connect-timeout", "2", "-m", "3", ep], 4)
+            cand_p = out_p.strip()
+            if rc_p == 0 and re.match(r"^\d+\.\d+\.\d+\.\d+$", cand_p):
+                try:
+                    if not ipaddress.ip_address(cand_p).is_private:
+                        pub_ip = cand_p
+                        break
+                except Exception:
+                    pass
+
+    steals = [x.strip() for x in args.steal_domain.split(",") if x.strip()]
+    r_ports: List[int] = []; xp = args.xhttp_path or ""; sp = args.sub_path or str(cfg_j.get("sub_path") or env_m.get("SUB_PATH") or "")
+    pp = str(cfg_j.get("panel_path") or env_m.get("PANEL_PATH") or "")
+    p_port = int(str(cfg_j.get("panel_port") or env_m.get("PANEL_PORT") or "10443"))
+    s_port = int(str(cfg_j.get("sub_port") or env_m.get("SUB_PORT") or "55443"))
+    x_port, hy2_p, awg3_p, nawg_p = 50443, args.hy2_port, 0, 0
+    db_p = ""; en_nawg = False; en_agh = bool(a_dom)
+
+    if mode == "local":
+        for cand in ("/etc/x-ui/x-ui.db", "/usr/local/x-ui/bin/x-ui.db", "/etc/x-ui/db/x-ui.db"):
+            if os.path.exists(cand): db_p = cand; break
+        if db_p:
+            try:
+                cn = sqlite3.connect(f"file:{db_p}?mode=ro", uri=True, timeout=3.0)
+                for k, v in cn.execute("SELECT key, value FROM settings WHERE key IN ('webPort','subPort','webBasePath','subPath')"):
+                    if k == "webPort" and str(v).isdigit(): p_port = int(v)
+                    elif k == "subPort" and str(v).isdigit(): s_port = int(v)
+                    elif k == "webBasePath" and v: pp = str(v)
+                    elif k == "subPath" and v and not sp: sp = str(v)
+                ib_cols = {r[1] for r in cn.execute("PRAGMA table_info(inbounds)")}
+                nc_parts, nc_params = [], []
+                if "node_id" in ib_cols: nc_parts.append("(node_id IS NULL OR node_id = 0)")
+                if "origin_node_guid" in ib_cols:
+                    pg_r = cn.execute("SELECT value FROM settings WHERE key='panelGuid' LIMIT 1").fetchone()
+                    pg_v = str(pg_r[0]).strip() if pg_r and pg_r[0] else ""
+                    if pg_v:
+                        nc_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = ?)")
+                        nc_params.append(pg_v)
+                    else:
+                        nc_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '')")
+                nc_sql = (" AND " + " AND ".join(nc_parts)) if nc_parts else ""
+                for pr, port, st_raw, tag in cn.execute(f"SELECT protocol, port, stream_settings, tag FROM inbounds WHERE enable=1{nc_sql}", nc_params):
+                    st = json.loads(st_raw) if st_raw else {}
+                    if pr == "vless" and "xhttpSettings" in st:
+                        x_port = int(port); xp = xp or str(st["xhttpSettings"].get("path", ""))
+                    if pr == "vless" and "realitySettings" in st:
+                        r_ports.append(int(port))
+                        rs_d = st["realitySettings"]
+                        if "steal" in str(tag).lower() or str(rs_d.get("dest", rs_d.get("target", ""))).strip() == "127.0.0.1:9443":
+                            for sn in rs_d.get("serverNames", []):
+                                if sn and str(sn) not in steals: steals.append(str(sn))
+                    if pr == "hysteria" and hy2_p == 0: hy2_p = int(port)
+                    if pr == "amneziawg": awg3_p = int(port)
+                cn.close()
+            except Exception: pass
+        en_nawg = os.path.exists("/etc/amnezia/amneziawg/awg0.conf")
+        if en_nawg:
+            mp = re.search(r"^\s*ListenPort\s*=\s*(\d+)", open("/etc/amnezia/amneziawg/awg0.conf", errors="ignore").read(), re.M)
+            if mp: nawg_p = int(mp.group(1))
+        en_agh = os.path.exists("/opt/AdGuardHome/AdGuardHome.yaml") and os.path.exists("/etc/nginx/conf.d/03-adguard.conf")
+
+    if args.awg_ports:
+        ap = [int(x.strip()) for x in args.awg_ports.split(",") if x.strip().isdigit()]
+        if ap: nawg_p = ap[0]; awg3_p = ap[1] if len(ap) > 1 else awg3_p
+
+    return Cfg(mode, ip, p_dom, steals, a_dom, a_cid, xp, pp, sp, p_port, s_port, x_port, hy2_p, nawg_p, awg3_p, en_agh, en_nawg, sorted(set(r_ports)), db_p, bool(args.test_ratelimit), 4.0, pub_ip)
+
+def run_remote_checks(cfg: Cfg) -> List[Check]:
+    items: List[Check] = []
+    fp_main: Dict[str, str] = {}
+
+    # R1: Периметр, Open Proxy, Port 80, PTR, IPv6 Dual-Stack, DNS Origin Leak
+    ports = sorted(set([21, 22, 23, 25, 53, 80, 443, 1080, 3000, 3128, 5201, 8080, 8088, 8443, 9443, 10443, 11111, 20443, 45443, 46443, 50443, 55443, 62789, 65140, cfg.p_port, cfg.s_port, cfg.x_port] + cfg.r_ports))
+    intl = {53, 1080, 3000, 3128, 5201, 8088, 9443, 11111, 20443, 45443, 46443, 50443, 55443, 62789, 65140, cfg.p_port, cfg.s_port, cfg.x_port}
+    op_list: List[str] = []; exp_int: List[int] = []
+    for p in ports:
+        if p <= 0: continue
+        ok, ban = tcp_open(cfg.ip, p, 0.85)
+        if ok:
+            bs = ban.decode("ascii", "ignore").strip().splitlines()[0][:32] if ban else ""
+            op_list.append(f"{p}({bs})" if bs else str(p))
+            if p in intl: exp_int.append(p)
+    items.append(Check("R1-01", "R1. Периметр L3/L4 (Shodan/Censys/ZMap)", "Изоляция внутренних TCP-портов", "CRITICAL", "FAIL" if exp_int else "PASS",
+        f"Открыты внутренние: {exp_int} (все: {', '.join(op_list)})" if exp_int else f"Открыты только штатные порты: {', '.join(op_list) or 'нет'}",
+        "Закройте внутренние порты в UFW и bind на 127.0.0.1", f"Внешние порты: {', '.join(op_list)}", "Изоляция внутренних TCP-портов"))
+
+    pl = [str(pp) for pp in (80, 443) if b"200 Connection established" in raw_tcp(cfg.ip, pp, b"CONNECT 1.1.1.1:443 HTTP/1.1\r\nHost: 1.1.1.1:443\r\n\r\n", 1.8)[1]]
+    items.append(Check("R1-02", "R1. Периметр L3/L4 (Shodan/Censys/ZMap)", "Защита от Open HTTP/CONNECT Proxy", "CRITICAL", "FAIL" if pl else "PASS",
+        f"Уязвимы порты: {', '.join(pl)}" if pl else "CONNECT-проксирование на 80/443 отклонено.", pub_title="Защита от Open HTTP/CONNECT Proxy"))
+
+    st_i, d_i, _ = raw_tcp(cfg.ip, 80, f"GET / HTTP/1.1\r\nHost: {cfg.ip}\r\nConnection: close\r\n\r\n".encode("ascii"), 2.0)
+    st_f, d_f, _ = raw_tcp(cfg.ip, 80, b"GET / HTTP/1.1\r\nHost: evil-scanner.invalid\r\nConnection: close\r\n\r\n", 2.0)
+    drop_ok = (st_i in ("EOF_SILENT", "TCP_RST") and not d_i and st_f in ("EOF_SILENT", "TCP_RST") and not d_f)
+    p80_dom_bad: List[str] = []
+    if cfg.p_dom:
+        _, d80, _ = raw_tcp(cfg.ip, 80, f"GET / HTTP/1.1\r\nHost: {cfg.p_dom}\r\nConnection: close\r\n\r\n".encode("ascii"), 2.0)
+        h80 = d80.decode("utf-8", "ignore").splitlines()[0] if d80 else "NO_DATA"
+        if "301" not in h80 or re.search(rb"Server:\s*nginx/\d", d80, re.I): p80_dom_bad.append(h80)
+    items.append(Check("R1-03", "R1. Периметр L3/L4 (Shodan/Censys/ZMap)", "Порт 80/tcp (IP/Fake-Host 444 Drop & Redirect)", "MEDIUM",
+        "PASS" if (drop_ok and not p80_dom_bad) else "WARN",
+        f"IP={st_i}, FakeHost={st_f}, MainHost={p80_dom_bad or '301 OK'}", "Настройте return 444 для _ и 301 для PRIMARY_DOMAIN", pub_title="Порт 80/tcp (Drop без Host и 301 Redirect)"))
+
+    ptr_ip = cfg.pub_ip or cfg.ip
+    try:
+        is_priv_ptr = ipaddress.ip_address(ptr_ip).is_private
+        ptr = "PRIVATE_NAT" if is_priv_ptr else socket.gethostbyaddr(ptr_ip)[0]
+    except Exception:
+        ptr = "NXDOMAIN"
+    ddns = [d for d in [cfg.p_dom, cfg.agh_dom] + cfg.steals if d and any(d.endswith(x) for x in DDNS_SFX)]
+    items.append(Check("R1-04", "R1. Периметр L3/L4 (Shodan/Censys/ZMap)", "Репутация домена и PTR", "LOW", "WARN" if ddns else "PASS",
+        f"DDNS={ddns}; PTR={ptr}" if ddns else f"Собственный домен 2+ уровня; PTR={ptr}", pub_title="Репутация домена и PTR-запись"))
+
+    # R1-05: IPv6 Dual-Stack & AAAA Bypass
+    aaaa_ips: List[str] = []
+    if cfg.p_dom:
+        for d in [x for x in [cfg.p_dom, cfg.agh_dom] + cfg.steals if x]:
+            try:
+                for fam, _, _, _, sa in socket.getaddrinfo(d, None, socket.AF_INET6):
+                    if fam == socket.AF_INET6 and sa[0] not in aaaa_ips: aaaa_ips.append(sa[0])
+            except Exception: pass
+    v6_intl: List[int] = []; v6_all: List[int] = []
+    for v6a in aaaa_ips[:1]:
+        for vp in sorted(set([22, 53, 80, 443, 3000, 8088, 9443, 10443, 20443, 45443, 46443, 50443, 55443, cfg.p_port, cfg.s_port, cfg.x_port])):
+            if vp <= 0: continue
+            if tcp_open(v6a, vp, 0.85, socket.AF_INET6)[0]:
+                v6_all.append(vp)
+                if vp not in (80, 443): v6_intl.append(vp)
+    items.append(Check("R1-05", "R1. Периметр L3/L4 (Shodan/Censys/ZMap)", "Изоляция IPv6 Dual-Stack (AAAA и внешние порты)", "CRITICAL" if v6_intl else "INFO",
+        "FAIL" if v6_intl else "PASS",
+        f"По IPv6 ({aaaa_ips[:1]}) открыты внутренние порты {v6_intl}!" if v6_intl else (f"AAAA={aaaa_ips[:2]}, открыты только {v6_all}" if aaaa_ips else "Записи AAAA отсутствуют, утечек по IPv6 нет."),
+        "Отключите AAAA или настройте ip6tables/UFW IPV6=yes" if v6_intl else "", pub_title="Изоляция IPv6 Dual-Stack (AAAA и порты)"))
+
+    # R1-06: DNS Origin / MX / SPF / Subdomain Metadata Leak
+    if cfg.p_dom:
+        dom_ip = ""
+        try: dom_ip = socket.gethostbyname(cfg.p_dom)
+        except Exception: pass
+        cmp_ip = cfg.pub_ip or cfg.ip
+        try: cmp_priv = ipaddress.ip_address(cmp_ip).is_private
+        except Exception: cmp_priv = True
+        is_cdn = bool(dom_ip and cmp_ip and not cmp_priv and dom_ip != cmp_ip)
+        leaks_dns: List[str] = []
+        if shutil.which("dig"):
+            _, txt_out, _ = cmd(["dig", "+short", "TXT", cfg.p_dom, "@1.1.1.1"], 3)
+            _, mx_out, _ = cmd(["dig", "+short", "MX", cfg.p_dom, "@1.1.1.1"], 3)
+            if is_cdn and cmp_ip in txt_out: leaks_dns.append("SPF/TXT содержит origin IP")
+            for mx_ln in mx_out.splitlines():
+                mx_h = mx_ln.split()[-1].rstrip(".") if mx_ln.split() else ""
+                if mx_h and mx_h != ".":
+                    try:
+                        mx_ip = socket.gethostbyname(mx_h)
+                        if is_cdn and mx_ip == cmp_ip: leaks_dns.append(f"MX {mx_h}->origin IP")
+                    except Exception: pass
+            _, wc_out, _ = cmd(["dig", "+short", "A", f"{secrets.token_hex(5)}.{cfg.p_dom}", "@1.1.1.1"], 3)
+            if is_cdn and not wc_out.strip():
+                for sub in ("mail", "direct", "origin", "vpn", "panel", "admin"):
+                    _, s_out, _ = cmd(["dig", "+short", "A", f"{sub}.{cfg.p_dom}", "@1.1.1.1"], 3)
+                    if cmp_ip in s_out.splitlines(): leaks_dns.append(f"{sub}.->origin IP")
+        items.append(Check("R1-06", "R1. Периметр L3/L4 (Shodan/Censys/ZMap)", "DNS Origin Leak (MX / SPF / TXT / Поддомены)", "HIGH" if leaks_dns else "INFO",
+            "FAIL" if leaks_dns else "PASS",
+            f"Обнаружена утечка Origin IP: {leaks_dns}" if leaks_dns else ("Проксируемый домен (CDN) не раскрывает Origin IP в MX/SPF/поддоменах." if is_cdn else "Прямой A-резолв без лишних MX/SPF утечек."),
+            "Удалите прямые A/SPF/MX записи с реальным IP при использовании CDN" if leaks_dns else "", pub_title="Защита DNS-метаданных (MX / SPF / Origin IP)"))
+
+    # R2: TLS Oracle & Stack Parity
+    zs, _, _ = tls_probe_raw(cfg.ip, raw_hello(None, t13=True), cfg.to)
+    bs, _, _ = tls_probe_raw(cfg.ip, raw_hello("censys-scan-2026.invalid", t13=True), cfg.to)
+    ips, _, _ = tls_probe_raw(cfg.ip, raw_hello(cfg.ip, t13=True), cfg.to)
+    ok_sni = all(x != "SERVER_HELLO" for x in (zs, bs, ips))
+    items.append(Check("R2-01", "R2. TLS Oracle (GFW / ТСПУ / Censys)", "Zero-SNI, IP-SNI и Random-SNI Shield (:443)", "CRITICAL", "PASS" if ok_sni else "FAIL",
+        f"Отклонены: Zero-SNI={zs}, IP-SNI={ips}, Fake-SNI={bs}", "Включите ssl_reject_handshake on для default_server",
+        "Сканер по IP/без SNI не получает X.509 сертификат" if ok_sni else "УТЕЧКА сертификата без валидного SNI!", "Zero-SNI, IP-SNI и Random-SNI Shield (:443)"))
+
+    if cfg.p_dom:
+        t10, _, _ = tls_probe_raw(cfg.ip, raw_hello(cfg.p_dom, 0x0301, 0x0301, False, False), cfg.to)
+        t11, _, _ = tls_probe_raw(cfg.ip, raw_hello(cfg.p_dom, 0x0302, 0x0302, False, False), cfg.to)
+        wk, _, _ = tls_probe_raw(cfg.ip, raw_hello(cfg.p_dom, 0x0301, 0x0303, False, True), cfg.to)
+        ok_old = all(x != "SERVER_HELLO" for x in (t10, t11, wk))
+        items.append(Check("R2-02", "R2. TLS Oracle (GFW / ТСПУ / Censys)", "Отказ TLS 1.0/1.1 и слабых шифров", "HIGH", "PASS" if ok_old else "FAIL",
+            f"TLS1.0={t10}, TLS1.1={t11}, Weak={wk}", pub_title="Отказ TLS 1.0/1.1 и слабых шифров"))
+
+        doms = [d for d in [cfg.p_dom, cfg.agh_dom] + cfg.steals if d]
+        pmap: Dict[str, str] = {}; san_l: List[str] = []; y_c: List[str] = []
+        for d in doms:
+            o13, al13, sans, age = tls_details(cfg.ip, d, "1.3", cfg.to)
+            o12, _, _, _ = tls_details(cfg.ip, d, "1.2", cfg.to)
+            pmap[d] = f"T1.3={'OK' if o13 else 'NO'}/T1.2={'OK' if o12 else 'NO'}/ALPN={al13}"
+            if cfg.agh_dom and d != cfg.agh_dom and cfg.agh_dom in sans: san_l.append(f"{d}->{cfg.agh_dom}")
+            if age is not None and age < 7: y_c.append(f"{d}({age}д)")
+        items.append(Check("R2-03", "R2. TLS Oracle (GFW / ТСПУ / Censys)", "Изоляция SAN сертификатов и ALPN h2", "HIGH", "FAIL" if san_l else "PASS",
+            f"Утечка SAN: {san_l}" if san_l else f"SAN изолированы ({', '.join(f'{k}:{v}' for k,v in pmap.items())}); новые CT={y_c or 'нет'}",
+            pub_title="Изоляция SAN сертификатов и ALPN h2"))
+
+        fp_main = sclient_fingerprint(cfg.ip, cfg.p_dom)
+        if cfg.steals:
+            p12 = "T1.2=OK" in pmap.get(cfg.p_dom, ""); s12 = "T1.2=OK" in pmap.get(cfg.steals[0], "")
+            items.append(Check("R2-04", "R2. TLS Oracle (GFW / ТСПУ / Censys)", "Паритет версий TLS (Main vs Steal-REALITY)", "MEDIUM", "PASS" if p12 == s12 else "WARN",
+                f"{cfg.p_dom} ({pmap[cfg.p_dom]}) vs {cfg.steals[0]} ({pmap[cfg.steals[0]]})", pub_title="Паритет версий TLS (Main vs Steal-REALITY)"))
+
+            fp_steal = sclient_fingerprint(cfg.ip, cfg.steals[0])
+            if fp_main and fp_steal:
+                mism = [k for k in ("cipher", "temp_key", "alpn") if fp_main.get(k) != fp_steal.get(k)]
+                items.append(Check("R2-05", "R2. TLS Oracle (GFW / ТСПУ / Censys)", "JA4S/TLS Stack Паритет (Шифр / KeyShare / PQ)", "MEDIUM",
+                    "WARN" if mism else "PASS",
+                    f"Отличие {mism}: Main={fp_main} vs Steal={fp_steal}" if mism else f"Паритет 100%: Cipher={fp_main.get('cipher')}, KeyShare={fp_main.get('temp_key')}, ALPN={fp_main.get('alpn')}",
+                    pub_title="TLS Stack / KeyShare / Cipher Паритет (JA4S)"))
+
+    # R3: Активные зонды DPI
+    sp4, dp4, msp = raw_tcp(cfg.ip, 443, f"GET / HTTP/1.1\r\nHost: {cfg.p_dom or cfg.ip}\r\nConnection: close\r\n\r\n".encode("ascii"), 3.0)
+    ok_p4 = (sp4 != "HANG_TIMEOUT" and b"nginx" not in dp4.lower() and msp < 1500)
+    items.append(Check("R3-01", "R3. Активные зонды DPI / GFW / ТСПУ", "Plain-HTTP-on-443 (Anti-#4610)", "HIGH", "PASS" if ok_p4 else "FAIL",
+        f"Реакция: {sp4} за {msp:.1f}ms ({len(dp4)}B)", view=f"Plain HTTP на 443 -> {sp4} ({msp:.0f}ms)", pub_title="Plain-HTTP-on-443 (Anti-#4610)"))
+
+    j1, m1, _ = tls_probe_raw(cfg.ip, secrets.token_bytes(64), 2.5)
+    j2, m2, _ = tls_probe_raw(cfg.ip, raw_hello(cfg.p_dom or "example.com", corrupt=True), 2.5)
+    ok_j = all(x.startswith("TLS_ALERT_") or x in ("EOF_SILENT", "TCP_RST") for x in (j1, j2))
+    items.append(Check("R3-02", "R3. Активные зонды DPI / GFW / ТСПУ", "J3 Junk Probing (мусор + битый ClientHello)", "HIGH", "PASS" if ok_j else "WARN",
+        f"Junk64B={j1}({m1:.0f}ms), CorruptExt={j2}({m2:.0f}ms)", pub_title="J3 Junk Probing (мусор + битый ClientHello)"))
+
+    if cfg.steals and cfg.p_dom:
+        sd = cfg.steals[0]; c_bad: List[str] = []; b_bad: List[str] = []
+        for sh in [cfg.p_dom] + ([cfg.agh_dom] if cfg.agh_dom else []):
+            for pp in ["/", cfg.panel_p or "/api/v1/myprivatecloud/auth", cfg.xhttp_p or "/"]:
+                try:
+                    sc, _, bc, _, _ = http_sni(cfg.ip, sd, "GET", pp, {"Host": sh}, to=cfg.to)
+                    if sc == 200 or b"3x-ui" in bc.lower() or b"adguard" in bc.lower(): c_bad.append(f"{sh}{pp}->{sc}")
+                    if any(sig.encode("ascii") in bc.lower() for sig in BANNERS): b_bad.append(f"{sh}->{sc}")
+                except Exception: pass
+        items.append(Check("R3-03", "R3. Активные зонды DPI / GFW / ТСПУ", f"Host/SNI Confusion на Fallback ({sd})", "CRITICAL",
+            "FAIL" if (c_bad or b_bad) else "PASS",
+            f"Пробой={c_bad}; Баннеры={b_bad}" if (c_bad or b_bad) else f"Подмена Host внутри SNI={sd} полностью изолирована.",
+            "Проверьте listen 127.0.0.1:9443 и error_page 421/429", pub_title="Host/SNI Confusion на Fallback (Steal-REALITY)"))
+        try:
+            rm = sorted(http_sni(cfg.ip, cfg.p_dom, "GET", "/", to=cfg.to)[3] for _ in range(3))[1]
+            rs = sorted(http_sni(cfg.ip, sd, "GET", "/", to=cfg.to)[3] for _ in range(3))[1]
+            dl = abs(rs - rm)
+            items.append(Check("R3-04", "R3. Активные зонды DPI / GFW / ТСПУ", "Тайминг-дельта ретрансляции (Main vs Steal)", "LOW", "PASS" if dl < 45 else "WARN",
+                f"Main={rm:.1f}ms, Steal={rs:.1f}ms (дельта {dl:.1f}ms)", pub_title="Тайминг-дельта ретрансляции (Main vs Steal)"))
+        except Exception: pass
+
+        st_sh, ms_sh, sz_sh = tls_probe_raw(cfg.ip, raw_hello(sd, t13=True), cfg.to)
+        ok_rep = (st_sh == "SERVER_HELLO" and sz_sh >= 120)
+        items.append(Check("R3-05", "R3. Активные зонды DPI / GFW / ТСПУ", "REALITY Fallback & Post-Handshake Probe (Steal)", "HIGH",
+            "PASS" if ok_rep else "FAIL",
+            f"Невалидная сессия REALITY -> {st_sh} ({sz_sh}B за {ms_sh:.1f}ms)" + ("" if ok_rep else " (сбой fallback-ретрансляции!)"),
+            pub_title="REALITY Fallback & Post-Handshake Probe"))
+
+    # R4: Web Decoy, Боты 11.2026, Утечки IP/Заголовков, Favicon, OWASP
+    if cfg.p_dom:
+        try:
+            sm, mh, mb, _, vm = http_sni(cfg.ip, cfg.p_dom, "GET", "/", to=cfg.to)
+            st_ok = True; st_inf = ""
+            if cfg.steals:
+                ss, _, sb_steal, _, _ = http_sni(cfg.ip, cfg.steals[0], "GET", "/", to=cfg.to)
+                st_ok = (ss == 200 and b"/api/v1/myprivatecloud/" not in sb_steal)
+                st_inf = f", Steal={ss}"
+            items.append(Check("R4-01", "R4. Web Decoy, Боты 11.2026 & OWASP", "Доступность веб-декоев (HTTP/2)", "HIGH", "PASS" if (sm == 200 and st_ok) else "FAIL",
+                f"{vm} Main={sm} ({len(mb)}B){st_inf}", pub_title="Доступность веб-декоев (HTTP/2)"))
+
+            cls_uas = [("Empty", ""), ("Nuclei", "nuclei"), ("Sqlmap", "sqlmap/1.7"), ("ZGrab2", "Mozilla/5.0 zgrab/0.x"), ("Censys", "CensysInspect/1.1"), ("Httpx", "httpx")]
+            cls_res = {lbl: http_sni(cfg.ip, cfg.p_dom, "GET", "/", {"User-Agent": ua}, to=cfg.to)[0] for lbl, ua in cls_uas}
+            bad_cls = [f"{k}->{v}" for k, v in cls_res.items() if v not in (200, 404)]
+            err_leaks = []
+            for mth, ep in [("GET", "/.env"), ("GET", "/nonexistent-2026-probe"), ("DELETE", "/")]:
+                se, _, be, _, _ = http_sni(cfg.ip, cfg.p_dom, mth, ep, to=cfg.to)
+                lb = be.decode("utf-8", "ignore").lower()
+                for sg in BANNERS:
+                    if sg in lb: err_leaks.append(f"{ep}({se}):{sg}")
+            items.append(Check("R4-02", "R4. Web Decoy, Боты 11.2026 & OWASP", "Сканеры (Nuclei/ZGrab2/Censys) и стерильность 404/405", "HIGH",
+                "FAIL" if (bad_cls or err_leaks) else "PASS",
+                f"Аномалии={bad_cls}, баннеры={err_leaks}" if (bad_cls or err_leaks) else f"Сканеры={cls_res}; баннеры ошибок скрыты.",
+                "Уберите баннеры в error_page @notfound", pub_title="Сканеры и стерильность 404/405"))
+
+            ai_uas = [
+                ("GPTBot", "GPTBot/1.0"), ("OAI-SearchBot", "OAI-SearchBot/1.0"), ("ChatGPT-User", "ChatGPT-User/1.0"),
+                ("ClaudeBot", "ClaudeBot/1.0"), ("Claude-SearchBot", "Claude-SearchBot/1.0"), ("Claude-User", "Claude-User/1.0"),
+                ("PerplexityBot", "PerplexityBot/1.0"), ("Perplexity-User", "Perplexity-User/1.0"),
+                ("Meta-ExternalFetcher", "Meta-ExternalFetcher/1.1"), ("Meta-ExternalAgent", "Meta-ExternalAgent/1.1"),
+                ("GrokBot", "GrokBot/1.0"), ("MistralAI-Index", "MistralAI-Index/1.0"),
+                ("GoogleOther", "GoogleOther/1.0"), ("Bytespider", "Bytespider"),
+            ]
+            ai_bypass = [f"{lbl}->{http_sni(cfg.ip, cfg.p_dom, 'GET', '/', {'User-Agent': ua}, to=cfg.to)[0]}" for lbl, ua in ai_uas]
+            ai_200 = [x for x in ai_bypass if x.endswith("->200")]
+            items.append(Check("R4-03", "R4. Web Decoy, Боты 11.2026 & OWASP", "Фильтрация AI-краулеров 11.2026 (14 ботов: OAI/Claude/Grok/Mistral)", "MEDIUM",
+                "WARN" if ai_200 else "PASS",
+                f"Пропущены через $badbot (отдан 200): {', '.join(ai_200)}" if ai_200 else f"Все {len(ai_uas)} AI-краулеров 11.2026 блокируются 404.",
+                "Добавьте пропущенные UA (grokbot|claude-searchbot|mistralai-index|googleother) в $badbot_raw" if ai_200 else "",
+                f"AI-боты 11.2026: {', '.join(ai_200[:3]) if ai_200 else 'все 14->404'}",
+                "Фильтрация AI-краулеров 11.2026 (14 агентов)"))
+
+            ht = mb.decode("utf-8", "ignore"); assets = ["/robots.txt"] + [m.group(1) for m in re.finditer(r'(?:src|href)=["\'](/[^"\'?#]+)', ht, re.I)][:10]
+            texts = [("/", ht)]; all_hdrs: List[Tuple[str, Dict[str, str]]] = [("/", mh)]
+            for ap in set(assets):
+                try:
+                    sa, ah, ba, _, _ = http_sni(cfg.ip, cfg.p_dom, "GET", ap, to=cfg.to)
+                    if sa == 200:
+                        texts.append((ap, ba.decode("utf-8", "ignore"))); all_hdrs.append((ap, ah))
+                except Exception: pass
+            kws = [f"{sn}:'{kw}'" for sn, tx in texts for kw in VPN_KWS if kw in tx.lower()]
+            cdns = [f"{sn}:{u}" for sn, tx in texts for u in re.findall(r"https?://(?!www\.w3\.org)([a-zA-Z0-9.-]+)", tx) if u not in (cfg.p_dom, "privatecloud.internal") and u not in cfg.steals]
+            items.append(Check("R4-04", "R4. Web Decoy, Боты 11.2026 & OWASP", "Скан публичных JS/CSS/HTML на VPN-ключи и внешние CDN", "CRITICAL",
+                "FAIL" if (kws or cdns) else "PASS", f"Утечки={kws[:4]} CDN={cdns[:3]}" if (kws or cdns) else f"Проверено {len(texts)} файлов: 0 VPN-маркеров и 0 внешних CDN.",
+                pub_title="Скан публичных ресурсов на VPN-ключи и внешние CDN"))
+
+            fz = [f"{u}->{http_sni(cfg.ip, cfg.p_dom, 'GET', u, to=cfg.to)[0]}" for u in ("/.env", "/.git/config", "/wp-login.php", "/phpmyadmin/", "/admin/", "/panel/", "/x-ui/")]
+            fz_bad = [x for x in fz if not (x.endswith("->404") or x.endswith("->429"))]
+            api_bad = [u for u in ("/api/v1/myprivatecloud/docs", "/api/v1/myprivatecloud/openapi.json", "/api/v1/myprivatecloud/storage/nodes") if http_sni(cfg.ip, cfg.p_dom, "GET", u, to=cfg.to)[0] == 200]
+            api_st = http_sni(cfg.ip, cfg.p_dom, "GET", "/api/v1/myprivatecloud/status", to=cfg.to)[0]
+            miss_h = [h for h in ("strict-transport-security", "x-frame-options", "x-content-type-options", "content-security-policy") if h not in mh]
+            csp = mh.get("content-security-policy", ""); bad_csp = "'unsafe-inline'" in csp or "'unsafe-eval'" in csp
+            leak_h = [h for h in ("x-powered-by", "via", "alt-svc", "etag") if h in mh] + ([f"server={mh['server']}"] if "/" in mh.get("server", "") else [])
+            ok_owasp = not (fz_bad or api_bad or api_st != 401 or miss_h or bad_csp or leak_h)
+            items.append(Check("R4-05", "R4. Web Decoy, Боты 11.2026 & OWASP", "URI Fuzzing, защита API и OWASP-заголовки", "HIGH", "PASS" if ok_owasp else "FAIL",
+                f"fuzz_bad={fz_bad}, api_200={api_bad}, status_code={api_st}, miss_h={miss_h}, bad_csp={bad_csp}, leak={leak_h}" if not ok_owasp else "Fuzzing=404/429, API=401, Swagger=404, HSTS/CSP/Headers OK.",
+                pub_title="URI Fuzzing, защита API и OWASP-заголовки"))
+
+            if cfg.rl:
+                rls = [http_sni(cfg.ip, cfg.p_dom, "GET", f"/rl-scan-probe-{i}", to=2.0)[0] for i in range(8)]
+                items.append(Check("R4-06", "R4. Web Decoy, Боты 11.2026 & OWASP", "Rate-Limit защита (zone=scan -> 429)", "LOW", "PASS" if 429 in rls else "WARN",
+                    f"Коды серии 8 запросов: {rls}", pub_title="Rate-Limit защита от перебора"))
+
+            spoof_h = {"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1", "Forwarded": "for=127.0.0.1", "X-Original-URL": "/api/v1/myprivatecloud/storage/nodes"}
+            sp_api = http_sni(cfg.ip, cfg.p_dom, "GET", "/api/v1/myprivatecloud/status", spoof_h, to=cfg.to)[0]
+            sp_nodes = http_sni(cfg.ip, cfg.p_dom, "GET", "/api/v1/myprivatecloud/storage/nodes", spoof_h, to=cfg.to)[0]
+            ip_leaks: List[str] = []
+            chk_tokens = list(dict.fromkeys([x for x in (cfg.ip, cfg.pub_ip, "127.0.0.1", "10.8.1.", "10.9.0.") if x]))
+            port_pat = re.compile(r":(?:10443|55443|50443|20443|8088|9443|62789|11111|3000)\b")
+            for sn, tx in texts:
+                for tok in chk_tokens:
+                    if tok in tx: ip_leaks.append(f"{sn}:{tok}")
+                if port_pat.search(tx): ip_leaks.append(f"{sn}:internal_port")
+            for sn, hd in all_hdrs:
+                for hk, hv in hd.items():
+                    for tok in chk_tokens:
+                        if tok in hv: ip_leaks.append(f"hdr {sn}[{hk}]:{tok}")
+                    if hk == "location" and port_pat.search(hv): ip_leaks.append(f"hdr {sn}[location]:port")
+            sp_bad = (sp_api == 200 or sp_nodes == 200 or bool(ip_leaks))
+            items.append(Check("R4-07", "R4. Web Decoy, Боты 11.2026 & OWASP", "Spoofing XFF/X-Real-IP и утечки IP/портов в HTTP", "CRITICAL",
+                "FAIL" if sp_bad else "PASS",
+                f"Bypass/Leak: api={sp_api}, nodes={sp_nodes}, leaks={ip_leaks[:4]}" if sp_bad else "XFF/X-Real-IP спуфинг отклонён (401); утечек IP/внутренних портов в HTML/JS/Headers нет.",
+                pub_title="Защита от Spoofing XFF и утечки IP/портов в HTTP"))
+
+            fav_m = http_sni(cfg.ip, cfg.p_dom, "GET", "/favicon.svg", to=cfg.to)
+            if fav_m[0] != 200: fav_m = http_sni(cfg.ip, cfg.p_dom, "GET", "/favicon.ico", to=cfg.to)
+            if fav_m[0] == 200 and fav_m[2]:
+                mmh_m = mmh3_32_signed(base64.encodebytes(fav_m[2]), 0)
+                sha_m = hashlib.sha256(fav_m[2]).hexdigest()[:16]
+                fav_dup = False
+                if cfg.steals:
+                    fav_s = http_sni(cfg.ip, cfg.steals[0], "GET", "/favicon.svg", to=cfg.to)
+                    if fav_s[0] != 200: fav_s = http_sni(cfg.ip, cfg.steals[0], "GET", "/favicon.ico", to=cfg.to)
+                    if fav_s[0] == 200 and fav_s[2] == fav_m[2]: fav_dup = True
+                items.append(Check("R4-08", "R4. Web Decoy, Боты 11.2026 & OWASP", "Favicon Hash Корреляция (Shodan MMH3 & Censys SHA256)", "LOW",
+                    "WARN" if fav_dup else "PASS",
+                    f"Main и Steal отдают идентичный фавикон (MMH3={mmh_m}, SHA256={sha_m}...) — риск групповой корреляции." if fav_dup else f"MMH3={mmh_m}, SHA256={sha_m}...",
+                    "Задайте уникальный favicon для Steal-домена (или уберите дефолтный шаблонный SVG)" if fav_dup else "",
+                    pub_title="Корреляция Favicon (Shodan MMH3 & Censys SHA256)"))
+
+            ed_on = (fp_main.get("early_data") == "YES") if fp_main else False
+            as_on = "alt-svc" in mh
+            items.append(Check("R4-10", "R4. Web Decoy, Боты 11.2026 & OWASP", "Защита от TLS 0-RTT (Early Data) и утечки Alt-Svc", "MEDIUM",
+                "WARN" if (ed_on or as_on) else "PASS",
+                f"early_data={ed_on}, alt_svc={as_on}" if (ed_on or as_on) else "TLS 0-RTT (ssl_early_data) отключён, заголовок Alt-Svc скрыт.",
+                pub_title="Отключение TLS 0-RTT и скрытие Alt-Svc"))
+        except Exception as e:
+            items.append(Check("R4-01", "R4. Web Decoy, Боты 11.2026 & OWASP", "Веб-зондирование", "CRITICAL", "FAIL", f"Сбой HTTPS-пробы: {e}", pub_title="Доступность веб-декоев (HTTP/2)"))
+
+    stun_exp = [f"{pn}:{pt}" for pn, pt in (("STUN", 3478), ("mDNS", 5353), ("UPnP", 1900)) if tcp_open(cfg.ip, pt, 0.5)[0]]
+    items.append(Check("R4-09", "R4. Web Decoy, Боты 11.2026 & OWASP", "Изоляция STUN / mDNS / UPnP (WebRTC & Discovery)", "MEDIUM",
+        "FAIL" if stun_exp else "PASS",
+        f"Открыты: {stun_exp}" if stun_exp else "Порты STUN (3478), mDNS (5353), UPnP (1900) закрыты снаружи.",
+        pub_title="Закрытие STUN / mDNS / UPnP"))
+
+    # R5: xHTTP, SUB_PATH / PANEL_PATH Differential Oracle & AdGuard DoH
+    scan_cooled = False
+    if cfg.p_dom and cfg.xhttp_p:
+        time.sleep(4.2 if cfg.rl else 3.5)
+        scan_cooled = True
+        xp = "/" + cfg.xhttp_p.strip("/") + "/"
+        try:
+            sg, _, bg, _, _ = http_sni(cfg.ip, cfg.p_dom, "GET", xp, to=cfg.to)
+            sp, _, bp, _, _ = http_sni(cfg.ip, cfg.p_dom, "POST", xp, body=secrets.token_bytes(64), to=cfg.to)
+            sr, _, br, _, _ = http_sni(cfg.ip, cfg.p_dom, "POST", f"/probe-{secrets.token_hex(4)}/", body=secrets.token_bytes(64), to=cfg.to)
+            leak_502 = sp in (500, 502, 504) and sp != sr
+            items.append(Check("R5-01", "R5. xHTTP (ML-KEM-768), Sub-Oracle & AdGuard DoH", "Differential Oracle xHTTP (GET/POST vs 404)", "MEDIUM",
+                "WARN" if (sg != 404 or leak_502) else "PASS",
+                f"GET {xp}->{sg}({len(bg)}B), POST {xp}->{sp}({len(bp)}B) vs POST /rnd->{sr}({len(br)}B)",
+                "Настройте обработку сброса невалидного POST от Xray (proxy_intercept_errors / 404) без 502" if leak_502 else "",
+                f"xHTTP POST={sp} vs 404-эталон={sr}", "Differential Oracle xHTTP (GET/POST)"))
+
+            shd, _, _, _, _ = http_sni(cfg.ip, cfg.p_dom, "HEAD", xp, to=cfg.to)
+            sop, _, _, _, _ = http_sni(cfg.ip, cfg.p_dom, "OPTIONS", xp, to=cfg.to)
+            sgr, _, bgr, _, _ = http_sni(cfg.ip, cfg.p_dom, "POST", xp, {"Content-Type": "application/grpc", "X-Amz-Meta-Trace": "probe"}, secrets.token_bytes(32), to=cfg.to)
+            sr_h = http_sni(cfg.ip, cfg.p_dom, "HEAD", f"/probe-{secrets.token_hex(4)}/", to=cfg.to)[0]
+            sr_g, _, br_g, _, _ = http_sni(cfg.ip, cfg.p_dom, "POST", f"/probe-{secrets.token_hex(4)}/", {"Content-Type": "application/grpc"}, secrets.token_bytes(32), to=cfg.to)
+            diff_x = (shd != sr_h or sop != 405 or sgr != sr_g or abs(len(bgr) - len(br_g)) > 64)
+            items.append(Check("R5-06", "R5. xHTTP (ML-KEM-768), Sub-Oracle & AdGuard DoH", "Deep xHTTP Probe (HEAD/OPTIONS/gRPC vs 404)", "LOW",
+                "WARN" if diff_x else "PASS",
+                f"HEAD={shd}(rnd={sr_h}), OPT={sop}, gRPC-POST={sgr}/{len(bgr)}B(rnd={sr_g}/{len(br_g)}B)",
+                pub_title="Deep xHTTP Probe (HEAD/OPTIONS/gRPC)"))
+        except Exception as e:
+            items.append(Check("R5-01", "R5. xHTTP (ML-KEM-768), Sub-Oracle & AdGuard DoH", "Тест xHTTP", "MEDIUM", "WARN", f"Ошибка: {e}", pub_title="Differential Oracle xHTTP"))
+
+    if cfg.p_dom and cfg.sub_p:
+        time.sleep(1.2 if scan_cooled else (4.2 if cfg.rl else 3.5))
+        sp_norm = "/" + cfg.sub_p.strip("/") + "/"
+        try:
+            su_code, su_hdr, su_body, _, _ = http_sni(cfg.ip, cfg.p_dom, "GET", f"{sp_norm}nonexistent-{secrets.token_hex(4)}", {"User-Agent": ""}, to=cfg.to)
+            rnd_code, _, rnd_body, _, _ = http_sni(cfg.ip, cfg.p_dom, "GET", f"/rnd-{secrets.token_hex(4)}", {"User-Agent": ""}, to=cfg.to)
+            su_leak = (su_code in (200, 500, 502) or b"3x-ui" in su_body.lower() or "127.0.0.1" in su_hdr.get("location", "") or (su_code == 404 and abs(len(su_body) - len(rnd_body)) > 40))
+            items.append(Check("R5-05", "R5. xHTTP (ML-KEM-768), Sub-Oracle & AdGuard DoH", "Изоляция SUB_PATH (Empty-UA & Error Intercept)", "MEDIUM",
+                "WARN" if su_leak else "PASS",
+                f"GET <SUB_PATH>rnd (empty UA) -> HTTP {su_code} ({len(su_body)}B) vs эталон {rnd_code} ({len(rnd_body)}B)" + (" — отличие от Nginx 404" if su_leak else ""),
+                "Добавьте proxy_intercept_errors on; error_page 400 404 ... /404.html в location SUB_PATH" if su_leak else "",
+                pub_title="Изоляция эндпоинта подписок (Error Intercept)"))
+        except Exception: pass
+
+    if cfg.en_agh and cfg.agh_dom:
+        wq = dns_wire("example.com"); b64q = base64.urlsafe_b64encode(wq).decode("ascii").rstrip("=")
+        try:
+            ar, ahr, abr, _, _ = http_sni(cfg.ip, cfg.agh_dom, "GET", "/", to=cfg.to)
+            adg, _, _, _, _ = http_sni(cfg.ip, cfg.agh_dom, "GET", f"/dns-query?dns={b64q}", {"Accept": "application/dns-message"}, to=cfg.to)
+            adp, _, _, _, _ = http_sni(cfg.ip, cfg.agh_dom, "POST", "/dns-query", {"Content-Type": "application/dns-message"}, wq, to=cfg.to)
+            root_ok = (ar == 404 and "www-authenticate" not in ahr and b"adguard" not in abr.lower())
+            items.append(Check("R5-02", "R5. xHTTP (ML-KEM-768), Sub-Oracle & AdGuard DoH", f"Скрытие админки {cfg.agh_dom} под 404", "CRITICAL", "PASS" if root_ok else "FAIL",
+                f"GET / -> {ar}" + ("" if root_ok else " (ОБНАРУЖЕНА АДМИНКА!)"), pub_title="Скрытие веб-админки DoH под 404"))
+            open_doh = (adg == 200 or adp == 200)
+            items.append(Check("R5-03", "R5. xHTTP (ML-KEM-768), Sub-Oracle & AdGuard DoH", "Проверка на Open DoH Resolver (/dns-query)", "HIGH", "WARN" if open_doh else "PASS",
+                f"ПУБЛИЧНЫЙ /dns-query ОТКРЫТ БЕЗ ClientID (GET={adg}, POST={adp}) — риск DNS-абуза!" if open_doh else f"Публичный /dns-query закрыт (GET={adg}, POST={adp}).",
+                "Ограничьте location = /dns-query (return 404)" if open_doh else "",
+                "Open DoH Resolver доступен любому без ClientID!" if open_doh else "Публичный DoH закрыт", "Проверка на Open DoH Resolver (/dns-query)"))
+            if cfg.agh_cid:
+                ac, ahc, abc, _, _ = http_sni(cfg.ip, cfg.agh_dom, "GET", f"/dns-query/{cfg.agh_cid}?dns={b64q}", {"Accept": "application/dns-message"}, to=cfg.to)
+                items.append(Check("R5-04", "R5. xHTTP (ML-KEM-768), Sub-Oracle & AdGuard DoH", f"DoH-резолв с ClientID ({cfg.agh_cid})", "MEDIUM",
+                    "PASS" if (ac == 200 and len(abc) > 12) else "FAIL", f"HTTP {ac}, {len(abc)}B, CT={ahc.get('content-type')}", pub_title="DoH-резолв с ClientID"))
+        except Exception as e:
+            items.append(Check("R5-02", "R5. xHTTP (ML-KEM-768), Sub-Oracle & AdGuard DoH", "Проверка AGH DoH", "HIGH", "WARN", f"Ошибка: {e}", pub_title="Проверка AGH DoH"))
+
+    # R6: UDP DPI & Amplification
+    if cfg.hy2_p > 0:
+        dc, sc = secrets.token_bytes(8), secrets.token_bytes(8)
+        pkt = bytes([0xC0]) + struct.pack(">I", 0x0A0A0A0A) + bytes([len(dc)]) + dc + bytes([len(sc)]) + sc
+        pkt += secrets.token_bytes(1200 - len(pkt))
+        us = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); us.settimeout(1.5)
+        try:
+            us.sendto(pkt, (cfg.ip, cfg.hy2_p)); resp, _ = us.recvfrom(2048)
+            is_vn = (len(resp) >= 7 and resp[1:5] == b"\x00\x00\x00\x00")
+            amp = len(resp) > len(pkt)
+            items.append(Check("R6-01", "R6. Активные UDP DPI-зонды (ТСПУ)", f"Hysteria 2 QUIC GREASE Probe (:{cfg.hy2_p}/udp)", "INFO",
+                "WARN" if amp else "PASS",
+                f"{'RFC 9000 QUIC Version Negotiation' if is_vn else 'UDP ответ'} ({len(resp)}B <= {len(pkt)}B, без амплификации).",
+                view=f"UDP {cfg.hy2_p} распознаётся как QUIC", pub_title="Hysteria 2 QUIC GREASE Probe (без усиления)"))
+        except socket.timeout:
+            items.append(Check("R6-01", "R6. Активные UDP DPI-зонды (ТСПУ)", f"Hysteria 2 QUIC Probe (:{cfg.hy2_p}/udp)", "MEDIUM", "WARN", "Таймаут ответа на QUIC GREASE.", pub_title="Hysteria 2 QUIC Probe (UDP)"))
+        except ConnectionRefusedError:
+            items.append(Check("R6-01", "R6. Активные UDP DPI-зонды (ТСПУ)", f"Hysteria 2 QUIC Probe (:{cfg.hy2_p}/udp)", "HIGH", "FAIL", "ICMP Port Unreachable — служба Hy2 не слушает!", pub_title="Hysteria 2 QUIC Probe (UDP)"))
+        finally: us.close()
+
+    awg_t = [("AWG-Native", cfg.nawg_p), ("AWG-v3", cfg.awg3_p)]
+    awg_f: List[str] = []; awg_ok: List[str] = []
+    probes = [("WG1", b"\x01\x00\x00\x00" + secrets.token_bytes(144)), ("Junk64", secrets.token_bytes(64)),
+              ("STUN", b"\x00\x01\x00\x00\x21\x12\xa4\x42" + secrets.token_bytes(12)), ("QUIC", b"\xc0\x00\x00\x01\x08" + secrets.token_bytes(1195))]
+    for lbl, up in awg_t:
+        if up <= 0: continue
+        awg_ok.append(f"{lbl}:{up}")
+        for pn, pload in probes:
+            us = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); us.settimeout(0.9)
+            try:
+                us.connect((cfg.ip, up)); us.send(pload); r = us.recv(512)
+                awg_f.append(f"{lbl}:{up}({pn})->{len(r)}B")
+            except socket.timeout: pass
+            except ConnectionRefusedError: awg_f.append(f"{lbl}:{up}->ICMP_UNREACH")
+            finally: us.close()
+    if awg_ok:
+        items.append(Check("R6-02", "R6. Активные UDP DPI-зонды (ТСПУ)", f"AmneziaWG Silent Drop ({', '.join(awg_ok)})", "HIGH",
+            "FAIL" if awg_f else "PASS", f"Утечки/ошибки: {awg_f}" if awg_f else "100% Silent Drop на все 4 DPI-сигнатуры (WG-Type1, Junk-64B, STUN, QUIC).",
+            view="Полная UDP-невидимость (Silent Drop)" if not awg_f else f"UDP аномалия: {awg_f[0]}", pub_title="AmneziaWG Silent Drop (UDP)"))
+    return items
+
+def run_local_checks(cfg: Cfg) -> List[Check]:
+    items: List[Check] = []
+
+    if cfg.db:
+        try:
+            cn = sqlite3.connect(f"file:{cfg.db}?mode=ro", uri=True, timeout=3.0)
+            ib_cols_l = {r[1] for r in cn.execute("PRAGMA table_info(inbounds)")}
+            nc_l_parts, nc_l_params = [], []
+            if "node_id" in ib_cols_l: nc_l_parts.append("(node_id IS NULL OR node_id = 0)")
+            if "origin_node_guid" in ib_cols_l:
+                pg_rl = cn.execute("SELECT value FROM settings WHERE key='panelGuid' LIMIT 1").fetchone()
+                pg_vl = str(pg_rl[0]).strip() if pg_rl and pg_rl[0] else ""
+                if pg_vl:
+                    nc_l_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = ?)")
+                    nc_l_params.append(pg_vl)
+                else:
+                    nc_l_parts.append("(origin_node_guid IS NULL OR origin_node_guid = '')")
+            nc_l = (" AND " + " AND ".join(nc_l_parts)) if nc_l_parts else ""
+            rx = cn.execute(f"SELECT settings, stream_settings FROM inbounds WHERE protocol='vless' AND stream_settings LIKE '%xhttp%'{nc_l} LIMIT 1", nc_l_params).fetchone()
+            if rx:
+                xs, xst = json.loads(rx[0]), json.loads(rx[1]); xh = xst.get("xhttpSettings", {}); xm = xh.get("xmux", {})
+                ep = (xst.get("externalProxy") or [{}])[0]; errs = []
+                has_pq = str(xs.get("decryption", "")).startswith("mlkem768")
+                if not has_pq: errs.append("нет mlkem768")
+                elif not any(c.get("flow") == "xtls-rprx-vision" for c in xs.get("clients", [])): errs.append("нет flow xtls-rprx-vision")
+                if xh.get("mode") != "stream-one" or not xh.get("xPaddingObfsMode") or xh.get("xPaddingKey") != "X-Amz-Meta-Trace" or xh.get("xPaddingBytes") != "120-1120":
+                    errs.append("отклонение xhttpSettings/padding")
+                if xm.get("hKeepAlivePeriod") != 3000 or xm.get("maxConnections") != "1-3": errs.append("xmux")
+                if ep.get("alpn") != ["h2"] or ep.get("fingerprint") != "firefox": errs.append("externalProxy")
+                items.append(Check("L1-01", "L1. Стек Nginx + Xray v26.7.28", "Эталон xHTTP (ML-KEM-768 + Vision + Padding + xmux)", "CRITICAL",
+                    "FAIL" if errs else "PASS", f"Ошибки: {errs}" if errs else "Эталон xHTTP соблюдён (ML-KEM-768, Vision, X-Amz-Meta-Trace 120-1120, stream-one, xmux 3000s, h2, firefox).",
+                    pub_title="Эталон xHTTP (ML-KEM-768 + Vision + xmux)"))
+
+            rh = cn.execute(f"SELECT stream_settings FROM inbounds WHERE protocol='hysteria'{nc_l} LIMIT 1", nc_l_params).fetchone()
+            if rh:
+                mq = json.loads(rh[0]).get("hysteriaSettings", {}).get("masquerade", {}); murl = str(mq.get("url", ""))
+                if "127.0.0.1:80" in murl and not murl.endswith(":8088"):
+                    st_m = raw_tcp("127.0.0.1", 80, b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n", 1.5)[0]
+                    is_444 = st_m in ("EOF_SILENT", "TCP_RST")
+                    items.append(Check("L1-02", "L1. Стек Nginx + Xray v26.7.28", "Hysteria 2 Masquerade Origin", "HIGH", "WARN" if is_444 else "PASS",
+                        f"Masquerade={murl}: порт 80 рвёт TCP (444 Drop) -> риск 502!" if is_444 else f"Masquerade={murl} отвечает штатно.",
+                        "Направьте masquerade на 127.0.0.1:8088" if is_444 else "", pub_title="Hysteria 2 Masquerade Origin"))
+
+            r_rows = cn.execute(f"SELECT tag, stream_settings FROM inbounds WHERE enable=1 AND protocol='vless' AND stream_settings LIKE '%reality%'{nc_l}", nc_l_params).fetchall()
+            if r_rows:
+                ap_bad: List[str] = []; gfw_warn: List[str] = []
+                for r_tag, r_raw in r_rows:
+                    rs = json.loads(r_raw).get("realitySettings", {})
+                    snames = rs.get("serverNames", [])
+                    if "" in snames or not snames: ap_bad.append(f"{r_tag}:empty_serverNames(#7280)")
+                    dest = str(rs.get("dest", rs.get("target", "")))
+                    xver = int(rs.get("xver", 0) or 0)
+                    if dest == "127.0.0.1:9443" and xver != 1: ap_bad.append(f"{r_tag}:xver={xver}!=1")
+                    mc_ver = str(rs.get("minClientVer") or "").strip()
+                    if mc_ver == "": gfw_warn.append(f"{r_tag}:empty_minClientVer(риск_отвала_Mihomo_на_26.7.28)")
+                    elif mc_ver not in ("0.0.0", "1.1.1"): gfw_warn.append(f"{r_tag}:minClientVer={mc_ver}")
+                items.append(Check("L1-04", "L1. Стек Nginx + Xray v26.7.28", "Аудит REALITY (Aparecium #7280, xver, minClientVer)", "CRITICAL" if ap_bad else "LOW",
+                    "FAIL" if ap_bad else ("WARN" if gfw_warn else "PASS"),
+                    f"Критично: {ap_bad}" if ap_bad else (f"GFW warning в логах Xray: {gfw_warn} (empty-SNI #7280 защищён)." if gfw_warn else "serverNames без пустых строк (#7280 OK), xver корректен."),
+                    "Уберите '' из serverNames и проверьте xver" if ap_bad else ("Уберите minClientVer в realitySettings для исключения GFW-предупреждений Xray" if gfw_warn else ""),
+                    pub_title="Аудит REALITY (Aparecium #7280 и xver)"))
+            cn.close()
+        except Exception as e:
+            items.append(Check("L1-01", "L1. Стек Nginx + Xray v26.7.28", "Аудит БД x-ui.db", "HIGH", "WARN", f"Ошибка БД: {e}", pub_title="Аудит БД x-ui.db"))
+
+    ng_err = []
+    rc_nt, _, e_nt = cmd(["nginx", "-t"], 5)
+    if rc_nt != 0: ng_err.append(f"nginx -t: {e_nt.strip()}")
+    if os.path.exists("/etc/nginx/conf.d/01-main.conf") and cfg.xhttp_p:
+        m1 = open("/etc/nginx/conf.d/01-main.conf", errors="ignore").read()
+        for req in ("proxy_http_version 2;", "proxy_request_buffering off;", "proxy_buffering off;"):
+            if req not in m1: ng_err.append(f"нет {req}")
+    xb = "/usr/local/x-ui/bin/xray" if os.path.exists("/usr/local/x-ui/bin/xray") else "/usr/local/x-ui/bin/xray-linux-amd64"
+    rc_xt, _, e_xt = cmd([xb, "-test", "-config", "/usr/local/x-ui/bin/config.json"], 6) if os.path.exists(xb) else (-1, "", "нет xray")
+    geo_ok = os.path.exists("/usr/local/x-ui/bin/geoip.dat") and os.path.exists("/usr/local/x-ui/bin/geosite.dat")
+    items.append(Check("L1-03", "L1. Стек Nginx + Xray v26.7.28", "Nginx H2 Proxy, xray -test и геобазы", "HIGH",
+        "FAIL" if (ng_err or rc_xt != 0) else "PASS",
+        f"nginx_err={ng_err}, xray_rc={rc_xt} ({e_xt.strip()}), geo_ok={geo_ok}", pub_title="Nginx H2 Proxy, xray -test и геобазы"))
+
+    _, _, nv_err = cmd(["nginx", "-v"], 3)
+    m_nv = re.search(r"(\d+)\.(\d+)\.(\d+)", nv_err or "")
+    ng_ver_str = m_nv.group(0) if m_nv else "0.0.0"
+    ng_patched = False
+    if m_nv:
+        maj, mn, pat = int(m_nv.group(1)), int(m_nv.group(2)), int(m_nv.group(3))
+        if (mn % 2 == 1 and (maj, mn, pat) >= (1, 31, 10)) or (mn % 2 == 0 and (maj, mn, pat) >= (1, 30, 8)) or maj > 1:
+            ng_patched = True
+    sctp_loaded = "sctp" in (open("/proc/modules", errors="ignore").read() if os.path.exists("/proc/modules") else "")
+    modprobe_txt = "".join(open(f, errors="ignore").read() for f in glob.glob("/etc/modprobe.d/*.conf") if os.path.isfile(f))
+    sctp_blocked = bool(re.search(r"install\s+sctp\s+/bin/(false|true)|blacklist\s+sctp", modprobe_txt))
+    items.append(Check("L1-05", "L1. Стек Nginx + Xray v26.7.28", "Защита от NGINX2Root (18.11.2026) и модуля ядра sctp", "CRITICAL" if not ng_patched else "MEDIUM",
+        "FAIL" if (not ng_patched or sctp_loaded) else ("WARN" if not sctp_blocked else "PASS"),
+        f"nginx={ng_ver_str} ({'OK (NGINX2Root patched)' if ng_patched else 'УЯЗВИМ к NGINX2Root!'}), sctp_loaded={sctp_loaded}, sctp_blacklisted={sctp_blocked}",
+        "Обновите nginx >= 1.31.10 и добавьте 'install sctp /bin/false' + 'blacklist sctp' в /etc/modprobe.d/99-disable-sctp.conf" if (not ng_patched or not sctp_blocked) else "",
+        pub_title="Защита от NGINX2Root (11.2026) и ядра SCTP"))
+
+    if os.path.exists("/usr/local/x-ui/bin/config.json"):
+        try:
+            xcfg = json.load(open("/usr/local/x-ui/bin/config.json", encoding="utf-8"))
+            obs = {o.get("tag") for o in xcfg.get("outbounds", []) if isinstance(o, dict) and o.get("tag")}
+            if isinstance(xcfg.get("api"), dict) and xcfg["api"].get("tag"):
+                obs.add(str(xcfg["api"]["tag"]))
+            orphans = [r.get("outboundTag") for r in xcfg.get("routing", {}).get("rules", []) if isinstance(r, dict) and r.get("enabled", True) and r.get("outboundTag") and r.get("outboundTag") not in obs]
+            dir_ob = next((o for o in xcfg.get("outbounds", []) if isinstance(o, dict) and o.get("tag") == "direct"), {})
+            v4_ok = (dir_ob.get("settings", {}).get("domainStrategy") in ("UseIPv4", "ForceIPv4"))
+            items.append(Check("L1-06", "L1. Стек Nginx + Xray v26.7.28", "Целостность routing.rules и IPv4 Force в config.json", "MEDIUM",
+                "WARN" if (orphans or not v4_ok) else "PASS",
+                f"Осиротевшие outboundTag={orphans}, direct_v4={v4_ok}" if (orphans or not v4_ok) else "Все outboundTag валидны, direct outbound принудительно на UseIPv4/ForceIPv4.",
+                "Удалите битые правила в xrayTemplateConfig.routing.rules" if orphans else "",
+                pub_title="Целостность Xray routing и ForceIPv4"))
+        except Exception: pass
+
+    def chk_awg(nm: str, s1: int, s2: int, jc: int, hs: List[int], mtu: int) -> None:
+        errs = []
+        if s1 + 56 == s2: errs.append(f"КОЛЛИЗИЯ S1+56==S2 ({s1}+56={s2})")
+        if hs and (len(set(hs)) != 4 or any(h in (1, 2, 3, 4) for h in hs)): errs.append("невалидные H1..H4")
+        if mtu > 1380 or mtu <= 0: errs.append(f"MTU={mtu}")
+        items.append(Check(f"L2-{nm}", "L2. AmneziaWG & ТСПУ-матрица", f"Параметры {nm}", "CRITICAL" if errs else "INFO", "FAIL" if errs else "PASS",
+            f"Ошибки: {errs}" if errs else f"S1={s1}, S2={s2}, Jc={jc}, MTU={mtu}, уникальные H1-H4 (коллизий нет).",
+            pub_title=f"Матрица параметров AmneziaWG ({nm})"))
+
+    if cfg.en_nawg and os.path.exists("/etc/amnezia/amneziawg/awg0.conf"):
+        at = open("/etc/amnezia/amneziawg/awg0.conf", errors="ignore").read()
+        g = lambda k: int(m.group(1)) if (m := re.search(rf"^\s*{k}\s*=\s*(\d+)", at, re.M | re.I)) else 0
+        chk_awg("awg0", g("S1"), g("S2"), g("Jc"), [g("H1"), g("H2"), g("H3"), g("H4")], g("MTU"))
+    if cfg.db and cfg.awg3_p > 0:
+        try:
+            _cn_awg = sqlite3.connect(f"file:{cfg.db}?mode=ro", uri=True)
+            _ib_c_awg = {r[1] for r in _cn_awg.execute("PRAGMA table_info(inbounds)")}
+            _nc_awg = " AND (node_id IS NULL OR node_id = 0)" if "node_id" in _ib_c_awg else ""
+            _nc_awg_p = []
+            if "origin_node_guid" in _ib_c_awg:
+                _pg_awg = _cn_awg.execute("SELECT value FROM settings WHERE key='panelGuid' LIMIT 1").fetchone()
+                _pg_awgv = str(_pg_awg[0]).strip() if _pg_awg and _pg_awg[0] else ""
+                if _pg_awgv:
+                    _nc_awg += " AND (origin_node_guid IS NULL OR origin_node_guid = '' OR origin_node_guid = ?)"
+                    _nc_awg_p.append(_pg_awgv)
+                else:
+                    _nc_awg += " AND (origin_node_guid IS NULL OR origin_node_guid = '')"
+            row = _cn_awg.execute(f"SELECT settings FROM inbounds WHERE protocol='amneziawg'{_nc_awg} LIMIT 1", _nc_awg_p).fetchone()
+            _cn_awg.close()
+            if row:
+                sv = json.loads(row[0]).get("server", {})
+                hs = [int(sv.get(k, 0) or 0) for k in ("h1", "h2", "h3", "h4")]
+                chk_awg("AWG-v3", int(sv.get("s1", 0)), int(sv.get("s2", 0)), int(sv.get("jc", 0)), hs, int(sv.get("mtu", 0)))
+        except Exception: pass
+
+    _, ss_u, _ = cmd(["ss", "-ulnp"], 4)
+    stubs = [ln.strip() for ln in ss_u.splitlines() if re.search(r"127\.0\.0\.5[34]\b", ln)]
+    r_ns = re.findall(r"^\s*nameserver\s+(\S+)", open("/etc/resolv.conf", errors="ignore").read(), re.M) if os.path.exists("/etc/resolv.conf") else []
+    if cfg.en_agh:
+        dns_bad = bool(stubs or r_ns != ["127.0.0.1"])
+        items.append(Check("L3-01", "L3. Ядро, DNS Leaks, SSH & Firewall", "DNS-утечки ОС и systemd-resolved", "HIGH", "WARN" if dns_bad else "PASS",
+            f"systemd-resolved слушает {len(stubs)} stub-сокетов, resolv.conf={r_ns}" if dns_bad else "systemd-resolved выключен, resolv.conf=127.0.0.1.",
+            pub_title="DNS-утечки ОС и systemd-resolved"))
+
+    rc_sh, out_sh, _ = cmd(["sshd", "-T"], 5)
+    if rc_sh == 0:
+        sm = {ln.split(None, 1)[0].lower(): ln.split(None, 1)[1].strip() for ln in out_sh.splitlines() if len(ln.split(None, 1)) == 2}
+        root_ok = sm.get("permitrootlogin") in ("prohibit-password", "without-password", "no")
+        pwd_ok = sm.get("passwordauthentication") == "no"
+        items.append(Check("L3-02", "L3. Ядро, DNS Leaks, SSH & Firewall", "Харденинг SSH (sshd -T)", "HIGH" if not root_ok else "CRITICAL",
+            "PASS" if (pwd_ok and root_ok) else ("FAIL" if not pwd_ok else "WARN"),
+            f"port={sm.get('port')}, PasswordAuth={sm.get('passwordauthentication')}, PermitRootLogin={sm.get('permitrootlogin')}",
+            pub_title="Харденинг SSH (Pubkey-Only)"))
+
+    _, cc, _ = cmd(["sysctl", "-n", "net.ipv4.tcp_congestion_control"], 3)
+    _, qd, _ = cmd(["sysctl", "-n", "net.core.default_qdisc"], 3)
+    _, mg, _ = cmd(["iptables", "-t", "mangle", "-S"], 4)
+    _, fl, _ = cmd(["iptables", "-S", "ufw-before-input"], 4)
+    rc_fb, _, _ = cmd(["fail2ban-client", "status", "sshd"], 4)
+    k_ok = (cc.strip() == "bbr" and qd.strip() in ("fq", "cake") and "--clamp-mss-to-pmtu" in mg and "INVALID -j DROP" in fl and rc_fb == 0)
+    items.append(Check("L3-03", "L3. Ядро, DNS Leaks, SSH & Firewall", "BBR/FQ, TCPMSS, INVALID Drop и Fail2ban", "HIGH", "PASS" if k_ok else "WARN",
+        f"cc={cc.strip()}, qdisc={qd.strip()}, tcpmss={'--clamp-mss-to-pmtu' in mg}, invalid_drop={'INVALID -j DROP' in fl}, fail2ban_rc={rc_fb}",
+        pub_title="BBR/FQ, TCPMSS, INVALID Drop и Fail2ban"))
+
+    _, v6_off, _ = cmd(["sysctl", "-n", "net.ipv6.conf.all.disable_ipv6"], 3)
+    _, v6_g, _ = cmd(["ip", "-6", "addr", "show", "scope", "global"], 3)
+    ufw_v6 = ""
+    if os.path.exists("/etc/default/ufw"):
+        m_u6 = re.search(r"^\s*IPV6=(\S+)", open("/etc/default/ufw", errors="ignore").read(), re.M)
+        if m_u6: ufw_v6 = m_u6.group(1).lower()
+    v6_asym = (v6_off.strip() == "0" and bool(v6_g.strip()) and ufw_v6 == "no")
+    items.append(Check("L3-04", "L3. Ядро, DNS Leaks, SSH & Firewall", "Локальный паритет IPv6 (sysctl / UFW / global)", "CRITICAL" if v6_asym else "INFO",
+        "FAIL" if v6_asym else "PASS",
+        "Глобальный IPv6 активен при IPV6=no в /etc/default/ufw!" if v6_asym else f"disable_ipv6={v6_off.strip()}, global_v6={bool(v6_g.strip())}, ufw_ipv6={ufw_v6 or 'n/a'}",
+        pub_title="Локальный паритет стека IPv6"))
+
+    rc_ufw, out_ufw, _ = cmd(["ufw", "status"], 4)
+    _, out_ss_all, _ = cmd(["ss", "-tulnp"], 4)
+    if rc_ufw == 0 and "Status: active" in out_ufw and out_ss_all:
+        live_tcp4, live_udp4, live_tcp6, live_udp6 = set(), set(), set(), set()
+        for ln in out_ss_all.splitlines()[1:]:
+            cols = ln.split()
+            if len(cols) >= 5 and not cols[4].startswith(("127.", "[::1]:")):
+                m_pt = re.search(r":(\d+)$", cols[4])
+                if m_pt:
+                    pt_i = int(m_pt.group(1))
+                    addr = cols[4]
+                    is_v6 = addr.startswith("[") or addr.startswith("*:")
+                    is_v4 = not addr.startswith("[")
+                    if cols[0].startswith("tcp"):
+                        if is_v4: live_tcp4.add(pt_i)
+                        if is_v6: live_tcp6.add(pt_i)
+                    elif cols[0].startswith("udp"):
+                        if is_v4: live_udp4.add(pt_i)
+                        if is_v6: live_udp6.add(pt_i)
+        dead_rules: List[str] = []
+        for ln in out_ufw.splitlines():
+            if " on " in ln: continue
+            m_r = re.match(r"^\s*(\d+)/(tcp|udp)(\s+\(v6\))?\s+ALLOW\b", ln, re.I)
+            if m_r:
+                rp, rpr, is_rule_v6 = int(m_r.group(1)), m_r.group(2).lower(), bool(m_r.group(3))
+                if is_rule_v6:
+                    if (rpr == "tcp" and rp not in live_tcp6) or (rpr == "udp" and rp not in live_udp6):
+                        dead_rules.append(f"{rp}/{rpr}(v6)")
+                else:
+                    if (rpr == "tcp" and rp not in live_tcp4) or (rpr == "udp" and rp not in live_udp4):
+                        dead_rules.append(f"{rp}/{rpr}")
+        items.append(Check("L3-05", "L3. Ядро, DNS Leaks, SSH & Firewall", "Паритет UFW и живых сокетов ss (Anti-ICMP_UNREACH)", "HIGH",
+            "FAIL" if dead_rules else "PASS",
+            f"Открыты в UFW без процесса (риск ICMP_UNREACH): {dead_rules}" if dead_rules else "Все внешние порты UFW имеют активный слушающий сокет.",
+            "Закройте мёртвые правила UFW или поднимите соответствующие службы" if dead_rules else "",
+            pub_title="Паритет правил фаервола и живых сокетов"))
+
+    zl_err: List[str] = []; zl_info: List[str] = []
+    if not os.path.exists("/etc/systemd/journald.conf.d/00-volatile.conf") or os.path.isdir("/var/log/journal"): zl_err.append("journald на диске")
+    if os.path.exists("/etc/nginx/nginx.conf") and "access_log off;" not in open("/etc/nginx/nginx.conf", errors="ignore").read(): zl_err.append("nginx access_log")
+    disk_agh_files = glob.glob("/opt/AdGuardHome/data/querylog.json*") + glob.glob("/opt/AdGuardHome/data/stats.db*")
+    if disk_agh_files: zl_err.append(f"файлы на диске: {[os.path.basename(x) for x in disk_agh_files]}")
+    if os.path.exists("/opt/AdGuardHome/AdGuardHome.yaml"):
+        yt = open("/opt/AdGuardHome/AdGuardHome.yaml", errors="ignore").read()
+        m_ql = re.search(r"(?ms)^querylog:\n((?:  [^\n]*\n)*)", yt)
+        m_st = re.search(r"(?ms)^statistics:\n((?:  [^\n]*\n)*)", yt)
+        ql_on = bool(m_ql and "enabled: true" in m_ql.group(1))
+        st_on = bool(m_st and "enabled: true" in m_st.group(1))
+        _, fm_out, _ = cmd(["findmnt", "-n", "-o", "FSTYPE,SIZE", "/run/adguardhome"], 3)
+        is_tmpfs = fm_out.strip().startswith("tmpfs")
+        if (ql_on or st_on) and (not is_tmpfs or (m_ql and 'dir_path: ""' in m_ql.group(1)) or (m_st and 'dir_path: ""' in m_st.group(1))):
+            zl_err.append("AGH логи/статистика не изолированы в tmpfs /run/adguardhome")
+        elif ql_on:
+            _fm_clean = " ".join(fm_out.split())
+            zl_info.append(f"AGH querylog=true в изолированном {_fm_clean}")
+    items.append(Check("L4-01", "L4. Политика Zero-Log & FHS", "Zero-Log на диске и изоляция AGH в tmpfs", "HIGH",
+        "FAIL" if any("на диске" in x or "не изолированы" in x for x in zl_err) else ("WARN" if (zl_err or zl_info) else "PASS"),
+        f"Нарушения: {zl_err}" if zl_err else (f"Дисковых логов 0; {'; '.join(zl_info)}" if zl_info else "journald=volatile, nginx access_log=off, Xray access=none, AGH без дисковых логов."),
+        "Отключите querylog или оставьте в квотированном tmpfs /run/adguardhome" if (zl_err or zl_info) else "",
+        pub_title="Политика Zero-Log и RAM-изоляция телеметрии"))
+
+    bad_p = [f"{fp}={oct(stat.S_IMODE(os.stat(os.path.realpath(fp)).st_mode))}" for fp in (
+        "/root/vpn_credentials.txt", "/root/amneziawg-client.conf", "/etc/myprivatecloud/sso.key",
+        "/etc/myprivatecloud/config.env", "/etc/myprivatecloud/config.json", "/opt/AdGuardHome/AdGuardHome.yaml",
+        "/etc/amnezia/amneziawg/awg0.conf", "/etc/amnezia/amneziawg/clients.json", "/etc/x-ui/x-ui.db"
+    ) if os.path.exists(fp) and stat.S_IMODE(os.stat(os.path.realpath(fp)).st_mode) > 0o600]
+    items.append(Check("L4-02", "L4. Политика Zero-Log & FHS", "Права доступа секретов (<=0600)", "HIGH", "FAIL" if bad_p else "PASS",
+        f"Избыточные права: {bad_p}" if bad_p else "Все БД, ключи и конфиги защищены маской <= 0600.",
+        pub_title="Права доступа секретов и ключей (<=0600)"))
+    return items
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Hardcore DPI / GFW / TSPU & Hardening Auditor (11.2026)")
+    ap.add_argument("target", nargs="?", default="", help="Домен или IP (позиционный или --target)")
+    ap.add_argument("--target", dest="target_flag", default="", help="Целевой домен или IP")
+    ap.add_argument("--mode", choices=["auto", "local", "remote"], default="auto")
+    ap.add_argument("--target-ip", "--ip", dest="target_ip", default="")
+    ap.add_argument("--domain", default="")
+    ap.add_argument("--steal-domain", "--steal", dest="steal_domain", default="")
+    ap.add_argument("--agh-domain", "--agh", dest="agh_domain", default="")
+    ap.add_argument("--agh-client-id", default="")
+    ap.add_argument("--xhttp-path", "--xhttp", dest="xhttp_path", default="")
+    ap.add_argument("--sub-path", default="")
+    ap.add_argument("--hy2-port", "--hy2", dest="hy2_port", type=int, default=0)
+    ap.add_argument("--awg-ports", "--awg", dest="awg_ports", default="")
+    ap.add_argument("--test-ratelimit", "--rate-limit", dest="test_ratelimit", action="store_true")
+    ap.add_argument("--public", action="store_true", help="Вывести в stdout только анонимный отчёт (подробный всё равно сохранится в файл)")
+    args = ap.parse_args()
+    if args.target_flag and not args.target: args.target = args.target_flag
+
+    cfg = discover(args)
+    items = run_remote_checks(cfg)
+    if cfg.mode == "local":
+        if os.geteuid() != 0 and not args.public: print(f"{Y}[!] Запуск без root ограничивает локальные проверки.{N}")
+        items.extend(run_local_checks(cfg))
+
+    ps = sum(1 for x in items if x.st == "PASS"); wr = sum(1 for x in items if x.st == "WARN"); fl = sum(1 for x in items if x.st == "FAIL")
+    tot = ps + wr + fl; sc = int((ps / tot) * 100) if tot else 0
+    views = [(it.cid, "CLEAN" if it.st == "PASS" else ("MEDIUM" if it.st == "WARN" else "HIGH RISK"), it.view) for it in items if it.view]
+
+    if not args.public:
+        print(f"{C}{'='*78}\n{B}  HARDCORE DPI / GFW / ТСПУ И АУДИТ БОТОВ 11.2026 (Режим: {cfg.mode.upper()}){N}")
+        print(f"  IP: {cfg.ip} | Main: {cfg.p_dom or 'N/A'} | Steal: {','.join(cfg.steals) or 'N/A'} | AGH: {cfg.agh_dom or 'выкл'}\n{'='*78}{N}")
+        cur_d = ""
+        for it in items:
+            if it.dom != cur_d: cur_d = it.dom; print(f"\n{C}{B}[ {cur_d} ]{N}")
+            mk = f"{G}[✓ PASS]{N}" if it.st == "PASS" else (f"{R}[✗ FAIL]{N}" if it.st == "FAIL" else f"{Y}[! WARN]{N}")
+            print(f"  {mk} {B}{it.cid:<8}{N} ({it.sev:<8}) {it.title}\n           {D}└─ {it.ev}{N}")
+            if it.fix and it.st in ("FAIL", "WARN"): print(f"           {Y}   Фикс: {it.fix}{N}")
+
+        print(f"\n{C}{'='*78}\n{B}  МАТРИЦА ВИДИМОСТИ: ГЛАЗАМИ СКАНЕРОВ / БОТОВ / DPI / GFW / ТСПУ{N}\n{'-'*78}{N}")
+        for cid, rsk, vw in views:
+            cl = G if rsk == "CLEAN" else (Y if rsk == "MEDIUM" else R)
+            print(f"  {cl}[{rsk:<9}]{N} {B}{cid:<7}{N} {vw}")
+
+    pub_lines = [
+        "==============================================================================",
+        f"  ANONYMOUS DPI & SECURITY AUDIT REPORT (11.2026) | Score: {sc}%",
+        f"  Total={tot} | PASS={ps} | WARN={wr} | FAIL={fl}",
+        "==============================================================================",
+    ]
+    pub_json_items = []
+    for it in items:
+        p_t = it.pub_title or it.title
+        pub_lines.append(f"[{it.st:<4}] {it.cid:<8} | {p_t}")
+        pub_json_items.append({"id": it.cid, "title": p_t, "result": it.st})
+    pub_lines.append("==============================================================================")
+
+    print(f"\n{C}{'='*78}\n{B}  АНОНИМНЫЙ ОТЧЁТ (ДЛЯ ПУБЛИКАЦИИ — БЕЗ IP, ДОМЕНОВ И ПУТЕЙ){N}\n{'-'*78}{N}")
+    for it in items:
+        p_t = it.pub_title or it.title
+        cl = G if it.st == "PASS" else (Y if it.st == "WARN" else R)
+        print(f"  {cl}[{it.st:<4}]{N} {B}{it.cid:<8}{N} | {p_t}")
+
+    out_dir = "/root" if os.access("/root", os.W_OK) else "/tmp"
+    safe_t = re.sub(r"[^a-zA-Z0-9._-]", "_", cfg.p_dom or cfg.ip) or "target"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    txt_p = os.path.join(out_dir, f"hardcore_dpi_audit_{safe_t}_{ts}.txt")
+    json_p = os.path.join(out_dir, f"hardcore_dpi_audit_{safe_t}_{ts}.json")
+    pub_txt_p = os.path.join(out_dir, f"hardcore_dpi_audit_public_{ts}.txt")
+    pub_json_p = os.path.join(out_dir, f"hardcore_dpi_audit_public_{ts}.json")
+
+    lines = [
+        f"HARDCORE DPI / GFW / TSPU AUDIT REPORT ({ts})",
+        f"Mode: {cfg.mode} | IP: {cfg.ip} | Main: {cfg.p_dom} | Steal: {cfg.steals} | AGH: {cfg.agh_dom}",
+        f"Summary: PASS={ps} | WARN={wr} | FAIL={fl} | Score={sc}%", "", "=== DPI VISIBILITY ==="
+    ] + [f"[{r}] {c}: {v}" for c, r, v in views] + ["", "=== CHECKLIST ==="]
+    for it in items:
+        lines.append(f"[{it.st}] [{it.cid}] ({it.sev}) {it.title} -> {it.ev}")
+        if it.fix and it.st in ("FAIL", "WARN"): lines.append(f"   FIX: {it.fix}")
+
+    for path, content in (
+        (txt_p, "\n".join(lines) + "\n"),
+        (json_p, json.dumps({"config": asdict(cfg), "summary": {"pass": ps, "warn": wr, "fail": fl, "score": sc}, "items": [asdict(x) for x in items]}, indent=2, ensure_ascii=False)),
+        (pub_txt_p, "\n".join(pub_lines) + "\n"),
+        (pub_json_p, json.dumps({"summary": {"total": tot, "pass": ps, "warn": wr, "fail": fl, "score": sc}, "items": pub_json_items}, indent=2, ensure_ascii=False)),
+    ):
+        open(path + ".tmp", "w", encoding="utf-8").write(content)
+        os.replace(path + ".tmp", path); os.chmod(path, 0o600)
+
+    print(f"{C}{'='*78}{N}")
+    print(f"  ИТОГ: {G}PASS={ps}{N} | {Y}WARN={wr}{N} | {R}FAIL={fl}{N} | Индекс стойкости: {B}{sc}%{N}")
+    print(f"  1) Подробный (0600): {C}{txt_p}{N} | {C}{json_p}{N}")
+    print(f"  2) Анонимный (0600): {G}{pub_txt_p}{N} | {G}{pub_json_p}{N}")
+    print(f"{C}{'='*78}{N}")
+    return 1 if fl > 0 else 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+PY_AUDIT
+EOF_HARDCORE_AUDIT
+    chmod 0700 "${AUDIT_BIN}.tmp"
+    mv -f "${AUDIT_BIN}.tmp" "$AUDIT_BIN"
+    ok "Скрипт аудита установлен: ${CYAN}${AUDIT_BIN}${NC} (chmod 0700)"
+
+    echo
+    if prompt_yes_no "Провести комплексный аудит безопасности и DPI/ТСПУ прямо сейчас?" "n"; then
+        echo -e "  1) ${GREEN}Стандартный локальный + внешний аудит${NC} (--mode local)"
+        echo -e "  2) ${YELLOW}Расширенный аудит с проверкой Rate-Limit${NC} (--mode local --test-ratelimit)"
+        echo -e "  3) ${CYAN}Анонимный вывод в консоль + полный отчёт в файл${NC} (--mode local --public)"
+        prompt_choice "Выберите режим аудита" "1" AUDIT_MODE_CHOICE "1" "2" "3"
+        AUDIT_ARGS=("--mode" "local")
+        if [ "$AUDIT_MODE_CHOICE" = "2" ]; then
+            AUDIT_ARGS+=("--test-ratelimit")
+        elif [ "$AUDIT_MODE_CHOICE" = "3" ]; then
+            AUDIT_ARGS+=("--public")
+        fi
+        audit_rc=0
+        "$AUDIT_BIN" "${AUDIT_ARGS[@]}" || audit_rc=$?
+        if [ "$audit_rc" -eq 0 ]; then
+            ok "Финальный аудит завершён успешно (FAIL=0)."
+        else
+            warn "Аудит зафиксировал замечания (код: $audit_rc). Отчёт сохранён в /root/hardcore_dpi_audit_*.txt; повторите проверку после reboot: ${AUDIT_BIN} --mode local"
+        fi
+    else
+        log "Аудит отложен. Для запуска после reboot выполните: ${CYAN}${AUDIT_BIN} --mode local${NC}"
+    fi
+else
+    log "Установка скрипта аудита hardcore_dpi_audit.sh пропущена (только по запросу)."
+fi
 
 exit 0
